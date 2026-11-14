@@ -279,7 +279,7 @@ export async function startDevRoom() {
   });
   el.addEventListener('wheel', (e) => { view.dist = THREE.MathUtils.clamp(view.dist * (1 + Math.sign(e.deltaY) * 0.1), 4, 60); }, { passive: true });
   const people: Person[] = [];
-  const state = { model: MODELS[0], count: 3, morphs: true, shadows: true, detail: 100, shapes: true, plain: false, sharp: true, loading: '', error: '', info: null as Loaded | null };
+  const state = { model: MODELS[0], count: 3, morphs: true, shadows: true, detail: 100, shapes: 'live' as 'live' | 'baked' | 'off', underwear: true, plain: false, sharp: true, loading: '', error: '', info: null as Loaded | null };
   const resize = () => {
     renderer.setPixelRatio(state.sharp ? Math.min(window.devicePixelRatio, 2) : 1);
     renderer.setSize(host.clientWidth, host.clientHeight, false);
@@ -362,13 +362,66 @@ export async function startDevRoom() {
           }
           index = lod;
         }
-        const morphs = state.shapes ? keep.morph0 : NO_MORPHS;
+        const morphs = state.shapes === 'live' ? keep.morph0 : NO_MORPHS;
         if (g.index === index && g.morphAttributes === morphs) return;
         g.dispose(); // (so nothing of the old setting stays on the graphics chip: her shapes alone are a big texture)
         g.setIndex(index);
         g.morphAttributes = morphs;
       });
     }
+  };
+
+  /**
+   * BAKED SHAPES (v0.29.4): "lock her shape down". Live, the graphics chip re-blends her 43 body shapes for
+   * every point of her on every frame. Baked, her final shape is worked out ONCE, here, into a plain body of
+   * her own (only the points her detail level still draws), and nothing is blended while she walks.
+   */
+  const bakeGeometry = (g: THREE.BufferGeometry, weights: [number, number][]) => {
+    const keep = g.userData.devRoom as GeoKeep;
+    const index = g.index!;
+    const src = g.attributes;
+    // Only the points this detail level uses, renumbered
+    const remap = new Int32Array(src.position.count).fill(-1);
+    const order: number[] = [];
+    const tri = new Uint32Array(index.count);
+    for (let i = 0; i < index.count; i++) {
+      const v = index.getX(i);
+      if (remap[v] < 0) { remap[v] = order.length; order.push(v); }
+      tri[i] = remap[v];
+    }
+    const n = order.length;
+    const out = new THREE.BufferGeometry();
+    for (const [name, a] of Object.entries(src) as [string, THREE.BufferAttribute][]) {
+      const size = a.itemSize;
+      if (name === 'position' || name === 'normal') {
+        // (as real numbers: her base shape plus each of her shapes at its weight)
+        const morphs = keep.morph0[name] as THREE.BufferAttribute[] | undefined;
+        const arr = new Float32Array(n * 3);
+        for (let k = 0; k < n; k++) {
+          const o = order[k];
+          let x = a.getX(o), y = a.getY(o), z = a.getZ(o);
+          if (morphs) {
+            for (const [mi, w] of weights) {
+              const m = morphs[mi];
+              if (!m) continue;
+              if (g.morphTargetsRelative) { x += m.getX(o) * w; y += m.getY(o) * w; z += m.getZ(o) * w; }
+              else { x += (m.getX(o) - a.getX(o)) * w; y += (m.getY(o) - a.getY(o)) * w; z += (m.getZ(o) - a.getZ(o)) * w; }
+            }
+          }
+          arr[k * 3] = x; arr[k * 3 + 1] = y; arr[k * 3 + 2] = z;
+        }
+        out.setAttribute(name, new THREE.BufferAttribute(arr, 3));
+      } else {
+        // (everything else is copied as it is: her texture coordinates, which bones move each point)
+        const from = a.array as unknown as { [i: number]: number; constructor: new (len: number) => THREE.TypedArray };
+        const arr = new from.constructor(n * size);
+        for (let k = 0; k < n; k++) for (let c = 0; c < size; c++) arr[k * size + c] = from[order[k] * size + c];
+        out.setAttribute(name, new THREE.BufferAttribute(arr, size, a.normalized));
+      }
+    }
+    out.setIndex(new THREE.BufferAttribute(tri, 1));
+    out.userData.devRoomOwn = true;
+    return out;
   };
 
   const makePerson = (def: ModelDef, src: Loaded, i: number): Person => {
@@ -387,22 +440,33 @@ export async function startDevRoom() {
       copy.traverse((o) => {
         const mesh = o as THREE.SkinnedMesh;
         if (!mesh.isMesh) return;
-        if (!state.shapes) {
+        const body = def.builder && part === src.parts[0];
+        const dict = mesh.morphTargetDictionary;
+        if (state.shapes !== 'live') {
           mesh.morphTargetInfluences = undefined;
           mesh.morphTargetDictionary = undefined;
+        }
+        // (her underwear pieces are about half her points, and they are under her painted outfit)
+        if (body && !state.underwear && (mesh.material as THREE.Material).name === 'bikini') {
+          mesh.visible = false;
+          return;
+        }
+        if (body && state.shapes === 'baked' && mesh.geometry.index) {
+          const weights: [number, number][] = [];
+          for (const [name, v] of Object.entries(shape)) if (dict && dict[name] !== undefined && v !== 0) weights.push([dict[name], v]);
+          mesh.geometry = bakeGeometry(mesh.geometry, weights);
         }
         if (state.plain) {
           // (the cheapest material there is, one flat colour: is it her skin and outfit that cost?)
           mesh.material = new THREE.MeshLambertMaterial({ color: def.builder ? look.top : 0xc9a27e });
           mesh.material.userData.devRoomOwn = true;
         }
-        if (def.builder && part === src.parts[0]) {
+        if (body) {
           if (!state.plain) {
             mesh.material = Array.isArray(mesh.material)
               ? mesh.material.map((m) => paintedMaterial(m, src.box, look))
               : paintedMaterial(mesh.material, src.box, look);
           }
-          const dict = mesh.morphTargetDictionary;
           if (dict && mesh.morphTargetInfluences) {
             mesh.morphTargetInfluences.fill(0);
             for (const [name, v] of Object.entries(shape)) if (dict[name] !== undefined) mesh.morphTargetInfluences[dict[name]] = v;
@@ -441,6 +505,7 @@ export async function startDevRoom() {
         if (!mesh.isMesh) return;
         // (only what this person owned: her painted materials and her skeleton; the mesh and textures are shared)
         for (const m of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) if (m.userData.devRoomOwn) m.dispose();
+        if (mesh.geometry.userData.devRoomOwn) mesh.geometry.dispose();
         mesh.skeleton?.dispose();
       });
       p.root.removeFromParent();
@@ -460,7 +525,8 @@ export async function startDevRoom() {
   const detailBtns = DETAILS.map((d) => button(detailRow, `${d}%`, () => { state.detail = d; sync(); void rebuild(); }));
   const morphBtn = button(optRow, '', () => { state.morphs = !state.morphs; sync(); void rebuild(); });
   const shadowBtn = button(optRow, '', () => { state.shadows = !state.shadows; sync(); });
-  const shapeBtn = button(optRow, '', () => { state.shapes = !state.shapes; sync(); void rebuild(); });
+  const shapeBtn = button(optRow, '', () => { state.shapes = state.shapes === 'live' ? 'baked' : state.shapes === 'baked' ? 'off' : 'live'; sync(); void rebuild(); });
+  const underBtn = button(optRow, '', () => { state.underwear = !state.underwear; sync(); void rebuild(); });
   const plainBtn = button(optRow, '', () => { state.plain = !state.plain; sync(); void rebuild(); });
   const sharpBtn = button(optRow, '', () => { state.sharp = !state.sharp; sync(); resize(); });
   const sync = () => {
@@ -472,8 +538,10 @@ export async function startDevRoom() {
     shadowBtn.classList.toggle('on', state.shadows);
     sun.castShadow = state.shadows;
     detailBtns.forEach((b, i) => b.classList.toggle('on', DETAILS[i] === state.detail));
-    shapeBtn.textContent = `Body shapes: ${state.shapes ? 'on' : 'off'}`;
-    shapeBtn.classList.toggle('on', state.shapes);
+    shapeBtn.textContent = `Body shapes: ${state.shapes}`;
+    shapeBtn.classList.toggle('on', state.shapes !== 'off');
+    underBtn.textContent = `Hidden pieces: ${state.underwear ? 'drawn' : 'skipped'}`;
+    underBtn.classList.toggle('on', state.underwear);
     plainBtn.textContent = `Materials: ${state.plain ? 'plain' : 'full'}`;
     plainBtn.classList.toggle('on', !state.plain);
     sharpBtn.textContent = `Sharpness: ${state.sharp ? '2x' : '1x'}`;
