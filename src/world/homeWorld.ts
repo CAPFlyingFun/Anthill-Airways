@@ -65,7 +65,6 @@ const STEP = { crumbs: 0, feed: 1, packs: 2, cash: 4, beans: 12, coffee: 13 } as
 /** v3's tutorial step -> v4's (the stand's sale became the first order; the order steps merged in). */
 const TUTORIAL_V3: number[] = [0, 1, 2, 3, 4, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14];
 /** Who shows up with orders / at the café (the people models). */
-const NEIGHBOR_KINDS: HumanKind[] = ['h-ember', 'h-exec', 'h-balance', 'h-crew2', 'h-crew1', 'h-crew3', 'h-crew4', 'h-director'];
 const CAFE_KINDS: HumanKind[] = ['h-exec', 'h-balance', 'h-ember', 'h-crew1', 'h-crew2', 'h-crew4'];
 
 // ----------------------------------------------------------------------------
@@ -438,7 +437,9 @@ class Chest {
   zone: Zone;
   private lid = new THREE.Group();
   private openT = -1;
-  constructor(scene: THREE.Scene, x: number, z: number, open: boolean) {
+  /** Opened and cleared away (the world drops it then). */
+  gone = false;
+  constructor(scene: THREE.Scene, x: number, z: number) {
     this.group.position.set(x, 0, z);
     scene.add(this.group);
     const wood = mat(0x8a4b22, 0.8);
@@ -450,16 +451,23 @@ class Chest {
     this.lid.add(lidBox, box(0.24, 0.2, 0.08, gold, 0, 0.05, 0.92));
     this.group.add(this.lid);
     this.zone = new Zone(x, z, 1.3, 1.3);
-    if (open) this.lid.rotation.x = -1.9;
   }
   /** Pop the lid open (animated). */
   open() {
     this.openT = 0;
   }
+  /** The lid pops open, it sits there a moment, then it shrinks away. */
   update(dt: number) {
-    if (this.openT < 0 || this.openT >= 1) return;
-    this.openT = Math.min(1, this.openT + dt / 0.5);
-    this.lid.rotation.x = -1.9 * (1 - (1 - this.openT) ** 3);
+    if (this.openT < 0 || this.gone) return;
+    this.openT += dt;
+    const k = Math.min(1, this.openT / 0.5);
+    this.lid.rotation.x = -1.9 * (1 - (1 - k) ** 3);
+    const out = (this.openT - 2.5) / 0.4; // (after 2.5 s: gone in 0.4 s)
+    if (out > 0) this.group.scale.setScalar(Math.max(0.001, 1 - out));
+    if (out >= 1) {
+      this.group.removeFromParent();
+      this.gone = true;
+    }
   }
 }
 
@@ -704,7 +712,9 @@ export class HomeWorld {
 
     // The fences: around the yard (a gap in the south for the neighbors, a gate east to the café plot)
     const Y = HOME.yard;
-    this.fence(Y.minX, Y.minZ, Y.maxX, Y.minZ);
+    // (open along the deck: your back door leads straight out into the yard)
+    this.fence(Y.minX, Y.minZ, -12, Y.minZ);
+    this.fence(2, Y.minZ, Y.maxX, Y.minZ);
     this.fence(Y.minX, Y.minZ, Y.minX, Y.maxZ);
     this.fence(Y.minX, Y.maxZ, 11.2, Y.maxZ);
     this.fence(Y.maxX, Y.minZ, Y.maxX, HOME.gate.z0);
@@ -835,7 +845,7 @@ export class HomeWorld {
       }
       case 'ai-stand-cashier':
         // 🍪 A person behind the stand's counter: sells your snack packs for you
-        this.stand.hireStaff(person('h-ember'), animate, '🍪 CASHIER');
+        this.stand.hireStaff(person('h-crew4'), animate, '🍪 CASHIER');
         break;
       case 'ai-stand-banker':
         this.hireBanker(this.standPad, animate);
@@ -949,10 +959,11 @@ export class HomeWorld {
       tables.push(t);
       this.blockers.push({ minX: tx - 0.8, maxX: tx + 0.8, minZ: tz - 0.8, maxZ: tz + 0.8 });
     }
-    // 🎁 The chest
-    this.chest = new Chest(this.scene, 28, 8.5, this.home.chest);
+    // 🎁 The chest (once it's been opened, it's gone)
+    if (!this.home.chest) this.chest = new Chest(this.scene, 28, 8.5);
     if (animate) {
-      for (const o of [patio, cafe.group, pad.group, this.beans.group, this.machine.group, this.chest.group, ...tables]) this.flyers.grow(o);
+      for (const o of [patio, cafe.group, pad.group, this.beans.group, this.machine.group, ...tables]) this.flyers.grow(o);
+      if (this.chest) this.flyers.grow(this.chest.group);
       this.hud.banner('☕ The Corner Café is yours!', '🫘 Beans → ☕ the coffee machine → the counter. And something is hidden on the new plot…', 4500);
     }
   }
@@ -988,7 +999,7 @@ export class HomeWorld {
     const o = HOME.order;
     const later = o.min + Math.floor(Math.random() * (o.max - o.min + 1)) + Math.floor((this.save.level - 1) / 3);
     const wants = n === 0 ? o.first : n === 1 ? o.second : Math.min(30, Math.round(later * this.stand.bulk)); // (x ⬆️ Bigger orders)
-    return { name: NEIGHBORS[n % NEIGHBORS.length], kind: NEIGHBOR_KINDS[n % NEIGHBOR_KINDS.length], wants };
+    return { ...NEIGHBORS[n % NEIGHBORS.length], wants };
   }
 
   /** 🙋 An order's last pack is in their arms: XP (all of it when you served it), a thank-you, off they go. */
@@ -1109,6 +1120,7 @@ export class HomeWorld {
     if (this.home.made > 0 || this.stand.waiting > 0) this.stand.update(dt, this.stand.staffZone.contains(p), this.sfx);
     this.cafe?.update(dt, !!this.cafe && this.cafe.staffZone.contains(p), this.sfx);
     this.chest?.update(dt);
+    if (this.chest?.gone) this.chest = null;
     this.updateCrate(dt);
 
     const iv = CONFIG.player.pickupInterval / prog.workMult;

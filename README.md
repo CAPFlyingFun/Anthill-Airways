@@ -40,7 +40,7 @@ at the snack stand, two neighbors at once), and after it **Bigger orders** (cust
   then 8 + 8, then 10 + 10), it goes off for 60 s and comes back with **3 🪵 planks** (shown next to the area
   name). While it's away, its spot is empty: you can walk through it.
 - 🏡 **New plots**: the tile by the east gate opens the **Corner Café** plot. It needs **Lv 7**, **2 ants working**,
-  **3 planks** and **$400**; the sign over the gate ticks them off. The new plot hides a 🎁 **chest** ($150 + 40 XP).
+  **3 planks** and **$400**; the sign over the gate ticks them off. The new plot hides a 🎁 **chest** ($150 + 40 XP; once opened, it's gone).
 - ☕ **The café sells coffee**: 🫘 bean sacks → the **coffee machine** (3 s a cup) → the café's SELL spot ($20 a cup).
 - Measured idle income with no bonuses (Lv 8): about **$240/min** from the backyard (the farm sells all it makes)
   and **$320/min** from the café.

@@ -17,6 +17,7 @@
 // small next to them (HOME.antLength), but big enough to see what they carry.
 // ============================================================================
 import type { UnlockDef } from './config';
+import type { HumanKind } from '../actors/creatures';
 
 export const HOME = {
   /** Where you can walk: the backyard, then the café plot east of it. */
@@ -99,5 +100,18 @@ export const HOME_UNLOCKS: UnlockDef[] = [
 /** Old unlock ids -> new ones (see above). */
 export const HOME_RENAMED: Record<string, string> = { 'ai-farm4': 'ai-cashier', 'ai-farm5': 'ai-banker' };
 
-/** The neighbors who come by with orders (names cycle; their looks come from the people models). */
-export const NEIGHBORS = ['Rosa', 'Mr. Lee', 'Grandpa Joe', 'Mia', 'Coach Dan', 'Mrs. Patel', 'Sam', 'The Parkers'];
+/**
+ * The neighbors who come by with orders, in turn. Each name goes with a people model
+ * that fits it (men: h-director (grey hair), h-ember, h-crew1, h-crew2; women: h-exec,
+ * h-balance, h-crew3, h-crew4, h-sarah).
+ */
+export const NEIGHBORS: { name: string; kind: HumanKind }[] = [
+  { name: 'Rosa', kind: 'h-balance' },
+  { name: 'Mr. Lee', kind: 'h-crew1' },
+  { name: 'Mia', kind: 'h-crew3' },
+  { name: 'Grandpa Joe', kind: 'h-director' },
+  { name: 'Mrs. Patel', kind: 'h-exec' },
+  { name: 'Coach Dan', kind: 'h-ember' },
+  { name: 'Emma', kind: 'h-sarah' },
+  { name: 'Sam', kind: 'h-crew2' },
+];
