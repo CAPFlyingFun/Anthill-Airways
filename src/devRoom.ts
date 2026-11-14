@@ -24,6 +24,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
+import { MeshoptSimplifier } from 'meshoptimizer/simplifier';
 
 /** The builder's published models (GitHub Pages: the same origin as this game when it's live). */
 const BUILDER = 'https://capflyingfun.github.io/Custom-Character-Builder-System/models/';
@@ -40,6 +41,14 @@ const MODELS: ModelDef[] = [
 ];
 const COUNTS = [1, 3, 6, 10, 15, 20];
 const HEIGHT = 2.8; // people are this tall in the game
+/**
+ * DETAIL (v0.29.3, Joshua's "smart LOD" idea): how much of the model's triangles are drawn, in %.
+ * The model FILE is never changed: when it has loaded, a lighter triangle list is worked out here for
+ * the same points (so her skeleton, her shapes and her outfit all still fit), and swapped in.
+ */
+const DETAILS = [100, 50, 25, 10];
+const NO_MORPHS = {};
+interface GeoKeep { index0: THREE.BufferAttribute | null; morph0: THREE.BufferGeometry['morphAttributes']; lods: Map<number, THREE.BufferAttribute> }
 
 /**
  * JOSHUA'S FIRST THREE LOOKS, saved in the builder on 2026-11-14 (its export, traddomium-characters.json:
@@ -155,6 +164,7 @@ function paintedMaterial(base: THREE.Material, box: THREE.Box3, look: Look) {
       .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(roughnessFactor, 0.85, drCloth);');
   };
   m.customProgramCacheKey = () => 'devroom-painted';
+  m.userData.devRoomOwn = true;
   return m;
 }
 
@@ -216,6 +226,11 @@ export async function startDevRoom() {
   top.appendChild(title);
   const modelRow = row();
   const countRow = row();
+  const detailRow = row();
+  const detailLabel = document.createElement('div');
+  detailLabel.className = 'dr-stat';
+  detailLabel.textContent = 'Detail';
+  detailRow.appendChild(detailLabel);
   const optRow = row();
   const stat = document.createElement('div');
   stat.className = 'dr-stat';
@@ -263,7 +278,10 @@ export async function startDevRoom() {
     }
   });
   el.addEventListener('wheel', (e) => { view.dist = THREE.MathUtils.clamp(view.dist * (1 + Math.sign(e.deltaY) * 0.1), 4, 60); }, { passive: true });
+  const people: Person[] = [];
+  const state = { model: MODELS[0], count: 3, morphs: true, shadows: true, detail: 100, shapes: true, plain: false, sharp: true, loading: '', error: '', info: null as Loaded | null };
   const resize = () => {
+    renderer.setPixelRatio(state.sharp ? Math.min(window.devicePixelRatio, 2) : 1);
     renderer.setSize(host.clientWidth, host.clientHeight, false);
     el.style.width = '100%';
     el.style.height = '100%';
@@ -317,8 +335,41 @@ export async function startDevRoom() {
     return p;
   };
 
-  const people: Person[] = [];
-  const state = { model: MODELS[0], count: 3, morphs: true, shadows: true, loading: '', error: '', info: null as Loaded | null };
+
+  /**
+   * The test switches that change the model itself, for everyone at once: its detail (a lighter triangle
+   * list over the same points) and whether it carries its 43 body shapes at all.
+   */
+  const applyModelSettings = async (src: Loaded) => {
+    await MeshoptSimplifier.ready;
+    for (const part of src.parts) {
+      part.traverse((o) => {
+        const mesh = o as THREE.Mesh;
+        if (!mesh.isMesh) return;
+        const g = mesh.geometry;
+        const keep: GeoKeep = (g.userData.devRoom ??= { index0: g.index, morph0: g.morphAttributes, lods: new Map() });
+        let index = keep.index0;
+        if (index && state.detail < 100) {
+          let lod = keep.lods.get(state.detail);
+          if (!lod) {
+            const pos = g.attributes.position;
+            const points = new Float32Array(pos.count * 3);
+            for (let i = 0; i < pos.count; i++) { points[i * 3] = pos.getX(i); points[i * 3 + 1] = pos.getY(i); points[i * 3 + 2] = pos.getZ(i); }
+            const target = Math.max(3, Math.floor((index.count * state.detail) / 100 / 3) * 3);
+            const [lighter] = MeshoptSimplifier.simplify(new Uint32Array(index.array), points, 3, target, 1);
+            lod = new THREE.BufferAttribute(lighter, 1);
+            keep.lods.set(state.detail, lod);
+          }
+          index = lod;
+        }
+        const morphs = state.shapes ? keep.morph0 : NO_MORPHS;
+        if (g.index === index && g.morphAttributes === morphs) return;
+        g.dispose(); // (so nothing of the old setting stays on the graphics chip: her shapes alone are a big texture)
+        g.setIndex(index);
+        g.morphAttributes = morphs;
+      });
+    }
+  };
 
   const makePerson = (def: ModelDef, src: Loaded, i: number): Person => {
     const r = rng(1000 + i * 7919);
@@ -336,10 +387,21 @@ export async function startDevRoom() {
       copy.traverse((o) => {
         const mesh = o as THREE.SkinnedMesh;
         if (!mesh.isMesh) return;
+        if (!state.shapes) {
+          mesh.morphTargetInfluences = undefined;
+          mesh.morphTargetDictionary = undefined;
+        }
+        if (state.plain) {
+          // (the cheapest material there is, one flat colour: is it her skin and outfit that cost?)
+          mesh.material = new THREE.MeshLambertMaterial({ color: def.builder ? look.top : 0xc9a27e });
+          mesh.material.userData.devRoomOwn = true;
+        }
         if (def.builder && part === src.parts[0]) {
-          mesh.material = Array.isArray(mesh.material)
-            ? mesh.material.map((m) => paintedMaterial(m, src.box, look))
-            : paintedMaterial(mesh.material, src.box, look);
+          if (!state.plain) {
+            mesh.material = Array.isArray(mesh.material)
+              ? mesh.material.map((m) => paintedMaterial(m, src.box, look))
+              : paintedMaterial(mesh.material, src.box, look);
+          }
           const dict = mesh.morphTargetDictionary;
           if (dict && mesh.morphTargetInfluences) {
             mesh.morphTargetInfluences.fill(0);
@@ -378,11 +440,14 @@ export async function startDevRoom() {
         const mesh = o as THREE.SkinnedMesh;
         if (!mesh.isMesh) return;
         // (only what this person owned: her painted materials and her skeleton; the mesh and textures are shared)
-        for (const m of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) if (m.customProgramCacheKey() === 'devroom-painted') m.dispose();
+        for (const m of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) if (m.userData.devRoomOwn) m.dispose();
         mesh.skeleton?.dispose();
       });
       p.root.removeFromParent();
     }
+    state.loading = 'Preparing…';
+    await applyModelSettings(src);
+    if (ticket !== building) return;
     for (let i = 0; i < state.count; i++) people.push(makePerson(state.model, src, i));
     state.info = src;
     state.loading = '';
@@ -392,8 +457,12 @@ export async function startDevRoom() {
   // ---- The panel's buttons ----
   const modelBtns = MODELS.map((def) => button(modelRow, def.label, () => { state.model = def; sync(); void rebuild(); }));
   const countBtns = COUNTS.map((n) => button(countRow, String(n), () => { state.count = n; sync(); void rebuild(); }));
+  const detailBtns = DETAILS.map((d) => button(detailRow, `${d}%`, () => { state.detail = d; sync(); void rebuild(); }));
   const morphBtn = button(optRow, '', () => { state.morphs = !state.morphs; sync(); void rebuild(); });
   const shadowBtn = button(optRow, '', () => { state.shadows = !state.shadows; sync(); });
+  const shapeBtn = button(optRow, '', () => { state.shapes = !state.shapes; sync(); void rebuild(); });
+  const plainBtn = button(optRow, '', () => { state.plain = !state.plain; sync(); void rebuild(); });
+  const sharpBtn = button(optRow, '', () => { state.sharp = !state.sharp; sync(); resize(); });
   const sync = () => {
     modelBtns.forEach((b, i) => b.classList.toggle('on', MODELS[i] === state.model));
     countBtns.forEach((b, i) => b.classList.toggle('on', COUNTS[i] === state.count));
@@ -402,6 +471,13 @@ export async function startDevRoom() {
     shadowBtn.textContent = `Shadows: ${state.shadows ? 'on' : 'off'}`;
     shadowBtn.classList.toggle('on', state.shadows);
     sun.castShadow = state.shadows;
+    detailBtns.forEach((b, i) => b.classList.toggle('on', DETAILS[i] === state.detail));
+    shapeBtn.textContent = `Body shapes: ${state.shapes ? 'on' : 'off'}`;
+    shapeBtn.classList.toggle('on', state.shapes);
+    plainBtn.textContent = `Materials: ${state.plain ? 'plain' : 'full'}`;
+    plainBtn.classList.toggle('on', !state.plain);
+    sharpBtn.textContent = `Sharpness: ${state.sharp ? '2x' : '1x'}`;
+    sharpBtn.classList.toggle('on', state.sharp);
   };
   sync();
   void rebuild();

@@ -61,14 +61,16 @@ at the snack stand, two neighbors at once), and after it **Bigger orders** (cust
 Code: `src/homeMain.ts` (boot + loop + offline pay), `src/world/homeWorld.ts` (the backyard and the café),
 `src/data/home.ts` (every number). Not in this test yet: the farm close-up and ride-along cam, more plots.
 
-## 🧪 DEV Room (temporary, v0.29.2)
+## 🧪 DEV Room (temporary, v0.29.2 to v0.29.3)
 
 ⚙️ Settings -> **🧪 DEV Room** (or `?devroom=1`) opens a performance test for the Custom Character Builder
 System's female body: the builder's model is loaded **once** from the builder's own site, then cloned 1 to 20
 times, each clone with her own belly size, height and painted outfit (Joshua's saved looks Char1 to Char3, in
 turn). It shows frames per second, the slowest frame, triangles drawn and draw calls, with the game's current
 small Sarah to compare. The outfits are stand-ins painted by height in the shader; the builder's real painted
-clothes are not copied here. Nothing in the room touches the save. Code: `src/devRoom.ts`. Remove when the
+clothes are not copied here. v0.29.3 adds test switches: **Detail** 100/50/25/10% (a lighter triangle list worked out
+in the browser after loading, the model file untouched), body shapes on/off, full/plain materials and 2x/1x
+sharpness, to find what the cost really is. Nothing in the room touches the save. Code: `src/devRoom.ts`. Remove when the
 character decision is made.
 
 ## 🎓 Tutorial and How to play
