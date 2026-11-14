@@ -63,7 +63,7 @@ Code: `src/homeMain.ts` (boot + loop + offline pay), `src/world/homeWorld.ts` (t
 
 ## 🧪 DEV Room (temporary, v0.29.2 to v0.29.5)
 
-⚙️ Settings -> **🧪 DEV Room** (or `?devroom=1`) opens a performance test for the Custom Character Builder
+Hidden from Settings since v0.29.6 (the button is still in the page, `hidden`); **`?devroom=1`** opens it. A performance test for the Custom Character Builder
 System's female body: the builder's model is loaded **once** from the builder's own site, then cloned 1 to 20
 times, each clone with her own belly size, height and painted outfit (Joshua's saved looks Char1 to Char3, in
 turn). It shows frames per second, the slowest frame, triangles drawn and draw calls, with the game's current
