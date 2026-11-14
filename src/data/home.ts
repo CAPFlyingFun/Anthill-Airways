@@ -3,10 +3,10 @@
 //
 // The new one-island game from the design doc ("Anthill Island: Design Doc").
 // This test is the opening: two stations, each one a full little business
-// (raw supply -> converter -> seller -> cash), each run by its own helpers.
+// (raw supply -> converter -> counter -> cash), each run by its own helpers.
 //
-//   🏡 THE BACKYARD: 🍞 bread box -> 🐜 ANT FARM -> 🍪 SNACK STAND by the street
-//      (+ the neighbors' 🙋 orders and the 📦 delivery crate, by hand)
+//   🏡 THE BACKYARD: 🍞 bread box -> 🐜 ANT FARM -> 🍪 SNACK STAND, where the
+//      neighbors line up with their 🙋 orders (+ the 📦 delivery crate, by hand)
 //   ☕ THE CORNER CAFÉ (the next plot): 🫘 bean sacks -> COFFEE MACHINE -> café counter
 //
 // At every station: a GATHERER ant (raw supply -> converter), a CARRIER ant
@@ -31,19 +31,21 @@ export const HOME = {
   /** The ant farm: seconds to turn one crumb into a snack pack. */
   farm: { cookTime: 2.2 },
   /**
-   * 🍪 The snack stand by the street: people from the sidewalk buy your snack packs
-   * ($5 each: the neighbors' orders pay more, plus XP). The backyard's idle business.
+   * 🍪 The snack stand by the street: your neighbors line up there with their orders
+   * (a new one every `interval` seconds, about what the farm makes; 2 lines once the
+   * ⬆️ panel's 2nd cashier works there). `serve` = seconds per pack handed over.
    */
-  stand: { interval: 10, queueMax: 4, serve: 0.8 },
+  stand: { interval: 20, queueMax: 4, serve: 0.35 },
   order: {
     first: 5,      // the first neighbor wants 5 snack packs...
     second: 10,    // ...the second one 10
-    min: 6,        // later orders: 6-11 packs (+1 every 3 levels)
+    min: 6,        // later orders: 6-11 packs (+1 every 3 levels, x ⬆️ Bigger orders)
     max: 11,
-    pay: 7,        // $ per snack pack (+5% per level)
-    xpBase: 10,    // XP = xpBase + xpPer x packs (+ 1 XP for every pickup and drop on the way)
+    pay: 7,        // $ per snack pack (+5% per level), paid onto the stand's cash pad
+    xpBase: 10,    // XP for a filled order = xpBase + xpPer x packs (+ 1 XP per pack you put on the shelf)...
     xpPer: 3,
-    wait: 8,       // seconds until the next neighbor walks in
+    autoXp: 0.25,  // ...a quarter of that when the cashier fills it while you're elsewhere
+    firstIn: 8,    // seconds from the farm's first snack pack to the first neighbor
   },
   crate: {
     /** What each trip asks for (goods you can already make). The last one repeats. */
@@ -58,7 +60,7 @@ export const HOME = {
   },
   /** The café plot's gate: helpers working + planks (+ the level and price on its tile). */
   plot: { ants: 2, planks: 3 },
-  /** ☕ The coffee machine: seconds to turn one sack of beans into a cup ($12 at the café). */
+  /** ☕ The coffee machine: seconds to turn one sack of beans into a cup ($20 at the café). */
   coffee: { cookTime: 3.0 },
   cafe: {
     interval: 8,    // seconds between new café customers
@@ -83,7 +85,7 @@ export const HOME_UNLOCKS: UnlockDef[] = [
   // 🐜 The farm levels: a Gatherer (bread box -> farm), then a Carrier (farm -> snack stand)
   { id: 'ai-farm2', name: 'Farm Lv 2: Gatherer', icon: '🐜', cost: 40, pos: [-7.8, -6.6], requires: ['ai-order1'], level: 2 },
   { id: 'ai-farm3', name: 'Farm Lv 3: Carrier', icon: '🐜', cost: 100, pos: [-7.8, -6.6], requires: ['ai-farm2'], level: 3 },
-  // 🍪 At the snack stand: a cashier (a person) by the SELL spot, then a banker ant by its cash
+  // 🍪 At the snack stand (the neighbors' orders): a cashier (a person) by the SELL spot, then a banker ant by its cash
   { id: 'ai-stand-cashier', name: 'Stand Cashier', icon: '🍪', cost: 150, pos: [-11.4, 6.6], requires: ['ai-farm3'], level: 4 },
   { id: 'ai-stand-banker', name: 'Stand Banker', icon: '🏦', cost: 250, pos: [0.9, 2.4], requires: ['ai-stand-cashier'], level: 5 },
   { id: 'ai-cafe', name: 'Corner Cafe Plot', icon: '☕', cost: 400, pos: [12.4, 2], requires: ['ai-farm2'], level: 7 },

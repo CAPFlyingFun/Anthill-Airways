@@ -140,18 +140,10 @@ export const HOME_HOWTO_HTML = `
     <li>Grab crumbs 🍞 from the bread box.</li>
     <li>Drop them on the farm's <b>IN</b> tray: the ants turn them into snack packs 🍪.</li>
     <li>Pick the packs up from the <b>OUT</b> tray.</li>
-    <li>Stand on <b>SELL</b> at your snack stand: people from the street line up and buy them.</li>
-    <li>Pick the cash up from the stand's 💵 cash pad.</li>
+    <li>Your 🙋 <b>neighbors</b> line up at your snack stand with their orders ("🙋 Rosa · 🍪 3/5"). Stand on
+      <b>SELL</b>: the packs go on the shelf and into their arms.</li>
+    <li>A filled order pays on the stand's 💵 cash pad (pick it up), plus <b>lots of XP</b>.</li>
   </ol>
-</section>
-
-<section>
-  <h3>🙋 Neighbors' orders</h3>
-  <ul>
-    <li>Neighbors come to the table by the fence and ask for snack packs.</li>
-    <li>Stand on <b>ORDER</b> to hand them over: each order pays <b>more than the stand, and lots of XP</b>.</li>
-    <li>A new neighbor comes by a few seconds later.</li>
-  </ul>
 </section>
 
 <section>

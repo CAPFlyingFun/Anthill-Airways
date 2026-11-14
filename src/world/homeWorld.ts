@@ -6,9 +6,9 @@
 // grows. This test covers the opening (see data/home.ts). Every station is a
 // little business of its own: raw supply -> converter -> counter -> cash pad.
 //
-//   🍞 BREAD BOX -> 🐜 ANT FARM (crumbs in, snack packs out) -> 🍪 SNACK STAND
-//   by the street (people buy them) -> its 💵 cash pad. On the side: 🙋 ORDERS
-//   from the neighbors (cash + lots of XP) and the 📦 DELIVERY CRATE (🪵 planks).
+//   🍞 BREAD BOX -> 🐜 ANT FARM (crumbs in, snack packs out) -> 🍪 SNACK STAND,
+//   where the neighbors line up with their 🙋 ORDERS (cash + lots of XP) -> its
+//   💵 cash pad. On the side: the 📦 DELIVERY CRATE (🪵 planks).
 //   Farm Lv 2: a GATHERER ant (bread box -> farm). Farm Lv 3: a CARRIER ant
 //              (farm -> the stand's shelf) + the crate shows up.
 //   At the stand (you hire helpers where they work): a CASHIER (a person), then
@@ -34,13 +34,12 @@ import { HomeSave, SaveData } from '../core/save';
 import { Progress } from '../core/progress';
 import { Hud } from '../ui/hud';
 import { HumanKind } from '../actors/creatures';
-import { CreatureModel, animateCreature, faceToward } from '../actors/models';
 import { Player, fpFov, handsSpot } from '../actors/player';
 import { Banker, Route, Worker } from '../actors/worker';
-import { Flyers, ItemType, Stack, StackItem, makeItem } from './items';
+import { Flyers, ITEM_VALUE, ItemType, Stack, StackItem, makeItem } from './items';
 import { TextSprite, makePad, titleTag } from './labels';
 import { Blocker, CashPad, ProcessorOpts, ResourcePile, TrashBin, UnlockTile, Zone, gridLayout } from './stations';
-import { Desk, person, stepTo } from './airportWorld';
+import { Desk, person } from './airportWorld';
 import { TUTORIAL_DONE, Tutorial, TutorialScript } from './tutorial';
 import type { MapArea, MapMarker, MapRect, MapSeg, MapView } from '../ui/minimap';
 
@@ -57,11 +56,14 @@ function box(w: number, h: number, d: number, material: THREE.Material, x = 0, y
 const ANT_TITLE = 0.6;
 /**
  * The backyard's save format (HomeSave.v). 2: the café's staff are hired at the café.
- * 3: the snack stand + the café's coffee (new tutorial steps, see homeTutorial).
+ * 3: the snack stand + the café's coffee. 4: the neighbors' orders at the snack stand
+ * (the garden table is gone). Both changed the tutorial's steps (see homeTutorial).
  */
-const HOME_SAVE_V = 3;
+const HOME_SAVE_V = 4;
 /** 🎓 The tutorial steps that an action finishes (their places in homeTutorial's list). */
-const STEP = { crumbs: 0, feed: 1, packs: 2, cash: 4, beans: 13, coffee: 14 } as const;
+const STEP = { crumbs: 0, feed: 1, packs: 2, cash: 4, beans: 12, coffee: 13 } as const;
+/** v3's tutorial step -> v4's (the stand's sale became the first order; the order steps merged in). */
+const TUTORIAL_V3: number[] = [0, 1, 2, 3, 4, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14];
 /** Who shows up with orders / at the café (the people models). */
 const NEIGHBOR_KINDS: HumanKind[] = ['h-ember', 'h-exec', 'h-balance', 'h-crew2', 'h-crew1', 'h-crew3', 'h-crew4', 'h-director'];
 const CAFE_KINDS: HumanKind[] = ['h-exec', 'h-balance', 'h-ember', 'h-crew1', 'h-crew2', 'h-crew4'];
@@ -398,44 +400,6 @@ class CoffeeMachine {
 }
 
 // ----------------------------------------------------------------------------
-// 🙋 Where the neighbors come for their orders: a garden table by the fence.
-// You stand on ORDER and the snack packs hop into their basket.
-// ----------------------------------------------------------------------------
-class OrderSpot {
-  group = new THREE.Group();
-  zone: Zone;
-  basket: Stack;
-  blocker: Blocker;
-  bubble = new TextSprite(0.66, '#ffffff');
-  /** Where the neighbor stands, facing you. */
-  stand: THREE.Vector3;
-  constructor(scene: THREE.Scene, x: number, z: number) {
-    this.group.position.set(x, 0, z);
-    scene.add(this.group);
-    const top = new THREE.Mesh(new THREE.CylinderGeometry(0.85, 0.85, 0.1, 24), mat(0xf4f1de, 0.5));
-    top.position.y = 1.05;
-    top.castShadow = true;
-    const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.12, 1.0, 10), mat(0x5a5f66, 0.4, 0.5));
-    leg.position.y = 0.5;
-    this.group.add(top, leg);
-    // A basket on the table for the packs
-    const b = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.45, 0.3, 18, 1, true), new THREE.MeshStandardMaterial({ color: 0xc8975a, roughness: 0.9, side: THREE.DoubleSide }));
-    b.position.y = 1.25;
-    this.group.add(b);
-    this.basket = new Stack(this.group, gridLayout(2, 2, 0.5, 0.36, 1.12), 40);
-    const pad = makePad(2.4, 2.4, 'ORDER', '#ffd166');
-    pad.position.set(-2.2, 0.03, 0);
-    this.group.add(pad);
-    this.zone = new Zone(x - 2.2, z, 1.2, 1.2);
-    this.blocker = { minX: x - 0.9, maxX: x + 0.9, minZ: z - 0.9, maxZ: z + 0.9 };
-    this.stand = new THREE.Vector3(x + 1.5, 0, z);
-    this.bubble.sprite.position.set(1.5, 4.0, 0);
-    this.bubble.sprite.visible = false;
-    this.group.add(this.bubble.sprite);
-  }
-}
-
-// ----------------------------------------------------------------------------
 // 📦 The delivery crate: fill it with goods you can make, it goes off on a truck
 // and comes back with 🪵 planks (the building material new plots need).
 // ----------------------------------------------------------------------------
@@ -532,7 +496,6 @@ export class HomeWorld {
   stand: Desk;
   standPad: CashPad;
   standLoad = new Zone(-8.6, 3.4, 0.6, 0.6);
-  orderSpot: OrderSpot;
   crate: Crate | null = null;
   /** ☕ The Corner Café (once its plot is yours): bean sacks -> coffee machine -> the counter, its own cash pad. */
   beans: ResourcePile | null = null;
@@ -554,22 +517,21 @@ export class HomeWorld {
   private plotSign: TextSprite[] = [];  // what the café plot needs, over its gate
   private plotSignT = 0;
   private cafeOpen = false;
-  // The neighbor with an order: walking in, waiting, or walking out
-  private neighbor: { model: CreatureModel; state: 'in' | 'wait' | 'out'; path: THREE.Vector3[] } | null = null;
   /** Just bought a tile here: the next one on this spot (the farm levels share one) waits until you step off. */
   private stepOff: Zone | null = null;
   /** 🗺️ For the minimap: the fences and trees, as they're built. */
   private fenceSegs: MapSeg[] = [];
   private treeSpots: { x: number; z: number; r: number }[] = [];
-  private nextOrderT: number = HOME.order.wait;
+  /** 🙋 Neighbors who've come by (names and looks cycle; the first two order 5, then 10). */
+  private neighborsSeen = 0;
 
   /** Where you start (between the farm's IN and OUT, south of it). */
   static readonly SPAWN = { x: -1, z: -0.5 };
-  /** A save from before v0.28 (with progress) just got the snack stand and the coffee: homeMain says what's new. */
+  /** A save from before v0.29 (with progress) just got the orders at the stand (and maybe the coffee): homeMain says what's new. */
   readonly fromOld: boolean;
 
   constructor(private hud: Hud, private sfx: Sfx, public save: SaveData, private progress: Progress) {
-    this.home = save.home ??= { made: 0, orders: 0, order: null, crate: { trips: 0, got: {}, away: 0 }, planks: 0, chest: false, cafeSales: 0, standSales: 0, v: HOME_SAVE_V };
+    this.home = save.home ??= { made: 0, orders: 0, crate: { trips: 0, got: {}, away: 0 }, planks: 0, chest: false, cafeSales: 0, standSales: 0, v: HOME_SAVE_V };
     if ((this.home.v ?? 1) < 2) {
       // v0.27 save: the café's cashier and banker were farm levels (same prices): rename them
       // (and never twice: a save holding both names would hire two of each)
@@ -581,7 +543,7 @@ export class HomeWorld {
         delete save.paid[from];
       }
     }
-    this.fromOld = (this.home.v ?? 1) < 3 && this.home.made > 0;
+    this.fromOld = (this.home.v ?? 1) < 4 && this.home.made > 0;
     if ((this.home.v ?? 1) < 3) {
       // v0.27 save: no snack stand yet, and the café sold snack packs. Mid-tutorial, the
       // steps moved (the stand's came in after "take the snack packs"): anyone past that
@@ -589,7 +551,15 @@ export class HomeWorld {
       this.home.standSales ??= 0;
       if (save.tutorial >= 3 && save.tutorial < TUTORIAL_DONE) save.tutorial = 3;
     }
+    if ((this.home.v ?? 1) < 4) {
+      // v0.28 save: the neighbors' orders were at a garden table of their own (an open
+      // one there is dropped: the neighbors line up at the stand now, and lines aren't
+      // saved), and the tutorial had a step for the stand's first sale.
+      delete (this.home as { order?: unknown }).order;
+      if (save.tutorial < TUTORIAL_DONE) save.tutorial = TUTORIAL_V3[save.tutorial] ?? save.tutorial;
+    }
     this.home.v = HOME_SAVE_V;
+    this.neighborsSeen = this.home.orders;
     this.buildEnvironment();
 
     // You: Jack's model, in front of the ant farm (on open grass: never on a tile, or
@@ -608,11 +578,9 @@ export class HomeWorld {
     this.farm.onMade = () => {
       this.home.made++;
     };
-    this.orderSpot = new OrderSpot(this.scene, 8.8, -3.2);
-    this.blockers.push(this.orderSpot.blocker);
     this.bin = new TrashBin(this.scene, -11.6, 2.6);
 
-    // 🍪 The snack stand by the street: people from the sidewalk buy your snack packs.
+    // 🍪 The snack stand by the street: your neighbors line up there with their orders.
     // They come in through the gap in the south fence and line up east of the counter
     // (in along z 9.6, out along z 10.4, so the two don't walk through each other).
     this.standPad = new CashPad(this.scene, -2, 2.6);
@@ -622,13 +590,16 @@ export class HomeWorld {
       interval: HOME.stand.interval, queueMax: HOME.stand.queueMax, serve: HOME.stand.serve,
       entry: [new THREE.Vector3(13.8, 0, 16), new THREE.Vector3(13.8, 0, 9.6), new THREE.Vector3(5, 0, 9.6)],
       exit: (from) => [new THREE.Vector3(from.x, 0, 10.4), new THREE.Vector3(13.8, 0, 10.4), new THREE.Vector3(13.8, 0, 16)],
-      staff2: () => person('h-crew1'), // (the ⬆️ panel's 2nd cashier)
+      staff2: () => person('h-crew1'), // (the ⬆️ panel's 2nd cashier: a 2nd line, two neighbors at once)
+      order: () => this.nextNeighbor(),
+      firstIn: HOME.order.firstIn,
     });
-    this.stand.onServe = (byPlayer) => {
-      this.progress.addXp(byPlayer ? CONFIG.xp.sale : CONFIG.xp.autoSale);
+    this.stand.onServe = () => {
       this.home.standSales++;
     };
-    this.stand.valueMult = () => this.progress.cashMult;
+    this.stand.onOrder = (o, byPlayer) => this.orderFilled(o, byPlayer);
+    // (a pack pays the order price: $7, +5% per level)
+    this.stand.valueMult = () => (HOME.order.pay / ITEM_VALUE.snack) * (1 + 0.05 * (this.save.level - 1)) * this.progress.cashMult;
     this.desks.push(this.stand);
     this.blockers.push(this.stand.blocker);
 
@@ -641,7 +612,6 @@ export class HomeWorld {
     this.refreshTiles(false);
 
     // An order that was open when you left: the neighbor is still waiting
-    if (this.home.order) this.spawnNeighbor(true);
 
     this.hud.setCash(save.cash);
     this.tutorial = new Tutorial(this, hud, save, homeTutorial(this));
@@ -1012,97 +982,26 @@ export class HomeWorld {
   // --------------------------------------------------------------------------
   // 🙋 Orders from the neighbors
   // --------------------------------------------------------------------------
-  private orderSize(n: number) {
-    if (n === 0) return HOME.order.first;
-    if (n === 1) return HOME.order.second;
+  /** 🙋 Who comes by next, and how many snack packs they want (the first two: 5, then 10). */
+  private nextNeighbor() {
+    const n = this.neighborsSeen++;
     const o = HOME.order;
-    const n2 = o.min + Math.floor(Math.random() * (o.max - o.min + 1)) + Math.floor((this.save.level - 1) / 3);
-    return Math.min(n2, 30); // (the order basket holds 40)
+    const later = o.min + Math.floor(Math.random() * (o.max - o.min + 1)) + Math.floor((this.save.level - 1) / 3);
+    const wants = n === 0 ? o.first : n === 1 ? o.second : Math.min(30, Math.round(later * this.stand.bulk)); // (x ⬆️ Bigger orders)
+    return { name: NEIGHBORS[n % NEIGHBORS.length], kind: NEIGHBOR_KINDS[n % NEIGHBOR_KINDS.length], wants };
   }
 
-  /** The neighbor with the open order walks in (or, after a reload, is already there). */
-  private spawnNeighbor(already: boolean) {
-    const order = this.home.order!;
-    const model = person(NEIGHBOR_KINDS[order.who % NEIGHBOR_KINDS.length]);
-    const spot = this.orderSpot.stand;
-    const path = [new THREE.Vector3(12.8, 0, 16), new THREE.Vector3(12.8, 0, spot.z + 1.2), spot.clone()];
-    model.root.position.copy(already ? spot : path[0]);
-    this.scene.add(model.root);
-    this.neighbor = { model, state: already ? 'wait' : 'in', path: already ? [] : path.slice(1) };
-    if (already) for (let i = 0; i < order.have; i++) this.orderSpot.basket.addInstant('snack');
-  }
-
-  private newOrder() {
-    const n = this.home.orders;
-    this.home.order = { who: n, want: this.orderSize(n), have: 0 };
-    this.spawnNeighbor(false);
-  }
-
-  private orderReward(want: number) {
-    const o = HOME.order;
-    return {
-      cash: Math.round(want * o.pay * (1 + 0.05 * (this.save.level - 1)) * this.progress.cashMult),
-      xp: o.xpBase + o.xpPer * want,
-    };
-  }
-
-  private completeOrder() {
-    const order = this.home.order!;
-    const r = this.orderReward(order.want);
-    this.addCash(r.cash);
-    this.progress.addXp(r.xp);
-    bump('sold', order.want);
+  /** 🙋 An order's last pack is in their arms: XP (all of it when you served it), a thank-you, off they go. */
+  private orderFilled(o: { name: string; wants: number; paid: number; at: THREE.Vector3 }, byPlayer: boolean) {
+    const full = HOME.order.xpBase + HOME.order.xpPer * o.wants;
+    const xp = Math.round(full * (byPlayer ? 1 : HOME.order.autoXp));
+    this.progress.addXp(xp);
     this.sfx.contract();
-    const at = this.orderSpot.stand.clone().setY(3.4);
-    this.hud.floatAt(at, this.camera, `Thank you! 😊 +$${r.cash} · +${r.xp} XP`, 'big gold');
-    // The packs go into the neighbor's arms, and off they go (they've all landed by now:
-    // see updateOrders)
-    const n = this.neighbor;
-    for (const it of this.orderSpot.basket.items.splice(0)) {
-      const target = new THREE.Vector3();
-      this.flyers.fly(it.mesh, () => (n ? target.copy(n.model.root.position).setY(1.6) : target.copy(at)), () => it.mesh.removeFromParent(), 0.3, 0.6);
-    }
-    if (n) {
-      n.state = 'out';
-      n.path = [new THREE.Vector3(12.8, 0, this.orderSpot.stand.z + 1.2), new THREE.Vector3(12.8, 0, 16)];
-    }
-    this.home.order = null;
+    this.hud.floatAt(o.at.setY(3.4), this.camera, `Thank you! 😊 +$${o.paid} · +${xp} XP`, byPlayer ? 'big gold' : 'gold');
     this.home.orders++;
     if (this.home.orders === 1) {
       this.save.unlocked.push('ai-order1'); // (brings out the first farm upgrade)
       this.refreshTiles(true);
-    }
-    this.nextOrderT = HOME.order.wait;
-  }
-
-  private updateOrders(dt: number) {
-    const spot = this.orderSpot;
-    const order = this.home.order;
-    // The neighbor walks in, waits (facing you), or walks home
-    const n = this.neighbor;
-    if (n) {
-      if (n.state === 'wait') {
-        animateCreature(n.model, dt, 0);
-        faceToward(n.model, -1, 0, dt, 6);
-      } else if (n.path.length) {
-        if (stepTo(n.model, n.path[0], 4.2, dt)) n.path.shift();
-      } else if (n.state === 'in') {
-        n.state = 'wait';
-      } else {
-        n.model.root.removeFromParent();
-        this.neighbor = null;
-      }
-    }
-    // The bubble: "🙋 Rosa · 🍪 3/5"
-    const waiting = !!order && n?.state === 'wait';
-    spot.bubble.sprite.visible = waiting;
-    if (order && waiting) spot.bubble.setText(`🙋 ${NEIGHBORS[order.who % NEIGHBORS.length]} · 🍪 ${order.have}/${order.want}`);
-    // Filled! (once the last pack has landed in the basket)
-    if (order && order.have >= order.want && waiting && !spot.basket.items.some((it) => it.flying)) this.completeOrder();
-    // A new neighbor comes by (the first one once the farm has made its first snack pack)
-    if (!order && !this.neighbor && this.home.made > 0) {
-      this.nextOrderT -= dt;
-      if (this.nextOrderT <= 0) this.newOrder();
     }
   }
 
@@ -1210,7 +1109,6 @@ export class HomeWorld {
     if (this.home.made > 0 || this.stand.waiting > 0) this.stand.update(dt, this.stand.staffZone.contains(p), this.sfx);
     this.cafe?.update(dt, !!this.cafe && this.cafe.staffZone.contains(p), this.sfx);
     this.chest?.update(dt);
-    this.updateOrders(dt);
     this.updateCrate(dt);
 
     const iv = CONFIG.player.pickupInterval / prog.workMult;
@@ -1238,19 +1136,8 @@ export class HomeWorld {
     drop(this.farm.inZone, this.farm.inZone, this.farm.input, 'crumb', STEP.feed);
     // 2) Snack packs off the farm's OUT tray...
     take(this.farm.outZone, this.farm.outZone, this.farm.output, 'snack', STEP.packs);
-    // ...onto the snack stand's shelf (and you sell while you stand there)
+    // ...onto the snack stand's shelf (and while you stand there, you serve the neighbors' orders)
     drop(this.stand.staffZone, this.stand.staffZone, this.stand.shelf!, 'snack', -1);
-    // 3) Orders: hand the packs over
-    const order = this.home.order;
-    if (order && this.neighbor?.state === 'wait') {
-      this.every(this.orderSpot.zone, dt, this.orderSpot.zone.contains(p) && has('snack') && order.have < order.want, iv, () => {
-        if (order.have < order.want && this.flyers.transferType(me.stack, this.orderSpot.basket, 'snack')) {
-          order.have++; // (it's filled once the last pack lands: updateOrders)
-          this.sfx.drop();
-          prog.addXp(xp.drop);
-        }
-      });
-    }
     // 4) The crate takes what it still needs
     const crate = this.crate;
     if (crate && this.home.crate.away === 0) {
@@ -1387,16 +1274,16 @@ export class HomeWorld {
     ];
     // (the gate to the café plot is a fence until the plot is yours)
     const fences = this.cafeOpen ? this.fenceSegs : [...this.fenceSegs, { x0: Y.maxX, z0: HOME.gate.z0, x1: Y.maxX, z1: HOME.gate.z1 }];
-    const order = this.home.order;
-    // (a red ! on a counter whose buyers are waiting at an empty shelf)
+    // (a red ! on a counter whose buyers are waiting at an empty shelf; at the snack stand,
+    // also on a neighbor waiting with no cashier there: someone has to serve them)
     const starved = (d: Desk) => d.waiting >= 2 && (d.shelf?.count ?? 0) === 0;
     const stand = this.stand;
+    const waitingOrder = !!stand.frontOrder && (!stand.hasStaff || (stand.shelf?.count ?? 0) === 0);
     const markers: MapMarker[] = [
       { x: -10, z: -2.5, icon: '🍞', label: 'Bread' },
       { x: -1, z: -6, icon: '🐜', label: 'Ant farm' },
-      { x: stand.group.position.x, z: stand.group.position.z, icon: '🍪', label: 'Snack stand', alert: starved(stand) },
+      { x: stand.group.position.x, z: stand.group.position.z, icon: '🍪', label: 'Snack stand (orders)', alert: waitingOrder },
       { x: this.standPad.zone.x, z: this.standPad.zone.z, icon: '💵', label: 'Cash' },
-      { x: 8.8, z: -3.2, icon: '🙋', label: 'Orders', alert: !!order && this.neighbor?.state === 'wait' && order.have < order.want },
       { x: this.bin.zone.x, z: this.bin.zone.z, icon: '🗑️', label: 'Trash' },
     ];
     if (this.crate) markers.push(this.home.crate.away > 0 ? { x: 9, z: 7, icon: '🚚', label: 'Crate (away)' } : { x: 9, z: 7, icon: '📦', label: 'Crate' });
@@ -1470,10 +1357,10 @@ export class HomeWorld {
 // ============================================================================
 function homeTutorial(w: HomeWorld): TutorialScript {
   const home = () => w.save.home!;
-  // 🎯 The quest card's bar: the order's packs handed over...
+  // 🎯 The quest card's bar: the packs handed over for the order at the front of the line...
   const orderProgress = () => {
-    const o = home().order;
-    return o ? o.have / o.want : null;
+    const o = w.stand.frontOrder;
+    return o ? (o.total - o.left) / o.total : null;
   };
   // ...what's in the crate (of what this trip asks for)...
   const crateProgress = () => {
@@ -1492,9 +1379,9 @@ function homeTutorial(w: HomeWorld): TutorialScript {
   return {
     intro: {
       title: '🏝️ Welcome to Anthill Island!',
-      html: `<p>You've set up an <b>ant farm</b> in your backyard. Feed your ants, sell their snack packs at your
-        <b>snack stand</b>, fill your neighbors' orders, and as the farm grows, <b>the ants take over the chores</b>:
-        gathering, carrying, selling.</p>
+      html: `<p>You've set up an <b>ant farm</b> in your backyard. Feed your ants, and bring their snack packs to your
+        <b>snack stand</b>, where your neighbors line up with their orders. As the farm grows, <b>the ants take over the
+        chores</b>: gathering, carrying, selling.</p>
         <p>🧪 This is a <b>test version</b>: just the backyard and the first café plot, so you can see how it feels.</p>
         <p>Want a quick walkthrough? A yellow arrow 🔽 shows you where to go.</p>`,
     },
@@ -1518,39 +1405,33 @@ function homeTutorial(w: HomeWorld): TutorialScript {
       { text: () => '👆 Drag anywhere to walk. Grab some crumbs from the bread box 🍞', target: () => t.at(w.bread.zone) },
       { text: () => '🐜 Drop the crumbs on your ANT FARM\'s IN tray: the ants turn them into snack packs', target: () => t.at(w.farm.inZone) },
       { text: () => '📦 Take the snack packs from the OUT tray', target: () => t.at(w.farm.outZone) },
-      // 3-4: the snack stand
-      {
-        text: () => '🍪 Sell them at your SNACK STAND: stand on SELL, and people from the street buy them',
-        target: () => (carrying('snack') || w.stand.shelf!.count > 0 ? t.at(w.stand.staffZone) : t.at(w.farm.outZone)),
-        done: () => home().standSales > 0,
-      },
-      {
-        text: () => '💵 Pick up your cash from the stand\'s cash pad',
-        target: () => t.at(w.standPad.zone),
-        done: () => t.owns('ai-stand-banker'), // (or picking up a bill: STEP.cash)
-      },
-      // 5-6: orders
+      // 3-5: the neighbors' orders, at the snack stand
       {
         text: () => {
-          const o = home().order;
-          return o ? `🙋 Your neighbor wants ${o.want} snack packs! Stand on ORDER to hand them over` : '🙋 A neighbor is coming over… make a few snack packs';
+          const o = w.stand.frontOrder;
+          return o ? `🙋 ${o.name} wants ${o.total} snack packs! Bring them to your SNACK STAND and stand on SELL` : '🙋 A neighbor is coming to your snack stand… take a few snack packs';
         },
-        target: () => (home().order ? t.at(w.orderSpot.zone) : t.at(w.farm.outZone)),
+        target: () => (carrying('snack') || w.stand.shelf!.count > 0 ? t.at(w.stand.staffZone) : t.at(w.farm.outZone)),
         done: () => home().orders >= 1,
         progress: orderProgress,
       },
       {
-        text: () => '📋 More neighbors, more orders: they pay more than the stand, and lots of XP',
-        target: () => (home().order ? t.at(w.orderSpot.zone) : null),
+        text: () => '💵 Your neighbor paid on the stand\'s cash pad: pick it up',
+        target: () => t.at(w.standPad.zone),
+        done: () => t.owns('ai-stand-banker'), // (or picking up a bill: STEP.cash)
+      },
+      {
+        text: () => '📋 More neighbors, more orders: each one pays, plus lots of XP',
+        target: () => (!w.stand.frontOrder ? null : carrying('snack') || w.stand.shelf!.count > 0 ? t.at(w.stand.staffZone) : t.at(w.farm.outZone)),
         done: () => home().orders >= 2,
         progress: orderProgress,
       },
-      // 7-10: the helpers, until the backyard runs by itself
+      // 6-9: the helpers, until the backyard runs by itself
       t.unlockStep('ai-farm2', '🐜 Grow your ant farm! Lv 2: a Gatherer ant feeds it crumbs'),
       t.unlockStep('ai-farm3', '🐜 Farm Lv 3: a Carrier ant takes the snack packs to your stand'),
-      t.unlockStep('ai-stand-cashier', '🍪 Hire a cashier for your snack stand: she sells while you\'re busy'),
+      t.unlockStep('ai-stand-cashier', '🍪 Hire a cashier for your snack stand: she serves your neighbors while you\'re busy'),
       t.unlockStep('ai-stand-banker', '🏦 A banker ant collects the stand\'s cash: now your backyard runs by itself!'),
-      // 11-12: planks, and the next plot
+      // 10-11: planks, and the next plot
       {
         text: () => '📦 Fill the delivery crate with snack packs and crumbs: it brings back 🪵 planks',
         target: () => (w.crate ? t.at(w.crate.zone) : null),
@@ -1566,7 +1447,7 @@ function homeTutorial(w: HomeWorld): TutorialScript {
           return (met + (t.paidOf('ai-cafe') ?? 0)) / 4;
         },
       },
-      // 13-15: coffee, and the chest
+      // 12-14: coffee, and the chest
       {
         text: () => (carrying('beans') ? '☕ Drop the beans on the COFFEE MACHINE\'s IN tray' : '🫘 The café sells coffee! Grab a few sacks of coffee beans'),
         target: () => (!w.machine || !w.beans ? null : carrying('beans') ? t.at(w.machine.inZone) : t.at(w.beans.zone)),

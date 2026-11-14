@@ -182,19 +182,20 @@ export async function startHome({ app, renderer, save, hud, sfx, input, progress
       await offerOffline(more);
     }
   };
-  // 📰 Then, once, for a save from before v0.28: what's new (its tutorial may be long done)
+  // 📰 Then, once, for a save from before v0.29: what's new (its tutorial may be long done)
   const news = () => {
-    if (!home.fromOld || save.paid['news-ai28']) return;
-    save.paid['news-ai28'] = 1;
+    if (!home.fromOld || save.paid['news-ai29']) return;
+    save.paid['news-ai29'] = 1;
     writeSave(save);
     hud.showGuide('🆕 New on Anthill Island', `
       <p>Every station is now a little business of its own, and each one gets the same <b>four helpers</b>:
         a 🐜 <b>gatherer</b>, a 🐜 <b>carrier</b>, a 🧑 <b>cashier</b> and a 🏦 <b>banker ant</b>.</p>
       <ul>
-        <li>🍪 Your backyard has a <b>snack stand</b> by the street. Your Carrier ant stocks it now.</li>
-        <li>☕ The café makes <b>coffee</b>: 🫘 beans → the coffee machine → the counter. Your café cashier and banker are still there.</li>
-        <li>✨ Their new helpers are on the glowing tiles by each station (the 🗺️ map shows them as gold squares).</li>
-        <li>💤 Your ants now <b>earn while you're away</b>.</li>
+        <li>🙋 Your neighbors bring their orders to the <b>snack stand</b> now (the garden table is gone). Your Carrier ant
+          stocks it, its cashier serves them, and they pay on its cash pad for the banker ant.</li>
+        <li>☕ The café makes <b>coffee</b>: 🫘 beans → the coffee machine → the counter.</li>
+        <li>✨ New helpers are on the glowing tiles by each station (the 🗺️ map shows them as gold squares).</li>
+        <li>💤 Your ants <b>earn while you're away</b>.</li>
       </ul>`, [{ label: '👍 Got it', cls: 'big-btn' }]);
   };
   window.setTimeout(async () => {
@@ -214,7 +215,7 @@ export async function startHome({ app, renderer, save, hud, sfx, input, progress
       { icon: '⏱️', label: 'Time played', value: `${Math.floor(secs / 3600)}h ${Math.floor((secs % 3600) / 60)}m` },
       { icon: '⭐', label: 'Your level', value: String(save.level) },
       { icon: '🍪', label: 'Snack packs made', value: h.made.toLocaleString() },
-      { icon: '🛒', label: 'Snack stand sales', value: (h.standSales ?? 0).toLocaleString() },
+      { icon: '🛒', label: 'Packs sold at the stand', value: (h.standSales ?? 0).toLocaleString() },
       { icon: '🙋', label: 'Orders filled', value: h.orders.toLocaleString() },
       { icon: '☕', label: 'Café sales', value: h.cafeSales.toLocaleString() },
       { icon: '📦', label: 'Crate trips', value: h.crate.trips.toLocaleString() },
@@ -302,7 +303,7 @@ export async function startHome({ app, renderer, save, hud, sfx, input, progress
     }
   };
   const tick = (now: number) => {
-    const rawMs = now - last;
+    const rawMs = Math.max(0, now - last); // (the first frame's timestamp can be a hair before `last`)
     last = now;
     const dt = Math.min(0.05, rawMs / 1000) * testSpeed;
     gameTime += dt;

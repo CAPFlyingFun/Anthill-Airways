@@ -89,6 +89,8 @@ interface Guest {
   wants: number;       // café: boxes still to buy
   path: THREE.Vector3[]; // waypoints still to walk (arriving or leaving)
   vip?: { patience: number; tag: TextSprite; shown: number }; // 👑 VIP: tips big if served in time
+  /** 🏝️ Someone with an order: who, how many in all, what it's paid so far (a bubble over them shows it). */
+  order?: { name: string; total: number; paid: number; bubble: TextSprite; shown: number };
 }
 
 /** VIP passengers at check-in: they tip big if served in time, or leave angry. */
@@ -109,6 +111,14 @@ export interface DeskOpts {
   serve: number;             // seconds between each sale / check-in step
   /** Who the 2nd cashier is (default: a crew member). */
   staff2?: () => CreatureModel;
+  /**
+   * 🏝️ Anthill Island: every guest comes with an order (who they are, their look, how
+   * many they want). A bubble over them shows "🙋 Rosa · 🍪 3/5"; onOrder fires when
+   * it's filled. (Without it, café guests want 1-3 items, as in the airport.)
+   */
+  order?: () => { name: string; kind: HumanKind; wants: number };
+  /** Seconds until the first guest comes (default: about one interval). */
+  firstIn?: number;
   entry: THREE.Vector3[];    // waypoints from outside to the back of the line
   exit: (from: THREE.Vector3) => THREE.Vector3[]; // where they go when done
 }
@@ -122,6 +132,8 @@ export class Desk {
   onServe: (byPlayer: boolean) => void = () => {};
   /** A VIP was served in time (tip) or gave up (angry). */
   onVip: (what: 'tip' | 'angry', amount: number, where: THREE.Vector3) => void = () => {};
+  /** 🏝️ An order was filled (see DeskOpts.order): what it paid in all, and where they stand. */
+  onOrder: (o: { name: string; wants: number; paid: number; at: THREE.Vector3 }, byPlayer: boolean) => void = () => {};
   /** Rush hour: people arrive ~3x as fast and the line gets longer. */
   rush = false;
   valueMult: () => number = () => 1;
@@ -169,6 +181,7 @@ export class Desk {
       for (const zz of [-1.75, 1.75]) this.group.add(box(0.1, 3.3, 0.1, mat(0x5a3a22), -1.0, 1.65, zz));
       this.shelf = new Stack(this.group, gridLayout(2, 4, 0.66, 0.5, 1.66, 0, -0.3), 30);
     }
+    if (opts.firstIn !== undefined) this.spawnT = opts.interval - opts.firstIn;
     this.register.position.set(0, 2.0, 1.2);
     this.group.add(this.register);
     const sign = new TextSprite(0.85);
@@ -219,21 +232,27 @@ export class Desk {
   }
 
   private spawnGuest(line: number) {
-    const kind = this.opts.kinds[Math.floor(Math.random() * this.opts.kinds.length)];
+    const order = this.opts.order?.();
+    const kind = order?.kind ?? this.opts.kinds[Math.floor(Math.random() * this.opts.kinds.length)];
     const model = person(kind);
     const [start, ...rest] = this.opts.entry;
     model.root.position.copy(start);
     this.scene.add(model.root);
+    // 1-3 items each (more with ⬆️ Bigger Orders), or what their order says
+    const wants = order ? order.wants : Math.min(16, Math.max(1, Math.round((1 + Math.floor(Math.random() * 3)) * this.bulk)));
     const spot = handsSpot(model);
-    const held = new Stack(model.bob, backLayout(() => 0, spot.y0, spot.z0), 16); // (room for Bigger Orders)
+    const held = new Stack(model.bob, backLayout(() => 0, spot.y0, spot.z0), Math.max(16, wants)); // (room for Bigger Orders)
     if (this.opts.mode === 'checkin') {
       // Passengers bring 1 or 2 suitcases
       const bags = Math.random() < 0.35 ? 2 : 1;
       for (let i = 0; i < bags; i++) held.addInstant('bag');
     }
-    // 1-3 items each (more with ⬆️ Bigger Orders)
-    const wants = Math.min(16, Math.max(1, Math.round((1 + Math.floor(Math.random() * 3)) * this.bulk)));
     const g: Guest = { model, held, wants, path: rest.map((v) => v.clone()) };
+    if (order) {
+      const bubble = new TextSprite(0.5, '#ffffff');
+      this.scene.add(bubble.sprite);
+      g.order = { name: order.name, total: wants, paid: 0, bubble, shown: -1 };
+    }
     if (this.opts.vips && Math.random() < VIP.chance) {
       const tag = new TextSprite(0.42, '#ffd166');
       tag.setText(`👑 VIP · ${VIP.patience}s`);
@@ -246,6 +265,15 @@ export class Desk {
   /** How many are waiting (for hints). */
   get waiting() {
     return this.queues[0].length + this.queues[1].length;
+  }
+
+  /** 🏝️ The order at the front of a line (the first line first): who, how many in all, how many still to hand over. */
+  get frontOrder(): { name: string; total: number; left: number } | null {
+    for (const q of this.queues) {
+      const g = q[0];
+      if (g?.order) return { name: g.order.name, total: g.order.total, left: g.wants };
+    }
+    return null;
   }
 
   update(dt: number, playerServing: boolean, sfx: Sfx) {
@@ -293,6 +321,17 @@ export class Desk {
         const p = g.model.root.position;
         g.vip.tag.sprite.position.set(p.x, g.model.height + 0.8, p.z);
         if (g.vip.patience <= 0 && !angry) angry = g;
+      }
+      if (g.order) {
+        // 🏝️ "🙋 Rosa · 🍪 3/5" over their head
+        const o = g.order;
+        const got = o.total - g.wants;
+        if (got !== o.shown) {
+          o.shown = got;
+          o.bubble.setText(`🙋 ${o.name} · 🍪 ${got}/${o.total}`);
+        }
+        const p = g.model.root.position;
+        o.bubble.sprite.position.set(p.x, g.model.height + 0.8, p.z);
       }
       if (g.path.length) {
         if (stepTo(g.model, g.path[0], 4.2, dt)) g.path.shift();
@@ -353,13 +392,21 @@ export class Desk {
     if (g.wants > 0) {
       if (this.shelf && this.flyers.transfer(this.shelf, g.held)) {
         g.wants--;
-        this.spawnBill(ITEM_VALUE[this.opts.sells ?? 'snackbox']);
+        const value = this.spawnBill(ITEM_VALUE[this.opts.sells ?? 'snackbox']);
+        if (g.order) g.order.paid += value;
         sfx.sale();
         this.onServe(byPlayer);
       }
       return;
     }
-    if (g.held.canPop()) this.finish(g, line);
+    if (g.held.canPop()) {
+      // (everything's in their arms)
+      if (g.order) {
+        this.onOrder({ name: g.order.name, wants: g.order.total, paid: g.order.paid, at: g.model.root.position.clone() }, byPlayer);
+        g.order.bubble.sprite.removeFromParent();
+      }
+      this.finish(g, line);
+    }
   }
 
   private finish(g: Guest, line: number) {
@@ -368,11 +415,12 @@ export class Desk {
     this.leaving.push(g);
   }
 
-  /** A bill pops out of the register onto the cash pad. */
+  /** A bill pops out of the register onto the cash pad (returns what it's worth). */
   private spawnBill(base: number) {
     const value = Math.round(base * this.valueMult() * this.priceMult);
     bump('sold'); // 📊 lifetime: sales / check-ins
     payBill(this.scene, this.flyers, this.cashPad, this.register, value);
+    return value;
   }
 }
 

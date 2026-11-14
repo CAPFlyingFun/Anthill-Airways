@@ -898,7 +898,7 @@ async function start() {
   let wasStorm = false;
   const MUSIC = { base: 'colony', air: 'airport', island: 'island', volcano: 'volcano', hotel: 'hotel', run: 'run' } as const;
   function frame(now: number) {
-    const rawMs = now - last;
+    const rawMs = Math.max(0, now - last); // (the first frame's timestamp can be a hair before `last`)
     const dt = Math.min(0.05, rawMs / 1000) * testSpeed; // cap dt so a lag spike can't teleport things
     gameTime += dt;
     tickClock(rawMs / 1000, Math.min(0.05, rawMs / 1000)); // (paying for things runs on real time)

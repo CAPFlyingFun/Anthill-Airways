@@ -49,13 +49,12 @@ export interface SaveData {
 /** 🏝️ Anthill Island: what the backyard remembers between sessions. */
 export interface HomeSave {
   made: number;      // snack packs the ant farm has made (the first one brings the first order)
-  orders: number;    // neighbors' orders filled
-  order: { who: number; want: number; have: number } | null; // the open order
+  orders: number;    // neighbors' orders filled (they line up at the snack stand; the line isn't saved)
   crate: { trips: number; got: Record<string, number>; away: number }; // goods in the crate; away = seconds until it's back
   planks: number;    // 🪵 building materials (from the crate), for new plots
   chest: boolean;    // the café plot's chest is open
   cafeSales: number; // sales at the café (snack packs until v0.28, coffee since)
-  standSales: number; // snack packs the backyard's snack stand has sold (v0.28: older saves get 0)
+  standSales: number; // snack packs handed over at the backyard's snack stand (v0.28: older saves get 0)
   v?: number;        // save format (missing = v0.27: see HOME_RENAMED in data/home.ts)
 }
 

@@ -9,7 +9,7 @@ An idle arcade tycoon (walk around, stack stuff on your back, unlock new land) w
 ▶️ **Play:** https://capflyingfun.github.io/Anthill-Airways-Dino/
 On iPhone: open in Safari → Share → **Add to Home Screen** to install it as an app (works offline).
 
-## 🏝️ Anthill Island (test version, v0.28)
+## 🏝️ Anthill Island (test version, v0.29)
 
 The new one-island game from the design doc, playable in its own save slot: **⚙️ Settings → Save slots →
 an empty slot → 🏝️ Anthill Island (test)**. Your Anthill Airways slots aren't touched. This test is the
@@ -23,36 +23,40 @@ gets the same four helpers, each hired on a tile where it works:
 |---|---|---|---|
 | 🐜 Gatherer (ant) | raw supply → the converter's IN | Farm Lv 2: Lv 2, $40 (bread box → farm) | Lv 8, $300 (bean sacks → coffee machine) |
 | 🐜 Carrier (ant) | the converter's OUT → the counter's shelf | Farm Lv 3: Lv 3, $100 (farm → snack stand) | Lv 9, $400 (machine → café counter) |
-| 🧑 Cashier (a person) | sells at the counter for you | Lv 4, $150 | Lv 10, $500 |
+| 🧑 Cashier (a person) | serves at the counter for you | Lv 4, $150 | Lv 10, $500 |
 | 🏦 Banker (ant) | the cash pad → your wallet: idle income | Lv 5, $250 | Lv 11, $700 |
 
-A **2nd cashier** at either counter is its ⬆️ panel's **LINE** upgrade (a second line, served at the same time).
+A **2nd cashier** at either counter is its ⬆️ panel's **LINE** upgrade (a second line, served at the same time;
+at the snack stand, two neighbors at once), and after it **Bigger orders** (customers and neighbors want more).
 
 - 🍞 Grab crumbs from the bread box → the farm's **IN** tray → the ants turn them into 🍪 snack packs on **OUT**.
-- 🍪 **The snack stand** by the street: stand on **SELL** and people from the sidewalk line up and buy your packs
-  ($5 each). The bills land on its 💵 cash pad. (Customers start coming once the farm has made its first pack.)
-- 🙋 **Neighbors' orders**: a neighbor walks up to the table by the fence (the first one once the farm has made
-  its first pack) and wants **5 snack packs**, the next one **10**, then 6-11 (+1 every 3 levels).
-  Stand on **ORDER** to hand them over: each order pays more than the stand ($7 a pack, +5% per level) and
-  **lots of XP** (10 + 3 per pack). A new neighbor comes 8 s later.
+- 🍪🙋 **The snack stand: the neighbors' orders.** Your neighbors line up at the snack stand by the street with
+  their orders (a bubble over each one: "🙋 Rosa · 🍪 3/5"). The first one comes 8 s after the farm's first pack and
+  wants **5 snack packs**, the next one **10**, then 6-11 (+1 every 3 levels); a new neighbor every 20 s (twice as
+  often with the 2nd cashier). Stand on **SELL**: your packs go on the shelf and into their arms. Each pack pays
+  **$7** (+5% per level) onto the stand's 💵 cash pad, and a filled order gives **lots of XP** (10 + 3 per pack;
+  a quarter of that when the cashier fills it while you're elsewhere).
 - 📦 **The delivery crate** turns up with Farm Lv 3: fill it with the snack packs and crumbs it asks for (6 + 6,
   then 8 + 8, then 10 + 10), it goes off for 60 s and comes back with **3 🪵 planks** (shown next to the area
   name). While it's away, its spot is empty: you can walk through it.
 - 🏡 **New plots**: the tile by the east gate opens the **Corner Café** plot. It needs **Lv 7**, **2 ants working**,
   **3 planks** and **$400**; the sign over the gate ticks them off. The new plot hides a 🎁 **chest** ($150 + 40 XP).
-- ☕ **The café sells coffee**: 🫘 bean sacks → the **coffee machine** (3 s a cup) → the café's SELL spot ($12 a cup).
+- ☕ **The café sells coffee**: 🫘 bean sacks → the **coffee machine** (3 s a cup) → the café's SELL spot ($20 a cup).
+- Measured idle income with no bonuses (Lv 8): about **$240/min** from the backyard (the farm sells all it makes)
+  and **$320/min** from the café.
 - 💤 **Offline earnings**: while you're away (60 s or more), your helpers keep working. Coming back (or opening the
   app) shows the welcome-back card: your **+$/min** rate (what the banker ants collect) x the time away (4 h max)
   x 50%, the same rules and upgrades as the classic game, without the bonus gate run.
 - ⬆️ The building panels work here too (bread box, farm, snack stand, bean sacks, coffee machine, café, Staff),
-  and the arrow-and-quest tutorial (16 steps) walks you through all of it (⚙️ Settings → 📖 How to play has this
+  and the arrow-and-quest tutorial (15 steps) walks you through all of it (⚙️ Settings → 📖 How to play has this
   game's guide).
 - 🗺️ **The minimap** (top right, under the 👁️ 🎒 buttons, after Beyond Extinction's): north up, centred on you
   (the blue arrow), the stations as icons (a red **!** on a counter whose buyers wait at an empty shelf), glowing
   tiles as gold squares, and the quest as a pulsing gold ring (or a gold arrow on the edge when it's further
   away). Tap it for the whole map with names (`src/ui/minimap.ts`).
 - Older saves are moved over automatically: v0.27's café cashier and banker (once Farm Lv 4 and 5) stay hired at
-  the café; v0.28 adds the stand and the café's coffee (mid-tutorial saves pick up at the stand's first step).
+  the café; v0.28 added the stand and the café's coffee; v0.29 moved the neighbors' orders to the stand (the
+  garden table is gone; an order open there is dropped). Mid-tutorial saves pick up at the first order.
 
 Code: `src/homeMain.ts` (boot + loop + offline pay), `src/world/homeWorld.ts` (the backyard and the café),
 `src/data/home.ts` (every number). Not in this test yet: the farm close-up and ride-along cam, more plots.
