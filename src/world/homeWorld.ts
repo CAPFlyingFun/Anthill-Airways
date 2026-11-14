@@ -42,6 +42,9 @@ import { Blocker, CashPad, ProcessorOpts, ResourcePile, TrashBin, UnlockTile, Zo
 import { Desk, person } from './airportWorld';
 import { TUTORIAL_DONE, Tutorial, TutorialScript } from './tutorial';
 import { Neighborhood } from './neighborhood';
+import { Shop, buildShop } from './buildings';
+import { Ride, Traffic } from './traffic';
+import { pace } from '../core/pace';
 import type { MapArea, MapMarker, MapRect, MapSeg, MapView } from '../ui/minimap';
 
 const mat = (color: number, roughness = 0.7, metalness = 0) => new THREE.MeshStandardMaterial({ color, roughness, metalness });
@@ -67,6 +70,8 @@ const STEP = { crumbs: 0, feed: 1, packs: 2, cash: 4, beans: 12, coffee: 13 } as
 const TUTORIAL_V3: number[] = [0, 1, 2, 3, 4, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14];
 /** Who shows up with orders / at the café (the people models). */
 const CAFE_KINDS: HumanKind[] = ['h-exec', 'h-balance', 'h-ember', 'h-crew1', 'h-crew2', 'h-crew4'];
+/** A stretch of fence that can be taken down again: its meshes and its lines on the minimap. */
+interface FenceBag { objs: THREE.Object3D[]; segs: MapSeg[] }
 /** Who shops at the Corner Store. */
 const STORE_KINDS: HumanKind[] = ['h-director', 'h-balance', 'h-crew3', 'h-crew1', 'h-sarah', 'h-ember', 'h-crew4'];
 
@@ -642,6 +647,23 @@ export class HomeWorld {
   private stepOff: Zone | null = null;
   /** 🗺️ For the minimap: the fences and trees, as they're built. */
   private fenceSegs: MapSeg[] = [];
+  /** The picket fences round the two empty lots: each comes down when its shop's building goes up (v0.32). */
+  private cafeFence: FenceBag = { objs: [], segs: [] };
+  private storeFence: FenceBag = { objs: [], segs: [] };
+  /**
+   * 🏬 The shops' buildings (v0.32): real walls and a roof when you look through your own eyes; in the
+   * top-down view only their low wall stubs show, so you can see in ("roofs off").
+   */
+  private shops: Shop[] = [];
+  /**
+   * 🚗 The street's cars (v0.32): through-traffic, and some customers come by car. A car that has
+   * parked at a shop waits for the people it brought: `seats` still to get out, `owed` still to come back.
+   */
+  private traffic!: Traffic;
+  private walkerList: THREE.Vector3[] = [];
+  private rides = new Map<number, { ride: Ride; seats: number; owed: number; age: number }>();
+  private rideDue = new Set<number>(); // (a car is on its way to this shop)
+  private cutaway = true;
   private treeSpots: { x: number; z: number; r: number }[] = [];
   /** 🙋 Neighbors who've come by (names and looks cycle; the first two order 5, then 10). */
   private neighborsSeen = 0;
@@ -713,8 +735,8 @@ export class HomeWorld {
       mode: 'cafe', sells: 'snack', machine: false, awning: 0xe76f51, label: '🍪 SNACK STAND', color: 0xc8975a, kinds: CAFE_KINDS,
       interval: HOME.stand.interval, queueMax: HOME.stand.queueMax, serve: HOME.stand.serve,
       // (they come out of a house across the street, over the crosswalk and in by the gap in the fence; and go home again)
-      entry: () => this.hood.routeIn(13.8, [new THREE.Vector3(13.8, 0, 9.6), new THREE.Vector3(5, 0, 9.6)], this.home.orders < 2),
-      exit: (from) => this.hood.routeOut(13.8, [new THREE.Vector3(from.x, 0, 10.4), new THREE.Vector3(13.8, 0, 10.4)]),
+      entry: () => this.wayIn(13.8, [new THREE.Vector3(13.8, 0, 9.6), new THREE.Vector3(5, 0, 9.6)], this.home.orders < 2),
+      exit: (from) => this.wayOut(13.8, [new THREE.Vector3(from.x, 0, 10.4), new THREE.Vector3(13.8, 0, 10.4)]),
       staff2: () => person('h-crew1'), // (the ⬆️ panel's 2nd cashier: a 2nd line, two neighbors at once)
       order: () => this.nextNeighbor(),
       firstIn: HOME.order.firstIn,
@@ -792,6 +814,7 @@ export class HomeWorld {
     // 🏘️ The neighborhood (v0.31): the streets, the sidewalks, the houses across the street and up the
     // side street, and your own house north of the yard, its back door onto the deck
     this.hood = new Neighborhood(s);
+    this.traffic = new Traffic(s, { ambient: 3, pedestrians: () => this.walkerList });
     Neighborhood.yourHouse(s);
     s.add(box(14, 0.3, 2.2, mat(0xa0703f, 0.85), -5, 0.15, -12)); // deck
     // A big shade tree, a smaller one behind the picnic table, and some bushes
@@ -827,20 +850,20 @@ export class HomeWorld {
     s.add(this.gate);
     // The café plot next door: an empty lot for now
     const P = HOME.cafePlot;
-    this.fence(P.minX, P.minZ, P.maxX, P.minZ);
+    this.fence(P.minX, P.minZ, P.maxX, P.minZ, this.cafeFence);
     // (its east fence has a gate too: to the store plot, closed until that one is yours)
-    this.fence(P.maxX, P.minZ, P.maxX, HOME.gate.z0);
-    this.fence(P.maxX, HOME.gate.z1, P.maxX, P.maxZ);
+    this.fence(P.maxX, P.minZ, P.maxX, HOME.gate.z0, this.cafeFence);
+    this.fence(P.maxX, HOME.gate.z1, P.maxX, P.maxZ, this.cafeFence);
     this.gate2.position.set(P.maxX, 0, HOME.gate.z0);
     for (const y of [0.5, 1.1]) this.gate2.add(box(0.1, 0.12, len, gateMat, 0, y, len / 2));
     for (let zz = 0.2; zz < len; zz += 0.45) this.gate2.add(box(0.12, 1.3, 0.16, gateMat, 0, 0.65, zz));
     s.add(this.gate2);
-    this.fence(P.minX, P.maxZ, 28.5, P.maxZ);
+    this.fence(P.minX, P.maxZ, 28.5, P.maxZ, this.cafeFence);
     // 🛒 The store plot after it: another empty lot
     const S = HOME.storePlot;
-    this.fence(S.minX, S.minZ, S.maxX, S.minZ);
-    this.fence(S.maxX, S.minZ, S.maxX, S.maxZ);
-    this.fence(S.minX, S.maxZ, 49.5, S.maxZ);
+    this.fence(S.minX, S.minZ, S.maxX, S.minZ, this.storeFence);
+    this.fence(S.maxX, S.minZ, S.maxX, S.maxZ, this.storeFence);
+    this.fence(S.minX, S.maxZ, 49.5, S.maxZ, this.storeFence);
     this.lot2.add(flat(S.maxX - S.minX, S.maxZ - S.minZ, 0xb39368, (S.minX + S.maxX) / 2, (S.minZ + S.maxZ) / 2, 0.006));
     const sale2 = new TextSprite(0.8, '#ffd166');
     sale2.setText('🏷️ LOT FOR SALE');
@@ -872,6 +895,66 @@ export class HomeWorld {
     }
   }
 
+  /**
+   * A customer's way in to the shop whose crosswalk is at `cx`. If a car is parked there with someone still
+   * in it, they get out of it; otherwise they walk from a house, and now and then a car sets off to bring the next ones.
+   */
+  private wayIn(cx: number, rest: THREE.Vector3[], quick = false) {
+    const r = this.rides.get(cx);
+    if (r && r.seats > 0 && r.ride.state === 'parked') {
+      r.seats--;
+      r.owed++;
+      return [r.ride.curb.clone(), new THREE.Vector3(r.ride.curb.x, 0, 13.6), new THREE.Vector3(cx, 0, 13.6), ...rest];
+    }
+    if (!quick && !r && !this.rideDue.has(cx) && Math.random() < 0.45) {
+      this.rideDue.add(cx);
+      this.traffic.arrive(cx, 'north', {
+        kind: Math.random() < 0.75 ? 'car' : 'van',
+        onParked: (ride) => {
+          this.rideDue.delete(cx);
+          this.rides.set(cx, { ride, seats: 1 + Math.floor(Math.random() * 2), owed: 0, age: 0 });
+        },
+      });
+    }
+    return this.hood.routeIn(cx, rest, quick);
+  }
+
+  /** ...and the way home: back to the car they came in (it drives off once everyone is in), or to a house on foot. */
+  private wayOut(cx: number, first: THREE.Vector3[]) {
+    const r = this.rides.get(cx);
+    if (r && r.owed > 0 && r.ride.state === 'parked') {
+      r.owed--;
+      const path = [...first, new THREE.Vector3(cx, 0, 13.6), new THREE.Vector3(r.ride.curb.x, 0, 13.6), r.ride.curb.clone()];
+      if (r.owed === 0 && r.seats === 0) {
+        // (the last one back: the car leaves when they reach it. People walk at 4.2 x the movement speed setting)
+        let len = 0;
+        for (let i = 1; i < path.length; i++) len += path[i].distanceTo(path[i - 1]);
+        r.ride.leaveIn(len / (4.2 * Math.max(0.2, pace.move)) + 1.2);
+        this.rides.delete(cx);
+      }
+      return path;
+    }
+    return this.hood.routeOut(cx, first);
+  }
+
+  /** 🏬 A shop's building goes up on its plot: the lot's fence comes down, its walls go on the map. */
+  private raiseShop(bag: FenceBag, spec: Parameters<typeof buildShop>[0], animate: boolean) {
+    this.dropFence(bag);
+    const shop = buildShop(spec);
+    shop.setCutaway(this.cutaway);
+    this.scene.add(shop.group);
+    this.shops.push(shop);
+    this.fenceSegs.push(...shop.outline);
+    if (animate) this.flyers.grow(shop.group);
+  }
+
+  /** Take a lot's picket fence down (its shop's walls stand there now). */
+  private dropFence(bag: FenceBag) {
+    for (const o of bag.objs) o.removeFromParent();
+    this.fenceSegs = this.fenceSegs.filter((seg) => !bag.segs.includes(seg));
+    bag.objs.length = bag.segs.length = 0;
+  }
+
   /** A simple round tree. */
   private tree(x: number, z: number, k: number) {
     const trunk = box(0.6 * k, 4 * k, 0.6 * k, mat(0x7a4b2a, 0.9), x, 2 * k, z);
@@ -884,8 +967,10 @@ export class HomeWorld {
   }
 
   /** A white picket fence from (x1, z1) to (x2, z2): one InstancedMesh of pickets + two rails. */
-  private fence(x1: number, z1: number, x2: number, z2: number) {
-    this.fenceSegs.push({ x0: x1, z0: z1, x1: x2, z1: z2 });
+  private fence(x1: number, z1: number, x2: number, z2: number, bag?: FenceBag) {
+    const seg = { x0: x1, z0: z1, x1: x2, z1: z2 };
+    this.fenceSegs.push(seg);
+    bag?.segs.push(seg);
     const len = Math.hypot(x2 - x1, z2 - z1);
     const n = Math.max(2, Math.round(len / 0.45));
     const white = mat(0xffffff, 0.6);
@@ -900,10 +985,12 @@ export class HomeWorld {
     }
     pickets.castShadow = true;
     this.scene.add(pickets);
+    bag?.objs.push(pickets);
     for (const y of [0.45, 1.05]) {
       const rail = box(0.08, 0.12, len, white, (x1 + x2) / 2, y, (z1 + z2) / 2);
       rail.rotation.y = angle;
       this.scene.add(rail);
+      bag?.objs.push(rail);
     }
   }
 
@@ -1077,6 +1164,11 @@ export class HomeWorld {
     patio.position.set((P.minX + P.maxX) / 2, 0.007, (P.minZ + P.maxZ) / 2);
     patio.receiveShadow = true;
     this.scene.add(patio);
+    // 🏬 Its building: doors to your yard (west) and to the next plot (east), the shop front on the street
+    this.raiseShop(this.cafeFence, {
+      rect: P, wall: 0xf3e9dc, trim: 0x2d6cdf, roof: 0x5a5f66, sign: '☕ CORNER CAFÉ', awning: 0x2d6cdf,
+      doors: [{ side: 'west', from: HOME.gate.z0, to: HOME.gate.z1 }, { side: 'east', from: HOME.gate.z0, to: HOME.gate.z1 }, { side: 'south', from: 31.5, to: 34.5 }],
+    }, animate);
     // ☕ The coffee: bean sacks -> the coffee machine (north side of the plot)...
     this.beans = new ResourcePile(this.scene, 18.6, -7.6, this.flyers, 'beans', 'beans');
     this.piles.push(this.beans);
@@ -1091,8 +1183,8 @@ export class HomeWorld {
     const cafe = new Desk(this.scene, 23, 1.5, this.flyers, pad, null, {
       mode: 'cafe', sells: 'coffee', awning: 0x2d6cdf, label: '☕ CORNER CAFÉ', color: 0xd9a066, kinds: CAFE_KINDS,
       interval: HOME.cafe.interval, queueMax: HOME.cafe.queueMax, serve: HOME.cafe.serve,
-      entry: () => this.hood.routeIn(33, [new THREE.Vector3(33, 0, 5)]),
-      exit: (from) => this.hood.routeOut(33, [new THREE.Vector3(from.x, 0, 5)]),
+      entry: () => this.wayIn(33, [new THREE.Vector3(33, 0, 5)]),
+      exit: (from) => this.wayOut(33, [new THREE.Vector3(from.x, 0, 5), new THREE.Vector3(33, 0, 8)]), // (out by the front door)
       staff2: () => person('h-balance'), // (the ⬆️ panel's 2nd cashier: someone who looks different from the first)
     });
     cafe.onServe = (byPlayer) => {
@@ -1106,7 +1198,7 @@ export class HomeWorld {
     this.blockers.push(cafe.blocker);
     // Patio tables with umbrellas
     const tables: THREE.Object3D[] = [];
-    for (const [tx, tz, color] of [[33, -8, 0x2a9d8f], [17.4, 9.4, 0xf4a261]] as [number, number, number][]) {
+    for (const [tx, tz, color] of [[33, -8, 0x2a9d8f], [18.4, 8.6, 0xf4a261]] as [number, number, number][]) {
       const t = new THREE.Group();
       t.position.set(tx, 0, tz);
       t.add(box(1.4, 0.1, 1.4, mat(0xf4f1de, 0.5), 0, 1.0, 0), box(0.1, 1.0, 0.1, mat(0x5a5f66, 0.4, 0.5), 0, 0.5, 0), box(0.07, 2.6, 0.07, mat(0x5a5f66, 0.4, 0.5), 0, 1.3, 0));
@@ -1152,6 +1244,11 @@ export class HomeWorld {
     floor.position.set((S.minX + S.maxX) / 2, 0.007, (S.minZ + S.maxZ) / 2);
     floor.receiveShadow = true;
     this.scene.add(floor);
+    // 🏬 Its building: a door to the café (west), the shop front on the street
+    this.raiseShop(this.storeFence, {
+      rect: S, wall: 0xeef3e6, trim: 0x2f9e5b, roof: 0x5a5f66, sign: '🛒 CORNER STORE', awning: 0x2f9e5b,
+      doors: [{ side: 'west', from: HOME.gate.z0, to: HOME.gate.z1 }, { side: 'south', from: 52.5, to: 55.5 }],
+    }, animate);
     // 🥬 The groceries: delivery crates -> the packing table (north side of the plot)...
     this.groceries = new ResourcePile(this.scene, 39.6, -7.6, this.flyers, 'grocery', 'pantry');
     this.piles.push(this.groceries);
@@ -1165,8 +1262,8 @@ export class HomeWorld {
     const store = new Desk(this.scene, 44, 1.5, this.flyers, pad, null, {
       mode: 'cafe', sells: 'shopbag', machine: false, awning: 0x2f9e5b, label: '🛒 CORNER STORE', color: 0xbfd8a8, kinds: STORE_KINDS,
       interval: HOME.store.interval, queueMax: HOME.store.queueMax, serve: HOME.store.serve,
-      entry: () => this.hood.routeIn(54, [new THREE.Vector3(54, 0, 5)]),
-      exit: (from) => this.hood.routeOut(54, [new THREE.Vector3(from.x, 0, 5)]),
+      entry: () => this.wayIn(54, [new THREE.Vector3(54, 0, 5)]),
+      exit: (from) => this.wayOut(54, [new THREE.Vector3(from.x, 0, 5), new THREE.Vector3(54, 0, 8)]),
       staff2: () => person('h-exec'),
     });
     store.onServe = (byPlayer) => {
@@ -1298,6 +1395,7 @@ export class HomeWorld {
     st.trips++;
     st.got = {};
     st.away = HOME.crate.away;
+    this.traffic.arrive(9, 'north', { kind: 'truck', onParked: (ride) => ride.leaveIn(3) }); // 🚚 (the delivery truck comes for it)
     crate.stack.clear();
     this.progress.addXp(HOME.crate.xp);
     this.sfx.contract();
@@ -1350,6 +1448,25 @@ export class HomeWorld {
     this.machine?.update(dt);
     this.groceries?.update(dt);
     this.hood.update(dt);
+    // 🚗 The cars: they brake for whoever is on the street; a parked car nobody else gets out of stops waiting
+    this.walkerList.length = 0;
+    for (const d of this.desks) d.walkers(this.walkerList);
+    this.hood.walkers(this.walkerList);
+    this.traffic.update(dt);
+    for (const [cx, r] of this.rides) {
+      r.age += dt;
+      if (r.age > 30 && r.seats > 0) r.seats = 0;
+      if (r.seats === 0 && r.owed === 0) {
+        r.ride.leaveIn(0.5);
+        this.rides.delete(cx);
+      }
+    }
+    // 🏬 Roofs: on when you look through your own eyes, off (walls cut low) in the top-down view
+    const cut = !this.player.firstPerson;
+    if (cut !== this.cutaway) {
+      this.cutaway = cut;
+      for (const shop of this.shops) shop.setCutaway(cut);
+    }
     this.packing?.update(dt);
     for (const w of this.workers) w.update(dt, this.flyers);
     for (const b of this.bankers) b.update(dt, this.flyers);

@@ -9,7 +9,7 @@ An idle arcade tycoon (walk around, stack stuff on your back, unlock new land) w
 ▶️ **Play:** https://capflyingfun.github.io/Anthill-Airways-Dino/
 On iPhone: open in Safari → Share → **Add to Home Screen** to install it as an app (works offline).
 
-## 🏝️ Anthill Island (test version, v0.31)
+## 🏝️ Anthill Island (test version, v0.32)
 
 The new one-island game from the design doc, playable in its own save slot: **⚙️ Settings → Save slots →
 an empty slot → 🏝️ Anthill Island (test)**. Your Anthill Airways slots aren't touched. This test is the
@@ -59,8 +59,16 @@ at the snack stand, two neighbors at once), and after it **Bigger orders** (cust
   that meets it at the corner (gable roofs, doors with porches, windows, garages and driveways: built to hold up in
   the 👁️ first-person view), a second sidewalk and crosswalks. Your customers come **out of a house's front door**,
   cross at the crosswalk, shop, and **walk home into a house** (not always the same one); a few neighbors are always
-  out for a stroll. Your own house is a real house too. Each house is one merged mesh. Next: cars (step 2), then
-  shops as buildings you walk into, roofs off in the top-down view (step 3). Code: `src/world/neighborhood.ts`.
+  out for a stroll. Your own house is a real house too. Each house is one merged mesh. Code: `src/world/neighborhood.ts`.
+- 🚗 **Cars** (v0.32, step 2): procedural cars, vans and delivery trucks (`src/world/traffic.ts`) drive the street on
+  the right, turn at the corner, keep their distance and brake for people on the crosswalks. Some customers **come
+  by car**: it parks at the curb by the shop, one or two people get out, shop, walk back, and it drives off (people
+  in a car aren't drawn, which is the point). A truck comes by when the delivery crate goes off.
+- 🏬 **Shops are buildings** (v0.32, step 3): the café and the store stand in real buildings on their plots
+  (`src/world/buildings.ts`): walls, shop-front windows, an awning and a sign on the street, a flat roof. In the 👁️
+  first-person view the walls and roof are whole; in the top-down view only low wall stubs show, so you see in
+  ("roofs off"). A lot's picket fence comes down when its shop goes up. Known: name tags show through walls in
+  first person, and the ceiling reads dark from inside.
 - 🗺️ **The minimap** (top right, under the 👁️ 🎒 buttons, after Beyond Extinction's): north up, centred on you
   (the blue arrow), the stations as icons (a red **!** on a counter whose buyers wait at an empty shelf), glowing
   tiles as gold squares, and the quest as a pulsing gold ring (or a gold arrow on the edge when it's further

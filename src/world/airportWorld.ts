@@ -146,6 +146,11 @@ export class Desk {
   lines = 1;
   private queues: Guest[][] = [[], []];
   private leaving: Guest[] = [];
+  /** Where everyone coming to or leaving this desk is right now (the street's cars brake for them). */
+  walkers(out: THREE.Vector3[]) {
+    for (const q of this.queues) for (const g of q) out.push(g.model.root.position);
+    for (const g of this.leaving) out.push(g.model.root.position);
+  }
   private spawnT = 1;
   private serveTs = [0, 0];
   private register = new THREE.Object3D();

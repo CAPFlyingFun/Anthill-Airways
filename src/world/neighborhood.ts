@@ -57,7 +57,7 @@ interface HouseSpec {
 }
 
 /** One box, as a piece of a house: its corners coloured, ready to merge. */
-function piece(geo: THREE.BufferGeometry, color: number, x = 0, y = 0, z = 0) {
+export function piece(geo: THREE.BufferGeometry, color: number, x = 0, y = 0, z = 0) {
   const g = geo.index ? geo.toNonIndexed() : geo;
   g.translate(x, y, z);
   const c = new THREE.Color(color);
@@ -67,9 +67,9 @@ function piece(geo: THREE.BufferGeometry, color: number, x = 0, y = 0, z = 0) {
   g.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   return g;
 }
-const cube = (w: number, h: number, d: number, color: number, x: number, y: number, z: number) => piece(new THREE.BoxGeometry(w, h, d), color, x, y, z);
+export const cube = (w: number, h: number, d: number, color: number, x: number, y: number, z: number) => piece(new THREE.BoxGeometry(w, h, d), color, x, y, z);
 
-const HOUSE_MAT = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.82 });
+export const HOUSE_MAT = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.82 });
 const WHITE = 0xf6f3ea;
 const GLASS = 0x6f93b3;
 
@@ -290,6 +290,11 @@ export class Neighborhood {
       s.model.root.removeFromParent(); // (home: through the front door)
       this.strollers.splice(i, 1);
     }
+  }
+
+  /** Where the strollers are right now (the street's cars brake for them). */
+  walkers(out: THREE.Vector3[]) {
+    for (const s of this.strollers) out.push(s.model.root.position);
   }
 
   /** 🗺️ For the minimap: the streets, the sidewalks and the houses. */
