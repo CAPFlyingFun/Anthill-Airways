@@ -19,10 +19,12 @@ export type ItemType = 'crumb' | 'snack' | 'leaf' | 'wrap' | 'sugar' | 'candy' |
   // Act 5 (Hotel)
   | 'laundry' | 'towel' | 'grocery' | 'tray'
   // 🏝️ Anthill Island: the Corner Café's coffee
-  | 'beans' | 'coffee';
+  | 'beans' | 'coffee'
+  // 🏝️ Anthill Island: the Corner Store's bag of groceries
+  | 'shopbag';
 
 /** Height of one item when stacked. */
-export const ITEM_H: Record<ItemType, number> = { crumb: 0.3, snack: 0.32, leaf: 0.14, wrap: 0.32, sugar: 0.4, candy: 0.3, cash: 0.11, bag: 0.48, snackbox: 0.36, fruit: 0.4, smoothie: 0.5, meat: 0.32, egg: 0.42, ticket: 0.1, obsidian: 0.36, gem: 0.4, magma: 0.4, crystal: 0.52, laundry: 0.4, towel: 0.2, grocery: 0.42, tray: 0.36, beans: 0.38, coffee: 0.4 };
+export const ITEM_H: Record<ItemType, number> = { crumb: 0.3, snack: 0.32, leaf: 0.14, wrap: 0.32, sugar: 0.4, candy: 0.3, cash: 0.11, bag: 0.48, snackbox: 0.36, fruit: 0.4, smoothie: 0.5, meat: 0.32, egg: 0.42, ticket: 0.1, obsidian: 0.36, gem: 0.4, magma: 0.4, crystal: 0.52, laundry: 0.4, towel: 0.2, grocery: 0.42, tray: 0.36, beans: 0.38, coffee: 0.4, shopbag: 0.5 };
 
 // Shared geometry + materials: every crumb reuses the same ones (fast).
 const geo = {
@@ -64,6 +66,8 @@ const geo = {
   tray: new THREE.CylinderGeometry(0.28, 0.28, 0.04, 18),                 // a silver tray...
   cloche: new THREE.SphereGeometry(0.2, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2), // ...with a dome lid
   veg: new THREE.SphereGeometry(0.1, 8, 6),
+  shopbag: new THREE.BoxGeometry(0.36, 0.44, 0.26),                        // a paper bag of groceries (the Corner Store)
+  baguette: new THREE.CylinderGeometry(0.035, 0.035, 0.34, 8),
 };
 const mat = {
   crumb: new THREE.MeshStandardMaterial({ color: 0xdca44a, roughness: 0.9 }),
@@ -97,6 +101,8 @@ const mat = {
   towelStripe: new THREE.MeshStandardMaterial({ color: 0x2ec4b6, roughness: 0.9 }),
   grocery: new THREE.MeshStandardMaterial({ color: 0xc89b5e, roughness: 0.9 }),
   veg: new THREE.MeshStandardMaterial({ color: 0x4caf50, roughness: 0.8 }),
+  shopbag: new THREE.MeshStandardMaterial({ color: 0xc9a36b, roughness: 0.95 }),
+  baguette: new THREE.MeshStandardMaterial({ color: 0xe0b46a, roughness: 0.8 }),
   silver: new THREE.MeshStandardMaterial({ color: 0xdfe4ea, roughness: 0.25, metalness: 0.8 }),
   beans: new THREE.MeshStandardMaterial({ color: 0xa47a4a, roughness: 1 }),
   beanTie: new THREE.MeshStandardMaterial({ color: 0x5b3a1e, roughness: 0.9 }),
@@ -106,7 +112,7 @@ const mat = {
 };
 
 /** Cash value of each sellable item (counter price; gate runs pay the same per item). */
-export const ITEM_VALUE: Record<ItemType, number> = { crumb: 2, snack: 5, leaf: 3, wrap: 14, sugar: 10, candy: 40, cash: 0, bag: 15, snackbox: 25, fruit: 0, smoothie: 60, meat: 0, egg: 80, ticket: 50, obsidian: 0, gem: 150, magma: 0, crystal: 450, laundry: 0, towel: 0, grocery: 0, tray: 220, beans: 2, coffee: 20 };
+export const ITEM_VALUE: Record<ItemType, number> = { crumb: 2, snack: 5, leaf: 3, wrap: 14, sugar: 10, candy: 40, cash: 0, bag: 15, snackbox: 25, fruit: 0, smoothie: 60, meat: 0, egg: 80, ticket: 50, obsidian: 0, gem: 150, magma: 0, crystal: 450, laundry: 0, towel: 0, grocery: 0, tray: 220, beans: 2, coffee: 20, shopbag: 50 };
 
 /** Build the 3D mesh for one item. Box faces order: +x, -x, +y(top), -y, +z, -z */
 export function makeItem(type: ItemType): THREE.Mesh {
@@ -170,6 +176,18 @@ export function makeItem(type: ItemType): THREE.Mesh {
       v.position.set(vx, 0.2, vz);
       m.add(v);
     }
+  } else if (type === 'shopbag') {
+    // A paper bag with greens and a baguette sticking out of the top
+    m = new THREE.Mesh(geo.shopbag, mat.shopbag);
+    for (const [vx, vz] of [[-0.08, 0.03], [0.07, -0.04]]) {
+      const v = new THREE.Mesh(geo.veg, mat.veg);
+      v.position.set(vx, 0.23, vz);
+      m.add(v);
+    }
+    const bread = new THREE.Mesh(geo.baguette, mat.baguette);
+    bread.position.set(0.1, 0.27, 0.06);
+    bread.rotation.z = -0.3;
+    m.add(bread);
   } else if (type === 'tray') {
     m = new THREE.Mesh(geo.tray, mat.silver);
     const lid = new THREE.Mesh(geo.cloche, mat.silver);

@@ -9,11 +9,11 @@ An idle arcade tycoon (walk around, stack stuff on your back, unlock new land) w
 ▶️ **Play:** https://capflyingfun.github.io/Anthill-Airways-Dino/
 On iPhone: open in Safari → Share → **Add to Home Screen** to install it as an app (works offline).
 
-## 🏝️ Anthill Island (test version, v0.29)
+## 🏝️ Anthill Island (test version, v0.30)
 
 The new one-island game from the design doc, playable in its own save slot: **⚙️ Settings → Save slots →
 an empty slot → 🏝️ Anthill Island (test)**. Your Anthill Airways slots aren't touched. This test is the
-opening: the backyard and the first café plot.
+opening: the backyard, the café plot and, from v0.30, the Corner Store plot.
 
 You're a person (Jack's model) with an **ant farm** in the backyard; the ants become your workforce. Every
 station is a little business of its own, **raw supply → converter → counter → cash pad**, and every station
@@ -41,6 +41,11 @@ at the snack stand, two neighbors at once), and after it **Bigger orders** (cust
   name). While it's away, its spot is empty: you can walk through it.
 - 🏡 **New plots**: the tile by the east gate opens the **Corner Café** plot. It needs **Lv 7**, **2 ants working**,
   **3 planks** and **$400**; the sign over the gate ticks them off. The new plot hides a 🎁 **chest** ($150 + 40 XP; once opened, it's gone).
+- 🛒 **The Corner Store** (v0.30), the plot after the café: its tile is by the café's east gate (once the café has its
+  Gatherer) and needs **Lv 12**, **4 ants working**, **6 planks** and **$2,500**. 🥬 Grocery crates → the **packing table**
+  (3.2 s a bag) → the checkout's SELL spot (**$50 a bag**, a shopper every 7 s). Its own four helpers: a gatherer (Lv 13,
+  $1,500), a carrier (Lv 14, $2,000), a cashier (Lv 15, $2,500) and a banker ant (Lv 16, $3,500). Its plot hides a chest
+  too ($600 + 80 XP). First-pass numbers: not balance-tested like the café's yet.
 - ☕ **The café sells coffee**: 🫘 bean sacks → the **coffee machine** (3 s a cup) → the café's SELL spot ($20 a cup).
 - Measured idle income with no bonuses (Lv 8): about **$240/min** from the backyard (the farm sells all it makes)
   and **$320/min** from the café.
@@ -59,7 +64,7 @@ at the snack stand, two neighbors at once), and after it **Bigger orders** (cust
   garden table is gone; an order open there is dropped). Mid-tutorial saves pick up at the first order.
 
 Code: `src/homeMain.ts` (boot + loop + offline pay), `src/world/homeWorld.ts` (the backyard and the café),
-`src/data/home.ts` (every number). Not in this test yet: the farm close-up and ride-along cam, more plots.
+`src/data/home.ts` (every number). Not in this test yet: the farm close-up and ride-along cam, and the next areas (airport, hotel, hospital, zoo).
 
 ## 🧪 DEV Room (temporary, v0.29.2 to v0.29.5)
 

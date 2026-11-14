@@ -59,13 +59,15 @@ const ANT_TITLE = 0.6;
  * 3: the snack stand + the café's coffee. 4: the neighbors' orders at the snack stand
  * (the garden table is gone). Both changed the tutorial's steps (see homeTutorial).
  */
-const HOME_SAVE_V = 4;
+const HOME_SAVE_V = 5; // (5: v0.30, the Corner Store)
 /** 🎓 The tutorial steps that an action finishes (their places in homeTutorial's list). */
 const STEP = { crumbs: 0, feed: 1, packs: 2, cash: 4, beans: 12, coffee: 13 } as const;
 /** v3's tutorial step -> v4's (the stand's sale became the first order; the order steps merged in). */
 const TUTORIAL_V3: number[] = [0, 1, 2, 3, 4, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14];
 /** Who shows up with orders / at the café (the people models). */
 const CAFE_KINDS: HumanKind[] = ['h-exec', 'h-balance', 'h-ember', 'h-crew1', 'h-crew2', 'h-crew4'];
+/** Who shops at the Corner Store. */
+const STORE_KINDS: HumanKind[] = ['h-director', 'h-balance', 'h-crew3', 'h-crew1', 'h-sarah', 'h-ember', 'h-crew4'];
 
 // ----------------------------------------------------------------------------
 // The sand-and-tunnels picture inside the ant farm.
@@ -399,6 +401,103 @@ class CoffeeMachine {
 }
 
 // ----------------------------------------------------------------------------
+// 🛍️ THE PACKING TABLE (the Corner Store's converter, v0.30): crates of groceries
+// go in on the left (IN), packed shopping bags come out on the right (OUT). The
+// same shape as the coffee machine (inZone / outZone / speedMult / cooking), so
+// the ⬆️ panel and the ⚠️ status tag work with it too.
+// ----------------------------------------------------------------------------
+const PACKING: ProcessorOpts = { inType: 'grocery', outType: 'shopbag', label: '🛍️ PACKING TABLE', cookTime: HOME.packing.cookTime, body: 0x2f7d4f, trim: 0xf4f1de, glow: 0x9be37a };
+
+class PackingTable {
+  group = new THREE.Group();
+  input: Stack;
+  output: Stack;
+  inZone: Zone;
+  outZone: Zone;
+  blocker: Blocker;
+  opts = PACKING;
+  /** ⬆️ Upgrade: packs this many times faster. */
+  speedMult = 1;
+  /** Packing one right now (the ⚠️ status tag reads it). */
+  cooking = false;
+  private cookT = 0;
+  private bench = new THREE.Object3D(); // crates are opened here
+  private bagSpot = new THREE.Object3D(); // packed bags come off here
+  private bag: THREE.Mesh;              // the bag being filled (it grows as it's packed)
+  private lamp: THREE.MeshStandardMaterial;
+
+  constructor(private scene: THREE.Scene, x: number, z: number, private flyers: Flyers) {
+    this.group.position.set(x, 0, z);
+    scene.add(this.group);
+    const wood = mat(0x9b6a3c, 0.85);
+    // A long workbench under a green-and-white striped shade, with shelves of produce behind it
+    this.group.add(box(3.0, 1.0, 1.7, mat(PACKING.body, 0.8), 0, 0.5, -0.1));
+    this.group.add(box(3.1, 0.08, 1.8, mat(0xe9e4da, 0.5), 0, 1.04, -0.1));
+    this.group.add(box(3.0, 1.9, 0.3, wood, 0, 1.95, -0.85));
+    for (const y of [1.6, 2.3]) this.group.add(box(2.8, 0.08, 0.5, mat(PACKING.trim, 0.7), 0, y, -0.6));
+    const produce = [0xe63946, 0xf4a261, 0x4caf50, 0xffd166, 0x9b5de5, 0x4caf50, 0xe63946, 0xf4a261];
+    produce.forEach((color, i) => {
+      const ball = new THREE.Mesh(new THREE.SphereGeometry(0.16, 10, 8), mat(color, 0.7));
+      ball.position.set(-1.1 + (i % 4) * 0.73, i < 4 ? 1.8 : 2.5, -0.55);
+      this.group.add(ball);
+    });
+    for (let i = 0; i < 5; i++) this.group.add(box(0.62, 0.1, 1.5, mat(i % 2 ? PACKING.trim : PACKING.body, 0.7), -1.24 + i * 0.62, 3.1, 0.1));
+    for (const px of [-1.5, 1.5]) this.group.add(box(0.08, 3.1, 0.08, mat(0x5a5f66, 0.4, 0.5), px, 1.55, 0.8));
+    this.bench.position.set(-0.6, 1.5, 0);
+    this.bagSpot.position.set(0.6, 1.3, 0.2);
+    this.bag = box(0.36, 0.44, 0.26, mat(0xc9a36b, 0.95), 0.6, 1.3, 0.1);
+    this.bag.visible = false;
+    this.lamp = new THREE.MeshStandardMaterial({ color: 0x1d3320, emissive: PACKING.glow, emissiveIntensity: 0.25 });
+    const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.09, 10, 8), this.lamp);
+    lamp.position.set(-1.3, 1.25, 0.75);
+    this.group.add(this.bench, this.bagSpot, this.bag, lamp);
+
+    // IN / OUT tables, with their pads in front (like the coffee machine)
+    for (const k of [-1, 1]) this.group.add(box(1.5, 0.8, 1.5, wood, k * 2.3, 0.4, 0.6));
+    this.input = new Stack(this.group, gridLayout(3, 3, 0.46, 0.46, 0.8, -2.3, 0.6), CONFIG.bakery.inputMax);
+    this.output = new Stack(this.group, gridLayout(3, 3, 0.46, 0.46, 0.8, 2.3, 0.6), CONFIG.bakery.outputMax);
+    const inPad = makePad(2.2, 2.2, 'IN');
+    inPad.position.set(-2.3, 0.03, 2.6);
+    const outPad = makePad(2.2, 2.2, 'OUT');
+    outPad.position.set(2.3, 0.03, 2.6);
+    this.group.add(inPad, outPad);
+    this.inZone = new Zone(x - 2.3, z + 2.6, 1.15, 1.15);
+    this.outZone = new Zone(x + 2.3, z + 2.6, 1.15, 1.15);
+    this.blocker = { minX: x - 3.05, maxX: x + 3.05, minZ: z - 1.1, maxZ: z + 1.4 };
+    const sign = new TextSprite(0.8);
+    sign.setText(PACKING.label);
+    sign.sprite.position.set(0, 4.3, 0);
+    this.group.add(sign.sprite);
+  }
+
+  update(dt: number) {
+    // Start one: a crate of groceries lands on the bench
+    if (!this.cooking && this.input.canPop() && !this.output.full) {
+      const it = this.input.pop()!;
+      const benchAt = this.bench.getWorldPosition(new THREE.Vector3());
+      this.flyers.fly(it.mesh, () => benchAt, () => it.mesh.removeFromParent(), 0.3, 0.9);
+      this.cooking = true;
+      this.cookT = 0;
+    }
+    if (this.cooking) {
+      this.cookT += dt;
+      const k = Math.min(1, this.cookT / (this.opts.cookTime / this.speedMult));
+      this.bag.scale.setScalar(0.3 + 0.7 * k); // (the bag fills up)
+      if (k >= 1) {
+        this.cooking = false;
+        bump('made'); // 📊 lifetime: items made
+        const it: StackItem = { mesh: makeItem('shopbag'), type: 'shopbag', value: 0, flying: false };
+        this.bagSpot.getWorldPosition(it.mesh.position);
+        this.scene.add(it.mesh);
+        this.flyers.pushInto(it, this.output, 0.3);
+      }
+    }
+    this.bag.visible = this.cooking;
+    this.lamp.emissiveIntensity = this.cooking ? 0.9 + Math.sin(this.cookT * 10) * 0.5 : 0.25;
+  }
+}
+
+// ----------------------------------------------------------------------------
 // 📦 The delivery crate: fill it with goods you can make, it goes off on a truck
 // and comes back with 🪵 planks (the building material new plots need).
 // ----------------------------------------------------------------------------
@@ -487,7 +586,7 @@ export class HomeWorld {
 
   // Stations (field names matter: the ⬆️ panels look through them)
   piles: ResourcePile[] = [];
-  processors: (AntFarm | CoffeeMachine)[] = [];
+  processors: (AntFarm | CoffeeMachine | PackingTable)[] = [];
   desks: Desk[] = [];
   cashPads: CashPad[] = [];
   tiles: UnlockTile[] = [];
@@ -512,6 +611,13 @@ export class HomeWorld {
   cafePad: CashPad | null = null;
   cafeLoad = new Zone(24.4, -1.6, 0.6, 0.6); // (the Carrier's spot: past the counter's back corner, like the stand's)
   chest: Chest | null = null;
+  /** 🛒 The Corner Store (once its plot is yours, v0.30): grocery crates -> packing table -> the checkout, its own cash pad. */
+  groceries: ResourcePile | null = null;
+  packing: PackingTable | null = null;
+  store: Desk | null = null;
+  storePad: CashPad | null = null;
+  storeLoad = new Zone(45.4, -1.6, 0.6, 0.6); // (the Carrier's spot, as at the café)
+  storeChest: Chest | null = null;
 
   private home: HomeSave;
   private blockers: Blocker[] = [];
@@ -525,6 +631,10 @@ export class HomeWorld {
   private plotSign: TextSprite[] = [];  // what the café plot needs, over its gate
   private plotSignT = 0;
   private cafeOpen = false;
+  private gate2 = new THREE.Group();    // the closed gate from the café to the store plot
+  private lot2 = new THREE.Group();     // the store's empty lot
+  private plotSign2: TextSprite[] = []; // what the store plot needs, over its gate
+  private storeOpen = false;
   /** Just bought a tile here: the next one on this spot (the farm levels share one) waits until you step off. */
   private stepOff: Zone | null = null;
   /** 🗺️ For the minimap: the fences and trees, as they're built. */
@@ -537,6 +647,8 @@ export class HomeWorld {
   static readonly SPAWN = { x: -1, z: -0.5 };
   /** A save from before v0.29 (with progress) just got the orders at the stand (and maybe the coffee): homeMain says what's new. */
   readonly fromOld: boolean;
+  /** A save from before v0.30 (no Corner Store yet): the 📰 news card tells them about it, once. */
+  readonly preStore: boolean;
 
   constructor(private hud: Hud, private sfx: Sfx, public save: SaveData, private progress: Progress) {
     this.home = save.home ??= { made: 0, orders: 0, crate: { trips: 0, got: {}, away: 0 }, planks: 0, chest: false, cafeSales: 0, standSales: 0, v: HOME_SAVE_V };
@@ -552,6 +664,7 @@ export class HomeWorld {
       }
     }
     this.fromOld = (this.home.v ?? 1) < 4 && this.home.made > 0;
+    this.preStore = (this.home.v ?? 1) < 5 && this.home.made > 0;
     if ((this.home.v ?? 1) < 3) {
       // v0.27 save: no snack stand yet, and the café sold snack packs. Mid-tutorial, the
       // steps moved (the stand's came in after "take the snack packs"): anyone past that
@@ -614,6 +727,8 @@ export class HomeWorld {
     for (const def of HOME_UNLOCKS) this.tiles.push(new UnlockTile(this.scene, def, save.paid[def.id] ?? 0));
     const plot = this.tiles.find((t) => t.def.id === 'ai-cafe');
     if (plot) plot.need = () => this.plotNeed();
+    const plot2 = this.tiles.find((t) => t.def.id === 'ai-store');
+    if (plot2) plot2.need = () => this.storeNeed();
     // (in the tiles' order, whatever order the save lists them in: a café helper needs its café)
     const order = (id: string) => HOME_UNLOCKS.findIndex((d) => d.id === id);
     for (const id of [...save.unlocked].sort((a, b) => order(a) - order(b))) this.applyUnlock(id, false);
@@ -729,8 +844,33 @@ export class HomeWorld {
     // The café plot next door: an empty lot for now
     const P = HOME.cafePlot;
     this.fence(P.minX, P.minZ, P.maxX, P.minZ);
-    this.fence(P.maxX, P.minZ, P.maxX, P.maxZ);
+    // (its east fence has a gate too: to the store plot, closed until that one is yours)
+    this.fence(P.maxX, P.minZ, P.maxX, HOME.gate.z0);
+    this.fence(P.maxX, HOME.gate.z1, P.maxX, P.maxZ);
+    this.gate2.position.set(P.maxX, 0, HOME.gate.z0);
+    for (const y of [0.5, 1.1]) this.gate2.add(box(0.1, 0.12, len, gateMat, 0, y, len / 2));
+    for (let zz = 0.2; zz < len; zz += 0.45) this.gate2.add(box(0.12, 1.3, 0.16, gateMat, 0, 0.65, zz));
+    s.add(this.gate2);
     this.fence(P.minX, P.maxZ, 28.5, P.maxZ);
+    // 🛒 The store plot after it: another empty lot
+    const S = HOME.storePlot;
+    this.fence(S.minX, S.minZ, S.maxX, S.minZ);
+    this.fence(S.maxX, S.minZ, S.maxX, S.maxZ);
+    this.fence(S.minX, S.maxZ, 49.5, S.maxZ);
+    this.lot2.add(flat(S.maxX - S.minX, S.maxZ - S.minZ, 0xb39368, (S.minX + S.maxX) / 2, (S.minZ + S.maxZ) / 2, 0.006));
+    const sale2 = new TextSprite(0.8, '#ffd166');
+    sale2.setText('🏷️ LOT FOR SALE');
+    sale2.sprite.position.set(47, 3.2, 0);
+    this.lot2.add(sale2.sprite);
+    this.lot2.add(box(0.15, 2.4, 0.15, mat(0x6b4426), 47, 1.2, 0));
+    s.add(this.lot2);
+    for (let i = 0; i < 3; i++) {
+      const t = new TextSprite(i === 0 ? 0.78 : 0.6, i === 0 ? '#ffd166' : '#ffffff');
+      t.sprite.position.set(34.2, 5.0 - i * 0.78, -1.7); // (over its tile)
+      t.sprite.visible = false;
+      s.add(t.sprite);
+      this.plotSign2.push(t);
+    }
     this.lot.add(flat(P.maxX - P.minX, P.maxZ - P.minZ, 0xb39368, (P.minX + P.maxX) / 2, (P.minZ + P.maxZ) / 2, 0.006));
     const sale = new TextSprite(0.8, '#ffd166');
     sale.setText('🏷️ LOT FOR SALE');
@@ -792,7 +932,12 @@ export class HomeWorld {
     if (!this.cafeOpen) return false;
     const P = HOME.cafePlot;
     if (x > P.minX + 0.6 && x < P.maxX - 0.6 && z > P.minZ + 0.6 && z < P.maxZ - 0.6) return true;
-    return x >= Y.maxX - 0.6 && x <= P.minX + 0.6 && z > HOME.gate.z0 + 0.4 && z < HOME.gate.z1 - 0.4; // through the gate
+    const inGate = z > HOME.gate.z0 + 0.4 && z < HOME.gate.z1 - 0.4;
+    if (x >= Y.maxX - 0.6 && x <= P.minX + 0.6 && inGate) return true; // through the gate
+    if (!this.storeOpen) return false;
+    const S = HOME.storePlot;
+    if (x > S.minX + 0.6 && x < S.maxX - 0.6 && z > S.minZ + 0.6 && z < S.maxZ - 0.6) return true;
+    return x >= P.maxX - 0.6 && x <= S.minX + 0.6 && inGate; // through the café's east gate
   };
 
   // --------------------------------------------------------------------------
@@ -814,6 +959,12 @@ export class HomeWorld {
   }
 
   /** What the café plot still needs besides level and cash ('' = nothing). */
+  private storeNeed() {
+    if (this.workers.length < HOME.storeGate.ants) return `NEEDS ${HOME.storeGate.ants} ANTS WORKING`;
+    if (this.home.planks < HOME.storeGate.planks) return `NEEDS ${HOME.storeGate.planks} PLANKS`;
+    return '';
+  }
+
   private plotNeed() {
     if (this.workers.length < HOME.plot.ants) return `NEEDS ${HOME.plot.ants} ANTS WORKING`;
     if (this.home.planks < HOME.plot.planks) return `NEEDS ${HOME.plot.planks} PLANKS`;
@@ -873,6 +1024,30 @@ export class HomeWorld {
         break;
       case 'ai-banker':
         if (this.cafePad) this.hireBanker(this.cafePad, animate);
+        break;
+      case 'ai-store':
+        this.openStore(animate);
+        break;
+      case 'ai-store-gatherer': {
+        // 🐜 The store's Gatherer: the grocery crates -> the packing table's IN tray
+        const crates = this.groceries;
+        const table = this.packing;
+        if (crates && table) this.antWorker('🐜 GATHERER', 42, -5.2, () => ({ src: crates.stack, srcZone: crates.zone, dst: table.input, dstZone: table.inZone }), { color: 0xffc928 }, animate);
+        break;
+      }
+      case 'ai-store-carrier': {
+        // 🐜 The store's Carrier: the packing table's OUT tray -> the checkout's shelf
+        const table = this.packing;
+        const shelf = this.store?.shelf;
+        if (table && shelf) this.antWorker('🐜 CARRIER', 52.5, -3, () => ({ src: table.output, srcZone: table.outZone, dst: shelf, dstZone: this.storeLoad }), { color: 0xe63946, flat: true }, animate);
+        break;
+      }
+      case 'ai-store-cashier':
+        // 🛒 A person at the checkout: sells the groceries for you
+        this.store?.hireStaff(person('h-crew2'), animate, '🛒 CASHIER');
+        break;
+      case 'ai-store-banker':
+        if (this.storePad) this.hireBanker(this.storePad, animate);
         break;
     }
   }
@@ -968,12 +1143,87 @@ export class HomeWorld {
     }
   }
 
+  /** 🛒 The Corner Store plot (v0.30): the café's east gate opens, the store goes up, another chest is hidden. */
+  private openStore(animate: boolean) {
+    if (this.storeOpen) return;
+    this.storeOpen = true;
+    this.gate2.visible = false;
+    this.lot2.visible = false;
+    for (const t of this.plotSign2) t.sprite.visible = false;
+    const S = HOME.storePlot;
+    // A tiled floor (pale green and cream, like a little market)
+    const c = document.createElement('canvas');
+    c.width = c.height = 256;
+    const g = c.getContext('2d')!;
+    for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) {
+      g.fillStyle = (i + j) % 2 ? '#dfe9d2' : '#f1ecdd';
+      g.fillRect(i * 64, j * 64, 64, 64);
+    }
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(3, 3);
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(S.maxX - S.minX, S.maxZ - S.minZ), new THREE.MeshStandardMaterial({ map: tex, roughness: 0.9 }));
+    floor.rotation.x = -Math.PI / 2;
+    floor.position.set((S.minX + S.maxX) / 2, 0.007, (S.minZ + S.maxZ) / 2);
+    floor.receiveShadow = true;
+    this.scene.add(floor);
+    // 🥬 The groceries: delivery crates -> the packing table (north side of the plot)...
+    this.groceries = new ResourcePile(this.scene, 39.6, -7.6, this.flyers, 'grocery', 'pantry');
+    this.piles.push(this.groceries);
+    this.packing = new PackingTable(this.scene, 48.5, -8, this.flyers);
+    this.processors.push(this.packing);
+    this.blockers.push(this.packing.blocker);
+    // ...and the checkout: a counter that sells the bags, with its own cash pad
+    const pad = new CashPad(this.scene, 39.6, -2.6);
+    this.storePad = pad;
+    this.cashPads.push(pad);
+    const store = new Desk(this.scene, 44, 1.5, this.flyers, pad, null, {
+      mode: 'cafe', sells: 'shopbag', machine: false, awning: 0x2f9e5b, label: '🛒 CORNER STORE', color: 0xbfd8a8, kinds: STORE_KINDS,
+      interval: HOME.store.interval, queueMax: HOME.store.queueMax, serve: HOME.store.serve,
+      entry: [new THREE.Vector3(54, 0, 15), new THREE.Vector3(54, 0, 5)],
+      exit: (from) => [new THREE.Vector3(from.x, 0, 5), new THREE.Vector3(54, 0, 15)],
+      staff2: () => person('h-exec'),
+    });
+    store.onServe = (byPlayer) => {
+      this.progress.addXp(byPlayer ? CONFIG.xp.sale : CONFIG.xp.autoSale);
+      this.home.storeSales = (this.home.storeSales ?? 0) + 1;
+    };
+    store.valueMult = () => this.progress.cashMult;
+    this.store = store;
+    this.desks.push(store);
+    this.blockers.push(store.blocker);
+    // Crates of fruit by the fence, and a row of shopping carts
+    const extras: THREE.Object3D[] = [];
+    for (const [fx, fz, color] of [[54, -8.6, 0xe63946], [55.2, -6.8, 0xf4a261], [38.6, 9.2, 0x4caf50]] as [number, number, number][]) {
+      const stall = new THREE.Group();
+      stall.position.set(fx, 0, fz);
+      stall.add(box(1.3, 0.7, 1.0, mat(0xb5803f, 0.85), 0, 0.35, 0));
+      for (let i = 0; i < 6; i++) {
+        const fruit = new THREE.Mesh(new THREE.SphereGeometry(0.19, 10, 8), mat(color, 0.7));
+        fruit.position.set(-0.38 + (i % 3) * 0.38, 0.82, -0.18 + Math.floor(i / 3) * 0.36);
+        stall.add(fruit);
+      }
+      this.scene.add(stall);
+      extras.push(stall);
+      this.blockers.push({ minX: fx - 0.75, maxX: fx + 0.75, minZ: fz - 0.6, maxZ: fz + 0.6 });
+    }
+    // 🎁 The store plot's own chest
+    if (!this.home.storeChest) this.storeChest = new Chest(this.scene, 49, 8.5);
+    if (animate) {
+      for (const o of [floor, store.group, pad.group, this.groceries.group, this.packing.group, ...extras]) this.flyers.grow(o);
+      if (this.storeChest) this.flyers.grow(this.storeChest.group);
+      this.hud.banner('🛒 The Corner Store is yours!', '🥬 Grocery crates → 🛍️ the packing table → the checkout. And another chest is hidden here…', 4500);
+    }
+  }
+
   private unlock(tile: UnlockTile) {
     const id = tile.def.id;
     this.save.unlocked.push(id);
     delete this.save.paid[id];
     tile.mesh.visible = false;
     if (id === 'ai-cafe') this.home.planks -= HOME.plot.planks; // (the planks get used)
+    if (id === 'ai-store') this.home.planks -= HOME.storeGate.planks;
     this.applyUnlock(id, true);
     this.progress.addXp(CONFIG.xp.tile.home);
     this.sfx.unlocked();
@@ -1114,6 +1364,8 @@ export class HomeWorld {
     this.farm.update(dt);
     this.beans?.update(dt);
     this.machine?.update(dt);
+    this.groceries?.update(dt);
+    this.packing?.update(dt);
     for (const w of this.workers) w.update(dt, this.flyers);
     for (const b of this.bankers) b.update(dt, this.flyers);
     // (the stand opens once the farm has made its first snack pack: then people start coming by)
@@ -1121,6 +1373,9 @@ export class HomeWorld {
     this.cafe?.update(dt, !!this.cafe && this.cafe.staffZone.contains(p), this.sfx);
     this.chest?.update(dt);
     if (this.chest?.gone) this.chest = null;
+    this.storeChest?.update(dt);
+    if (this.storeChest?.gone) this.storeChest = null;
+    this.store?.update(dt, !!this.store && this.store.staffZone.contains(p), this.sfx);
     this.updateCrate(dt);
 
     const iv = CONFIG.player.pickupInterval / prog.workMult;
@@ -1175,6 +1430,16 @@ export class HomeWorld {
     }
     const cafe = this.cafe;
     if (cafe?.shelf) drop(cafe.staffZone, cafe.staffZone, cafe.shelf, 'coffee', -1);
+    // 5b) 🛒 The store: grocery crates onto the packing table, the bags onto the checkout's shelf
+    const crates = this.groceries;
+    const table = this.packing;
+    if (crates && table) {
+      take(crates.zone, crates.zone, crates.stack, 'grocery', -1);
+      drop(table.inZone, table.inZone, table.input, 'grocery', -1);
+      take(table.outZone, table.outZone, table.output, 'shopbag', -1);
+    }
+    const store = this.store;
+    if (store?.shelf) drop(store.staffZone, store.staffZone, store.shelf, 'shopbag', -1);
     // 6) Cash pads -> wallet
     for (const pad of this.cashPads) {
       this.every(pad.zone, dt, pad.zone.contains(p), 0.035, () => {
@@ -1200,6 +1465,17 @@ export class HomeWorld {
       prog.addXp(c.xp);
       this.sfx.contract();
       this.hud.floatAt(chest.group.position.clone().setY(2.4), this.camera, `🎁 A chest! +$${cash} · +${c.xp} XP`, 'big gold');
+    }
+    const chest2 = this.storeChest;
+    if (chest2 && !this.home.storeChest && chest2.zone.contains(p)) {
+      this.home.storeChest = true;
+      chest2.open();
+      const c = HOME.storeChest;
+      const cash = Math.round(c.cash * prog.cashMult);
+      this.addCash(cash);
+      prog.addXp(c.xp);
+      this.sfx.contract();
+      this.hud.floatAt(chest2.group.position.clone().setY(2.4), this.camera, `🎁 A chest! +$${cash} · +${c.xp} XP`, 'big gold');
     }
     // 8) Trash bin (each piece pays a little: world/trash.ts)
     const onBin = this.bin.zone.contains(p) && me.stack.count > 0;
@@ -1235,7 +1511,7 @@ export class HomeWorld {
 
     this.hud.setInventory(me.stack.counts(), me.stack.count, me.carryMax);
     // Where you are (+ your planks, once you have some)
-    const place = p.x > HOME.yard.maxX ? '☕ Corner Café' : '🏡 Your Backyard';
+    const place = p.x > HOME.cafePlot.maxX + 0.5 ? '🛒 Corner Store' : p.x > HOME.yard.maxX ? '☕ Corner Café' : '🏡 Your Backyard';
     const name = this.home.planks > 0 ? `${place} · 🪵 ${this.home.planks}` : place;
     if (name !== this.zoneName) {
       this.zoneName = name;
@@ -1248,15 +1524,29 @@ export class HomeWorld {
 
   /** Over the gate: what the café plot needs, ticked off as you get there. */
   private updatePlotSign(dt: number) {
-    if (this.cafeOpen) return;
+    if (this.cafeOpen && this.storeOpen) return;
     this.plotSignT -= dt;
     if (this.plotSignT > 0) return;
     this.plotSignT = 0.5;
+    const ok = (b: boolean) => (b ? '✅' : '⬜');
+    if (this.cafeOpen) {
+      // 🛒 The store plot's sign, over its tile by the café's east gate
+      const show2 = this.owns('ai-cafe-gatherer');
+      for (const t of this.plotSign2) t.sprite.visible = show2;
+      if (!show2) return;
+      const def2 = HOME_UNLOCKS.find((d) => d.id === 'ai-store')!;
+      const G = HOME.storeGate;
+      const ants2 = Math.min(this.workers.length, G.ants);
+      const planks2 = Math.min(this.home.planks, G.planks);
+      this.plotSign2[0].setText('🛒 CORNER STORE PLOT');
+      this.plotSign2[1].setText(`${ok(this.save.level >= (def2.level ?? 0))} Lv ${def2.level} · ${ok(ants2 >= G.ants)} 🐜 ${ants2}/${G.ants} ants`);
+      this.plotSign2[2].setText(`${ok(planks2 >= G.planks)} 🪵 ${planks2}/${G.planks} planks · 💵 $${def2.cost}`);
+      return;
+    }
     const show = this.owns('ai-farm2');
     for (const t of this.plotSign) t.sprite.visible = show;
     if (!show) return;
     const def = HOME_UNLOCKS.find((d) => d.id === 'ai-cafe')!;
-    const ok = (b: boolean) => (b ? '✅' : '⬜');
     const ants = Math.min(this.workers.length, HOME.plot.ants);
     const planks = Math.min(this.home.planks, HOME.plot.planks);
     this.plotSign[0].setText('☕ CORNER CAFÉ PLOT');
@@ -1268,7 +1558,7 @@ export class HomeWorld {
   // 🗺️ The minimap
   // --------------------------------------------------------------------------
   /** The whole map (the big view fits it): your house to the street, the yard and the café plot. */
-  static readonly MAP_BOUNDS: MapRect = { minX: -17, maxX: 38, minZ: -22, maxZ: 18 };
+  static readonly MAP_BOUNDS: MapRect = { minX: -17, maxX: 59, minZ: -22, maxZ: 18 };
 
   /** What the minimap draws right now. */
   mapView(): MapView {
@@ -1281,11 +1571,16 @@ export class HomeWorld {
       this.cafeOpen
         ? { rect: P, fill: '#d8cbb3', label: 'Corner Café' }
         : { rect: P, fill: '#b39368', edge: 'rgba(255, 220, 140, 0.9)', dashed: true, label: 'Lot for sale' },
+      this.storeOpen
+        ? { rect: HOME.storePlot, fill: '#dfe9d2', label: 'Corner Store' }
+        : { rect: HOME.storePlot, fill: '#b39368', edge: 'rgba(255, 220, 140, 0.9)', dashed: true, label: 'Lot for sale' },
       { rect: { minX: -15, maxX: 5, minZ: -21, maxZ: -13 }, fill: '#f1e3c8', edge: '#8d5b4c', label: 'Your house' },
       { rect: { minX: -12, maxX: 2, minZ: -13.1, maxZ: -10.9 }, fill: '#a0703f' }, // deck
     ];
     // (the gate to the café plot is a fence until the plot is yours)
-    const fences = this.cafeOpen ? this.fenceSegs : [...this.fenceSegs, { x0: Y.maxX, z0: HOME.gate.z0, x1: Y.maxX, z1: HOME.gate.z1 }];
+    const fences = [...this.fenceSegs];
+    if (!this.cafeOpen) fences.push({ x0: Y.maxX, z0: HOME.gate.z0, x1: Y.maxX, z1: HOME.gate.z1 });
+    if (!this.storeOpen) fences.push({ x0: P.maxX, z0: HOME.gate.z0, x1: P.maxX, z1: HOME.gate.z1 });
     // (a red ! on a counter whose buyers are waiting at an empty shelf; at the snack stand,
     // also on a neighbor waiting with no cashier there: someone has to serve them)
     const starved = (d: Desk) => d.waiting >= 2 && (d.shelf?.count ?? 0) === 0;
@@ -1308,6 +1603,16 @@ export class HomeWorld {
       if (!this.home.chest) markers.push({ x: 28, z: 8.5, icon: '🎁', label: 'Chest' });
     } else {
       markers.push({ x: 26, z: 0, icon: '🏷️', label: 'For sale' });
+    }
+    const shop = this.store;
+    if (shop) {
+      markers.push({ x: shop.group.position.x, z: shop.group.position.z, icon: '🛒', label: 'Store', alert: starved(shop) });
+      if (this.storePad) markers.push({ x: this.storePad.zone.x, z: this.storePad.zone.z, icon: '💵', label: 'Cash' });
+      if (this.groceries) markers.push({ x: this.groceries.zone.x, z: this.groceries.zone.z, icon: '🥬', label: 'Groceries' });
+      if (this.packing) markers.push({ x: this.packing.group.position.x, z: this.packing.group.position.z, icon: '🛍️', label: 'Packing table' });
+      if (!this.home.storeChest) markers.push({ x: 49, z: 8.5, icon: '🎁', label: 'Chest' });
+    } else {
+      markers.push({ x: 47, z: 0, icon: '🏷️', label: 'For sale' });
     }
     const p = this.player.pos;
     const target = this.tutorial.target;
@@ -1405,6 +1710,8 @@ function homeTutorial(w: HomeWorld): TutorialScript {
             and a <b>banker ant</b> (Lv 11). Then it runs by itself too.</li>
           <li>👥 A 2nd cashier: tap a counter's ⬆️ (the LINE upgrade).</li>
           <li>📦 The crate keeps bringing 🪵 planks: they're for the next plots.</li>
+          <li>🛒 Next door: the <b>Corner Store</b> plot (Lv 12, 4 ants working, 6 planks). The sign by the café's east gate
+            ticks off what it needs.</li>
           <li>💤 While you're away, your ants keep earning (the +$/min under your cash).</li>
         </ul>
         <p>Thanks for testing! 🐜</p>`,

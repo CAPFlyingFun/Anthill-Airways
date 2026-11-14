@@ -198,9 +198,25 @@ export async function startHome({ app, renderer, save, hud, sfx, input, progress
         <li>💤 Your ants <b>earn while you're away</b>.</li>
       </ul>`, [{ label: '👍 Got it', cls: 'big-btn' }]);
   };
+  // 🛒 ...and for a save from before v0.30: the new plot
+  const storeNews = () => {
+    if (!home.preStore || save.paid['news-ai30']) return;
+    save.paid['news-ai30'] = 1;
+    writeSave(save);
+    hud.showGuide('🛒 New: the Corner Store', `
+      <p>The island grows! Past the café there's a new plot: the <b>Corner Store</b>.</p>
+      <ul>
+        <li>🏷️ It needs <b>Lv 12</b>, <b>4 ants working</b>, <b>6 🪵 planks</b> and <b>$2,500</b>. The sign by the café's east gate
+          ticks them off (its tile shows up once the café has its Gatherer).</li>
+        <li>🥬 Grocery crates → 🛍️ the <b>packing table</b> → the checkout: <b>$50 a bag</b>.</li>
+        <li>🐜 The same four helpers work there: a gatherer, a carrier, a cashier and a banker ant.</li>
+        <li>🎁 And the new plot hides another chest.</li>
+      </ul>`, [{ label: '👍 Got it', cls: 'big-btn' }]);
+  };
   window.setTimeout(async () => {
     await offerOffline(away);
     news();
+    storeNews();
   }, 900);
 
   // 9) 📊 Lifetime stats (Level panel → Lifetime stats)
