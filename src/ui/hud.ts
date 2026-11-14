@@ -436,8 +436,12 @@ export class Hud {
     el.textContent = `+$${short(perMin)}/min`;
   }
 
-  /** The "welcome back" card. Resolves 'run' (multiply it) or 'collect'. */
-  showWelcome(awaySecs: number, countedSecs: number, share: number, amount: number): Promise<'run' | 'collect'> {
+  /**
+   * The "welcome back" card. Resolves 'run' (multiply it) or 'collect'.
+   * 🏝️ Anthill Island has no gate runs: `opts.run = false` leaves the bonus-run button
+   * out, and `opts.who` says who kept working ("Your ants").
+   */
+  showWelcome(awaySecs: number, countedSecs: number, share: number, amount: number, opts: { run?: boolean; who?: string } = {}): Promise<'run' | 'collect'> {
     const t = (secs: number) => {
       const h = Math.floor(secs / 3600);
       const m = Math.floor((secs % 3600) / 60);
@@ -447,6 +451,10 @@ export class Hud {
     const capped = countedSecs < awaySecs - 59;
     $('wbAway').textContent = `You were away ${t(awaySecs)}${capped ? ` · ${t(countedSecs)} counted` : ''} at ${Math.round(share * 100)}%`;
     $('wbAmount').textContent = `$${Math.round(amount).toLocaleString()}`;
+    $('wbSub').textContent = `${opts.who ?? 'Your colony & airport'} kept working:`;
+    const runs = opts.run !== false;
+    $('wbRun').classList.toggle('hidden', !runs);
+    $('wbFine').classList.toggle('hidden', !runs);
     const overlay = $('welcome');
     overlay.classList.remove('hidden');
     return new Promise((resolve) => {
@@ -550,7 +558,7 @@ export class Hud {
   private invOpen = false;
   private invTimer = 0;
   private invBound = false;
-  private static ICONS: Record<string, string> = { crumb: '🍞', snack: '🍪', leaf: '🍃', wrap: '🌯', sugar: '🧊', candy: '🍬', cash: '💵', bag: '🧳', snackbox: '🍱', fruit: '🍈', smoothie: '🥤', meat: '🍖', egg: '🥚', ticket: '🎟️', obsidian: '🪨', gem: '💎', magma: '🔥', crystal: '🔶', laundry: '🧺', towel: '🧻', grocery: '🥬', tray: '🍽️' };
+  private static ICONS: Record<string, string> = { crumb: '🍞', snack: '🍪', leaf: '🍃', wrap: '🌯', sugar: '🧊', candy: '🍬', cash: '💵', bag: '🧳', snackbox: '🍱', fruit: '🍈', smoothie: '🥤', meat: '🍖', egg: '🥚', ticket: '🎟️', obsidian: '🪨', gem: '💎', magma: '🔥', crystal: '🔶', laundry: '🧺', towel: '🧻', grocery: '🥬', tray: '🍽️', beans: '🫘', coffee: '☕' };
 
   /** What you're carrying: the 🎒 badge ("5/8", red when full) + the slots behind it. */
   setInventory(counts: Map<string, number>, used: number, max: number) {

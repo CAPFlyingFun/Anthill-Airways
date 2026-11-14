@@ -3,18 +3,20 @@
 //
 // The new one-island game from the design doc. You're a person (Jack's model)
 // with an ant farm in the backyard; the ants become your workforce as the farm
-// grows. This first test covers only the opening (see data/home.ts):
+// grows. This test covers the opening (see data/home.ts). Every station is a
+// little business of its own: raw supply -> converter -> counter -> cash pad.
 //
-//   🍞 BREAD BOX -> 🐜 ANT FARM (crumbs in, snack packs out) -> 🙋 ORDERS from
-//   the neighbors (cash + lots of XP)
-//   Farm Lv 2: a GATHERER ant fills a crumb basket by the farm
-//   Farm Lv 3: a CARRIER ant feeds the farm (and later stocks the café) +
-//              the 📦 DELIVERY CRATE shows up: fill it, it brings back 🪵 planks
+//   🍞 BREAD BOX -> 🐜 ANT FARM (crumbs in, snack packs out) -> 🍪 SNACK STAND
+//   by the street (people buy them) -> its 💵 cash pad. On the side: 🙋 ORDERS
+//   from the neighbors (cash + lots of XP) and the 📦 DELIVERY CRATE (🪵 planks).
+//   Farm Lv 2: a GATHERER ant (bread box -> farm). Farm Lv 3: a CARRIER ant
+//              (farm -> the stand's shelf) + the crate shows up.
+//   At the stand (you hire helpers where they work): a CASHIER (a person), then
+//              a BANKER ant by its cash pad: the backyard runs by itself.
 //   The CORNER CAFÉ PLOT: player level + ants working + planks + cash, on one
-//              tile by the east gate. The café buys your snack packs, and the
-//              new plot hides a 🎁 chest.
-//   At the café (you hire helpers where they work): a CASHIER (a person),
-//              then a BANKER ant by the cash pad (idle income)
+//              tile by the east gate. Coffee: 🫘 BEAN SACKS -> ☕ COFFEE MACHINE
+//              -> the café counter, with its own gatherer, carrier, cashier and
+//              banker. The new plot hides a 🎁 chest.
 //
 // Everything is "stand on a pad" like the classic game, and the building panels
 // (⬆️) work here too (world key 'home').
@@ -39,7 +41,7 @@ import { Flyers, ItemType, Stack, StackItem, makeItem } from './items';
 import { TextSprite, makePad, titleTag } from './labels';
 import { Blocker, CashPad, ProcessorOpts, ResourcePile, TrashBin, UnlockTile, Zone, gridLayout } from './stations';
 import { Desk, person, stepTo } from './airportWorld';
-import { Tutorial, TutorialScript } from './tutorial';
+import { TUTORIAL_DONE, Tutorial, TutorialScript } from './tutorial';
 import type { MapArea, MapMarker, MapRect, MapSeg, MapView } from '../ui/minimap';
 
 const mat = (color: number, roughness = 0.7, metalness = 0) => new THREE.MeshStandardMaterial({ color, roughness, metalness });
@@ -53,8 +55,13 @@ function box(w: number, h: number, d: number, material: THREE.Material, x = 0, y
 
 /** Title tags over the helper ants (smaller than the people's). */
 const ANT_TITLE = 0.6;
-/** The backyard's save format (HomeSave.v). 2: the café's staff are hired at the café. */
-const HOME_SAVE_V = 2;
+/**
+ * The backyard's save format (HomeSave.v). 2: the café's staff are hired at the café.
+ * 3: the snack stand + the café's coffee (new tutorial steps, see homeTutorial).
+ */
+const HOME_SAVE_V = 3;
+/** 🎓 The tutorial steps that an action finishes (their places in homeTutorial's list). */
+const STEP = { crumbs: 0, feed: 1, packs: 2, cash: 4, beans: 13, coffee: 14 } as const;
 /** Who shows up with orders / at the café (the people models). */
 const NEIGHBOR_KINDS: HumanKind[] = ['h-ember', 'h-exec', 'h-balance', 'h-crew2', 'h-crew1', 'h-crew3', 'h-crew4', 'h-director'];
 const CAFE_KINDS: HumanKind[] = ['h-exec', 'h-balance', 'h-ember', 'h-crew1', 'h-crew2', 'h-crew4'];
@@ -271,28 +278,122 @@ class AntFarm {
 }
 
 // ----------------------------------------------------------------------------
-// The crumb basket by the farm (Farm Lv 2): the Gatherer fills it, the Carrier
-// (or you) takes crumbs from it to the farm. A low wicker tray you stand on.
+// ☕ THE COFFEE MACHINE (the Corner Café's converter): sacks of beans go in on
+// the left (IN), cups of coffee come out on the right (OUT). Same shape as the
+// ant farm (inZone / outZone / speedMult / cooking), so the ⬆️ panel and the ⚠️
+// status tag work with it too.
 // ----------------------------------------------------------------------------
-class Basket {
+const COFFEE: ProcessorOpts = { inType: 'beans', outType: 'coffee', label: '☕ COFFEE MACHINE', cookTime: HOME.coffee.cookTime, body: 0x3a3f45, trim: 0xc9ccd1, glow: 0xffb347 };
+
+class CoffeeMachine {
   group = new THREE.Group();
-  stack: Stack;
-  zone: Zone;
-  constructor(scene: THREE.Scene, x: number, z: number) {
+  input: Stack;
+  output: Stack;
+  inZone: Zone;
+  outZone: Zone;
+  blocker: Blocker;
+  opts = COFFEE;
+  /** ⬆️ Upgrade: brews this many times faster. */
+  speedMult = 1;
+  /** Brewing one right now (the ⚠️ status tag reads it). */
+  cooking = false;
+  private cookT = 0;
+  private hopper = new THREE.Object3D(); // beans drop in here (the glass hopper on top)
+  private spout = new THREE.Object3D();  // cups come out here
+  private lamp: THREE.MeshStandardMaterial;
+  private puffs: { mesh: THREE.Mesh; mat: THREE.MeshStandardMaterial }[] = [];
+
+  constructor(private scene: THREE.Scene, x: number, z: number, private flyers: Flyers) {
     this.group.position.set(x, 0, z);
     scene.add(this.group);
-    const wicker = new THREE.Mesh(new THREE.CylinderGeometry(1.15, 1.0, 0.35, 24, 1, true), new THREE.MeshStandardMaterial({ color: 0xc8975a, roughness: 0.9, side: THREE.DoubleSide }));
-    wicker.position.y = 0.18;
-    wicker.castShadow = true;
-    const bottom = new THREE.Mesh(new THREE.CylinderGeometry(1.0, 1.0, 0.04, 24), mat(0xa87a45, 0.9));
-    bottom.position.y = 0.02;
-    this.group.add(wicker, bottom);
-    this.stack = new Stack(this.group, gridLayout(3, 3, 0.44, 0.44, 0.05), 27);
-    this.zone = new Zone(x, z, 1.2, 1.2);
-    const sign = new TextSprite(0.5, '#ffd166');
-    sign.setText('🧺 CRUMB BASKET');
-    sign.sprite.position.set(0, 1.3, -1.4);
+    const steel = mat(0x3a3f45, 0.35, 0.6);
+    const chrome = mat(0xc9ccd1, 0.25, 0.8);
+    const wood = mat(0x9b6a3c, 0.85);
+    // A counter, and the big espresso machine on it
+    this.group.add(box(3.0, 1.0, 1.7, mat(0x6b4426, 0.85), 0, 0.5, -0.1));
+    this.group.add(box(3.1, 0.08, 1.8, mat(0xe9e4da, 0.5), 0, 1.04, -0.1));
+    this.group.add(box(2.4, 1.5, 1.1, steel, 0, 1.83, -0.3));
+    this.group.add(box(2.5, 0.14, 1.2, chrome, 0, 2.65, -0.3));
+    // The bean hopper on top: a glass cone with beans in it
+    const glass = new THREE.MeshStandardMaterial({ color: 0xbfe8ff, transparent: true, opacity: 0.45, roughness: 0.1, side: THREE.DoubleSide, depthWrite: false });
+    const cone = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.18, 0.75, 16, 1, true), glass);
+    cone.position.set(-0.6, 3.1, -0.3);
+    const inside = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.18, 0.4, 14), mat(0x4a2c1a, 0.6));
+    inside.position.set(-0.6, 2.93, -0.3);
+    this.group.add(cone, inside);
+    this.hopper.position.set(-0.6, 3.5, -0.3);
+    // Two group heads over a drip tray, a pressure gauge and a "brewing" lamp
+    for (const gx of [-0.45, 0.45]) {
+      const head = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.17, 0.22, 14), chrome);
+      head.position.set(gx, 1.55, 0.32);
+      head.castShadow = true;
+      this.group.add(head);
+    }
+    this.group.add(box(1.7, 0.06, 0.45, chrome, 0, 1.1, 0.5));
+    const gauge = new THREE.Mesh(new THREE.CircleGeometry(0.2, 18), mat(0xffffff, 0.4));
+    gauge.position.set(0.75, 2.2, 0.255);
+    this.lamp = new THREE.MeshStandardMaterial({ color: 0x331a0f, emissive: COFFEE.glow, emissiveIntensity: 0.25 });
+    const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.09, 10, 8), this.lamp);
+    lamp.position.set(-0.75, 2.2, 0.27);
+    this.spout.position.set(0, 1.35, 0.55);
+    this.group.add(gauge, lamp, this.hopper, this.spout);
+    // Steam over the machine while it brews
+    for (let i = 0; i < 3; i++) {
+      const m = new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0, roughness: 1, depthWrite: false });
+      const puff = new THREE.Mesh(new THREE.SphereGeometry(0.2, 10, 8), m);
+      puff.visible = false;
+      this.group.add(puff);
+      this.puffs.push({ mesh: puff, mat: m });
+    }
+
+    // IN / OUT tables, with their pads in front (like the colony's oven)
+    for (const s of [-1, 1]) this.group.add(box(1.5, 0.8, 1.5, wood, s * 2.3, 0.4, 0.6));
+    this.input = new Stack(this.group, gridLayout(3, 3, 0.46, 0.46, 0.8, -2.3, 0.6), CONFIG.bakery.inputMax);
+    this.output = new Stack(this.group, gridLayout(3, 3, 0.46, 0.46, 0.8, 2.3, 0.6), CONFIG.bakery.outputMax);
+    const inPad = makePad(2.2, 2.2, 'IN');
+    inPad.position.set(-2.3, 0.03, 2.6);
+    const outPad = makePad(2.2, 2.2, 'OUT');
+    outPad.position.set(2.3, 0.03, 2.6);
+    this.group.add(inPad, outPad);
+    this.inZone = new Zone(x - 2.3, z + 2.6, 1.15, 1.15);
+    this.outZone = new Zone(x + 2.3, z + 2.6, 1.15, 1.15);
+    this.blocker = { minX: x - 3.05, maxX: x + 3.05, minZ: z - 1.1, maxZ: z + 1.4 };
+    const sign = new TextSprite(0.8);
+    sign.setText(COFFEE.label);
+    sign.sprite.position.set(0, 4.3, 0);
     this.group.add(sign.sprite);
+  }
+
+  update(dt: number) {
+    // Start one: a sack of beans drops into the hopper
+    if (!this.cooking && this.input.canPop() && !this.output.full) {
+      const it = this.input.pop()!;
+      const hopperAt = this.hopper.getWorldPosition(new THREE.Vector3());
+      this.flyers.fly(it.mesh, () => hopperAt, () => it.mesh.removeFromParent(), 0.3, 0.9);
+      this.cooking = true;
+      this.cookT = 0;
+    }
+    if (this.cooking) {
+      this.cookT += dt;
+      if (this.cookT >= this.opts.cookTime / this.speedMult) {
+        this.cooking = false;
+        bump('made'); // 📊 lifetime: items made
+        const it: StackItem = { mesh: makeItem('coffee'), type: 'coffee', value: 0, flying: false };
+        this.spout.getWorldPosition(it.mesh.position);
+        this.scene.add(it.mesh);
+        this.flyers.pushInto(it, this.output, 0.3);
+      }
+    }
+    this.lamp.emissiveIntensity = this.cooking ? 0.9 + Math.sin(this.cookT * 10) * 0.5 : 0.25;
+    // Steam: three puffs rising from the top, one after another
+    this.puffs.forEach(({ mesh, mat: m }, i) => {
+      mesh.visible = this.cooking;
+      if (!this.cooking) return;
+      const k = (this.cookT * 0.9 + i / 3) % 1;
+      mesh.position.set(0.55 + Math.sin(k * 6 + i * 2) * 0.12, 2.85 + k * 1.3, -0.3);
+      mesh.scale.setScalar(0.6 + k * 1.1);
+      m.opacity = 0.55 * (1 - k);
+    });
   }
 }
 
@@ -414,7 +515,7 @@ export class HomeWorld {
 
   // Stations (field names matter: the ⬆️ panels look through them)
   piles: ResourcePile[] = [];
-  processors: AntFarm[] = [];
+  processors: (AntFarm | CoffeeMachine)[] = [];
   desks: Desk[] = [];
   cashPads: CashPad[] = [];
   tiles: UnlockTile[] = [];
@@ -424,10 +525,21 @@ export class HomeWorld {
 
   farm: AntFarm;
   bread: ResourcePile;
-  basket: Basket | null = null;
+  /**
+   * 🍪 The snack stand by the street, its cash pad, and where the Carrier stocks it from:
+   * past the back corner of the counter (not behind it: the awning would hide the ant).
+   */
+  stand: Desk;
+  standPad: CashPad;
+  standLoad = new Zone(-8.6, 3.4, 0.6, 0.6);
   orderSpot: OrderSpot;
   crate: Crate | null = null;
+  /** ☕ The Corner Café (once its plot is yours): bean sacks -> coffee machine -> the counter, its own cash pad. */
+  beans: ResourcePile | null = null;
+  machine: CoffeeMachine | null = null;
   cafe: Desk | null = null;
+  cafePad: CashPad | null = null;
+  cafeLoad = new Zone(24.4, -1.6, 0.6, 0.6); // (the Carrier's spot: past the counter's back corner, like the stand's)
   chest: Chest | null = null;
 
   private home: HomeSave;
@@ -451,8 +563,13 @@ export class HomeWorld {
   private treeSpots: { x: number; z: number; r: number }[] = [];
   private nextOrderT: number = HOME.order.wait;
 
+  /** Where you start (between the farm's IN and OUT, south of it). */
+  static readonly SPAWN = { x: -1, z: -0.5 };
+  /** A save from before v0.28 (with progress) just got the snack stand and the coffee: homeMain says what's new. */
+  readonly fromOld: boolean;
+
   constructor(private hud: Hud, private sfx: Sfx, public save: SaveData, private progress: Progress) {
-    this.home = save.home ??= { made: 0, orders: 0, order: null, crate: { trips: 0, got: {}, away: 0 }, planks: 0, chest: false, cafeSales: 0, v: HOME_SAVE_V };
+    this.home = save.home ??= { made: 0, orders: 0, order: null, crate: { trips: 0, got: {}, away: 0 }, planks: 0, chest: false, cafeSales: 0, standSales: 0, v: HOME_SAVE_V };
     if ((this.home.v ?? 1) < 2) {
       // v0.27 save: the café's cashier and banker were farm levels (same prices): rename them
       // (and never twice: a save holding both names would hire two of each)
@@ -464,12 +581,21 @@ export class HomeWorld {
         delete save.paid[from];
       }
     }
+    this.fromOld = (this.home.v ?? 1) < 3 && this.home.made > 0;
+    if ((this.home.v ?? 1) < 3) {
+      // v0.27 save: no snack stand yet, and the café sold snack packs. Mid-tutorial, the
+      // steps moved (the stand's came in after "take the snack packs"): anyone past that
+      // goes back to the stand's first step, and the steps they've done skip themselves.
+      this.home.standSales ??= 0;
+      if (save.tutorial >= 3 && save.tutorial < TUTORIAL_DONE) save.tutorial = 3;
+    }
     this.home.v = HOME_SAVE_V;
     this.buildEnvironment();
 
-    // You: Jack's model, by the ant farm
+    // You: Jack's model, in front of the ant farm (on open grass: never on a tile, or
+    // loading the game would start paying into it)
     const me = person('h-jack');
-    me.root.position.set(0, 0, 1.5);
+    me.root.position.set(HomeWorld.SPAWN.x, 0, HomeWorld.SPAWN.z);
     me.root.rotation.y = Math.PI;
     this.player = new Player(this.scene, { model: me, spot: handsSpot(me) });
 
@@ -484,12 +610,34 @@ export class HomeWorld {
     };
     this.orderSpot = new OrderSpot(this.scene, 8.8, -3.2);
     this.blockers.push(this.orderSpot.blocker);
-    this.bin = new TrashBin(this.scene, 1.5, 9);
+    this.bin = new TrashBin(this.scene, -11.6, 2.6);
+
+    // 🍪 The snack stand by the street: people from the sidewalk buy your snack packs.
+    // They come in through the gap in the south fence and line up east of the counter
+    // (in along z 9.6, out along z 10.4, so the two don't walk through each other).
+    this.standPad = new CashPad(this.scene, -2, 2.6);
+    this.cashPads.push(this.standPad);
+    this.stand = new Desk(this.scene, -6, 6.6, this.flyers, this.standPad, null, {
+      mode: 'cafe', sells: 'snack', machine: false, awning: 0xe76f51, label: '🍪 SNACK STAND', color: 0xc8975a, kinds: CAFE_KINDS,
+      interval: HOME.stand.interval, queueMax: HOME.stand.queueMax, serve: HOME.stand.serve,
+      entry: [new THREE.Vector3(13.8, 0, 16), new THREE.Vector3(13.8, 0, 9.6), new THREE.Vector3(5, 0, 9.6)],
+      exit: (from) => [new THREE.Vector3(from.x, 0, 10.4), new THREE.Vector3(13.8, 0, 10.4), new THREE.Vector3(13.8, 0, 16)],
+      staff2: () => person('h-crew1'), // (the ⬆️ panel's 2nd cashier)
+    });
+    this.stand.onServe = (byPlayer) => {
+      this.progress.addXp(byPlayer ? CONFIG.xp.sale : CONFIG.xp.autoSale);
+      this.home.standSales++;
+    };
+    this.stand.valueMult = () => this.progress.cashMult;
+    this.desks.push(this.stand);
+    this.blockers.push(this.stand.blocker);
 
     for (const def of HOME_UNLOCKS) this.tiles.push(new UnlockTile(this.scene, def, save.paid[def.id] ?? 0));
     const plot = this.tiles.find((t) => t.def.id === 'ai-cafe');
     if (plot) plot.need = () => this.plotNeed();
-    for (const id of save.unlocked) this.applyUnlock(id, false);
+    // (in the tiles' order, whatever order the save lists them in: a café helper needs its café)
+    const order = (id: string) => HOME_UNLOCKS.findIndex((d) => d.id === id);
+    for (const id of [...save.unlocked].sort((a, b) => order(a) - order(b))) this.applyUnlock(id, false);
     this.refreshTiles(false);
 
     // An order that was open when you left: the neighbor is still waiting
@@ -569,9 +717,9 @@ export class HomeWorld {
     for (const wx of [-12, -7.5, 2]) s.add(box(2.2, 1.8, 0.1, mat(0x4f6d8a, 0.2, 0.3), wx, 3.6, -12.96));
     s.add(box(1.6, 3.0, 0.1, mat(0x7a4b2a, 0.7), -3, 1.5, -12.96)); // back door
     s.add(box(14, 0.3, 2.2, mat(0xa0703f, 0.85), -5, 0.15, -12)); // deck
-    // A big shade tree and some bushes
+    // A big shade tree, a smaller one behind the picnic table, and some bushes
     this.tree(12, -8.5, 1.0);
-    this.tree(-13, 8.5, 0.8);
+    this.tree(-12.5, -9.2, 0.8);
     for (const [bx, bz] of [[-14, -6], [-14, 2], [5, -10.3], [14, -10.2], [-6, 10.3]]) {
       const bush = new THREE.Mesh(new THREE.SphereGeometry(0.9, 12, 8), mat(0x3f8f3a, 0.9));
       bush.scale.set(1.3, 0.8, 1);
@@ -695,36 +843,16 @@ export class HomeWorld {
   private applyUnlock(id: string, animate: boolean) {
     const grow = (o: THREE.Object3D) => animate && this.flyers.grow(o);
     switch (id) {
-      case 'ai-farm2': {
-        // 🧺 The crumb basket, and the Gatherer who fills it from the bread box
-        this.basket = new Basket(this.scene, -7.5, 1.6);
-        grow(this.basket.group);
-        const basket = this.basket;
-        this.antWorker('🐜 GATHERER', -9, 0, () => ({ src: this.bread.stack, srcZone: this.bread.zone, dst: basket.stack, dstZone: basket.zone }), { color: 0xffc928 }, animate);
+      case 'ai-farm2':
+        // 🐜 The Gatherer: the bread box -> the farm's IN tray, all day
+        this.antWorker('🐜 GATHERER', -8, -1, () => ({ src: this.bread.stack, srcZone: this.bread.zone, dst: this.farm.input, dstZone: this.farm.inZone }), { color: 0xffc928 }, animate);
         this.farm.setLevel(2);
         break;
-      }
       case 'ai-farm3': {
-        // The Carrier: basket -> farm, and (once the café is open) farm -> café, turn about.
-        // (The café run only when there are packs to take and room on its shelf for a load,
-        // and if a pick-up spot stays empty it switches jobs: it never stalls the farm.)
-        // Each trip it picks a job that can be finished (packs to take and room on the café's
-        // shelf / crumbs in the basket and room in the farm), taking turns when both can.
-        // Nothing to do: it waits by the basket and looks again a few seconds later.
-        let flip = false;
-        const idle = new Stack(new THREE.Group(), gridLayout(1, 1, 0, 0, 0), 1); // (always empty)
-        const carrier: Worker = this.antWorker('🐜 CARRIER', -5, -1, () => {
-          flip = !flip;
-          const load = carrier.stack.max;
-          const basket = this.basket!;
-          const cafe = this.cafe;
-          const toCafe = !!cafe?.shelf && this.farm.output.count > 0 && cafe.shelf.count + load <= cafe.shelf.max;
-          const toFarm = basket.stack.count > 0 && this.farm.input.count + load <= this.farm.input.max;
-          if (cafe?.shelf && toCafe && (!flip || !toFarm)) return { src: this.farm.output, srcZone: this.farm.outZone, dst: cafe.shelf, dstZone: cafe.staffZone };
-          if (toFarm) return { src: basket.stack, srcZone: basket.zone, dst: this.farm.input, dstZone: this.farm.inZone };
-          return { src: idle, srcZone: basket.zone, dst: this.farm.input, dstZone: this.farm.inZone };
-        }, { color: 0xe63946, flat: true }, animate);
-        carrier.patience = 5;
+        // 🐜 The Carrier: the farm's OUT tray -> the snack stand's shelf (it stocks it from
+        // the back corner of the counter, so it never walks through the stand or its line)
+        const shelf = this.stand.shelf!;
+        this.antWorker('🐜 CARRIER', 1, -1, () => ({ src: this.farm.output, srcZone: this.farm.outZone, dst: shelf, dstZone: this.standLoad }), { color: 0xe63946, flat: true }, animate);
         this.farm.setLevel(3);
         // ...and the delivery crate turns up by the south fence
         this.crate = new Crate(this.scene, 9, 7);
@@ -735,31 +863,53 @@ export class HomeWorld {
         }
         break;
       }
+      case 'ai-stand-cashier':
+        // 🍪 A person behind the stand's counter: sells your snack packs for you
+        this.stand.hireStaff(person('h-ember'), animate, '🍪 CASHIER');
+        break;
+      case 'ai-stand-banker':
+        this.hireBanker(this.standPad, animate);
+        break;
       case 'ai-cafe':
         this.openCafe(animate);
         break;
-      case 'ai-cashier':
-        // ☕ A person behind the café's counter: sells to the customers for you
-        this.cafe?.hireStaff(person('h-crew3'), animate, '☕ CASHIER');
-        break;
-      case 'ai-banker': {
-        // 🏦 A banker ant by the café's cash pad: sweeps the bills into your wallet (idle income)
-        const pad = this.cashPads[0];
-        if (!pad) break;
-        const b = new Banker(this.scene, pad, (amount) => {
-          const v = amount * (this.ups?.bonus ?? 1); // (+ 💼 collectors upgrade)
-          this.addCash(v);
-          autoCash(v); // automated income: the +$/min rate
-        }, HOME.antLength);
-        titleTag(b.model, '🏦 BANKER', ANT_TITLE);
-        this.bankers.push(b);
-        grow(b.model.root);
+      case 'ai-cafe-gatherer': {
+        // 🐜 The café's Gatherer: the bean sacks -> the coffee machine's IN tray
+        const beans = this.beans;
+        const machine = this.machine;
+        if (beans && machine) this.antWorker('🐜 GATHERER', 21, -5.2, () => ({ src: beans.stack, srcZone: beans.zone, dst: machine.input, dstZone: machine.inZone }), { color: 0xffc928 }, animate);
         break;
       }
+      case 'ai-cafe-carrier': {
+        // 🐜 The café's Carrier: the coffee machine's OUT tray -> the café's shelf (from its back corner)
+        const machine = this.machine;
+        const shelf = this.cafe?.shelf;
+        if (machine && shelf) this.antWorker('🐜 CARRIER', 31.5, -3, () => ({ src: machine.output, srcZone: machine.outZone, dst: shelf, dstZone: this.cafeLoad }), { color: 0xe63946, flat: true }, animate);
+        break;
+      }
+      case 'ai-cashier':
+        // ☕ A person behind the café's counter: sells the coffee for you
+        this.cafe?.hireStaff(person('h-crew3'), animate, '☕ CASHIER');
+        break;
+      case 'ai-banker':
+        if (this.cafePad) this.hireBanker(this.cafePad, animate);
+        break;
     }
   }
 
-  /** ☕ The Corner Café plot: the gate opens, the café goes up, a chest is hidden on it. */
+  /** 🏦 A banker ant by a cash pad: sweeps the bills into your wallet (idle income). */
+  private hireBanker(pad: CashPad, animate: boolean) {
+    const b = new Banker(this.scene, pad, (amount) => {
+      const v = amount * (this.ups?.bonus ?? 1); // (+ 💼 collectors upgrade)
+      this.addCash(v);
+      autoCash(v); // automated income: the +$/min rate
+    }, HOME.antLength);
+    titleTag(b.model, '🏦 BANKER', ANT_TITLE);
+    this.bankers.push(b);
+    if (animate) this.flyers.grow(b.model.root);
+  }
+
+  /** ☕ The Corner Café plot: the gate opens, the café and its coffee go up, a chest is hidden on it. */
   private openCafe(animate: boolean) {
     if (this.cafeOpen) return;
     this.cafeOpen = true;
@@ -788,12 +938,19 @@ export class HomeWorld {
     patio.position.set((P.minX + P.maxX) / 2, 0.007, (P.minZ + P.maxZ) / 2);
     patio.receiveShadow = true;
     this.scene.add(patio);
-    // The café (a desk that sells your snack packs) + its cash pad
-    // (the desk sits level with the gate, so the Carrier ant walks through it, not the fence)
-    const pad = new CashPad(this.scene, 21, -4);
+    // ☕ The coffee: bean sacks -> the coffee machine (north side of the plot)...
+    this.beans = new ResourcePile(this.scene, 18.6, -7.6, this.flyers, 'beans', 'beans');
+    this.piles.push(this.beans);
+    this.machine = new CoffeeMachine(this.scene, 27.5, -8, this.flyers);
+    this.processors.push(this.machine);
+    this.blockers.push(this.machine.blocker);
+    // ...and the café: a counter that sells it, with its own cash pad
+    // (the counter sits level with the gate; its line runs east to the gap in the fence)
+    const pad = new CashPad(this.scene, 18.6, -2.6);
+    this.cafePad = pad;
     this.cashPads.push(pad);
     const cafe = new Desk(this.scene, 23, 1.5, this.flyers, pad, null, {
-      mode: 'cafe', sells: 'snack', awning: 0x2d6cdf, label: '☕ CORNER CAFÉ', color: 0xd9a066, kinds: CAFE_KINDS,
+      mode: 'cafe', sells: 'coffee', awning: 0x2d6cdf, label: '☕ CORNER CAFÉ', color: 0xd9a066, kinds: CAFE_KINDS,
       interval: HOME.cafe.interval, queueMax: HOME.cafe.queueMax, serve: HOME.cafe.serve,
       entry: [new THREE.Vector3(33, 0, 15), new THREE.Vector3(33, 0, 5)],
       exit: (from) => [new THREE.Vector3(from.x, 0, 5), new THREE.Vector3(33, 0, 15)],
@@ -802,14 +959,15 @@ export class HomeWorld {
     cafe.onServe = (byPlayer) => {
       this.progress.addXp(byPlayer ? CONFIG.xp.sale : CONFIG.xp.autoSale);
       this.home.cafeSales++;
+      this.tutorial.did(STEP.coffee);
     };
-    cafe.valueMult = () => this.progress.cashMult * HOME.cafe.priceMult;
+    cafe.valueMult = () => this.progress.cashMult;
     this.cafe = cafe;
     this.desks.push(cafe);
     this.blockers.push(cafe.blocker);
     // Patio tables with umbrellas
     const tables: THREE.Object3D[] = [];
-    for (const [tx, tz, color] of [[28, -6, 0xe63946], [33, -8, 0x2a9d8f], [19.5, 8, 0xf4a261]] as [number, number, number][]) {
+    for (const [tx, tz, color] of [[33, -8, 0x2a9d8f], [17.4, 9.4, 0xf4a261]] as [number, number, number][]) {
       const t = new THREE.Group();
       t.position.set(tx, 0, tz);
       t.add(box(1.4, 0.1, 1.4, mat(0xf4f1de, 0.5), 0, 1.0, 0), box(0.1, 1.0, 0.1, mat(0x5a5f66, 0.4, 0.5), 0, 0.5, 0), box(0.07, 2.6, 0.07, mat(0x5a5f66, 0.4, 0.5), 0, 1.3, 0));
@@ -824,8 +982,8 @@ export class HomeWorld {
     // 🎁 The chest
     this.chest = new Chest(this.scene, 28, 8.5, this.home.chest);
     if (animate) {
-      for (const o of [patio, cafe.group, pad.group, this.chest.group, ...tables]) this.flyers.grow(o);
-      this.hud.banner('☕ The Corner Café is yours!', 'It buys your snack packs. Something is hidden on the new plot…', 4500);
+      for (const o of [patio, cafe.group, pad.group, this.beans.group, this.machine.group, this.chest.group, ...tables]) this.flyers.grow(o);
+      this.hud.banner('☕ The Corner Café is yours!', '🫘 Beans → ☕ the coffee machine → the counter. And something is hidden on the new plot…', 4500);
     }
   }
 
@@ -1044,8 +1202,12 @@ export class HomeWorld {
 
     this.bread.update(dt);
     this.farm.update(dt);
+    this.beans?.update(dt);
+    this.machine?.update(dt);
     for (const w of this.workers) w.update(dt, this.flyers);
     for (const b of this.bankers) b.update(dt, this.flyers);
+    // (the stand opens once the farm has made its first snack pack: then people start coming by)
+    if (this.home.made > 0 || this.stand.waiting > 0) this.stand.update(dt, this.stand.staffZone.contains(p), this.sfx);
     this.cafe?.update(dt, !!this.cafe && this.cafe.staffZone.contains(p), this.sfx);
     this.chest?.update(dt);
     this.updateOrders(dt);
@@ -1071,12 +1233,13 @@ export class HomeWorld {
         }
       });
 
-    // 1) Crumbs: from the bread box (and the basket), into the farm
-    take(this.bread.zone, this.bread.zone, this.bread.stack, 'crumb', 0);
-    if (this.basket) take(this.basket.zone, this.basket.zone, this.basket.stack, 'crumb', 0);
-    drop(this.farm.inZone, this.farm.inZone, this.farm.input, 'crumb', 1);
-    // 2) Snack packs off the farm's OUT tray
-    take(this.farm.outZone, this.farm.outZone, this.farm.output, 'snack', 2);
+    // 1) Crumbs: from the bread box into the farm
+    take(this.bread.zone, this.bread.zone, this.bread.stack, 'crumb', STEP.crumbs);
+    drop(this.farm.inZone, this.farm.inZone, this.farm.input, 'crumb', STEP.feed);
+    // 2) Snack packs off the farm's OUT tray...
+    take(this.farm.outZone, this.farm.outZone, this.farm.output, 'snack', STEP.packs);
+    // ...onto the snack stand's shelf (and you sell while you stand there)
+    drop(this.stand.staffZone, this.stand.staffZone, this.stand.shelf!, 'snack', -1);
     // 3) Orders: hand the packs over
     const order = this.home.order;
     if (order && this.neighbor?.state === 'wait') {
@@ -1102,14 +1265,23 @@ export class HomeWorld {
         prog.addXp(xp.drop);
       });
     }
-    // 5) The café: stock its shelf (and serve while you're there)
+    // 5) ☕ The café: beans into the coffee machine, the coffee onto the counter's shelf
+    // (and you sell while you stand there)
+    const beans = this.beans;
+    const machine = this.machine;
+    if (beans && machine) {
+      take(beans.zone, beans.zone, beans.stack, 'beans', -1);
+      drop(machine.inZone, machine.inZone, machine.input, 'beans', STEP.beans);
+      take(machine.outZone, machine.outZone, machine.output, 'coffee', -1);
+    }
     const cafe = this.cafe;
-    if (cafe?.shelf) drop(cafe.staffZone, cafe.staffZone, cafe.shelf, 'snack', -1);
+    if (cafe?.shelf) drop(cafe.staffZone, cafe.staffZone, cafe.shelf, 'coffee', -1);
     // 6) Cash pads -> wallet
     for (const pad of this.cashPads) {
       this.every(pad.zone, dt, pad.zone.contains(p), 0.035, () => {
         const bill = pad.stack.pop();
         if (!bill) return;
+        this.tutorial.did(STEP.cash);
         const target = new THREE.Vector3();
         this.flyers.fly(bill.mesh, () => target.copy(p).setY(1.7), () => {
           bill.mesh.removeFromParent();
@@ -1216,16 +1388,24 @@ export class HomeWorld {
     // (the gate to the café plot is a fence until the plot is yours)
     const fences = this.cafeOpen ? this.fenceSegs : [...this.fenceSegs, { x0: Y.maxX, z0: HOME.gate.z0, x1: Y.maxX, z1: HOME.gate.z1 }];
     const order = this.home.order;
+    // (a red ! on a counter whose buyers are waiting at an empty shelf)
+    const starved = (d: Desk) => d.waiting >= 2 && (d.shelf?.count ?? 0) === 0;
+    const stand = this.stand;
     const markers: MapMarker[] = [
       { x: -10, z: -2.5, icon: '🍞', label: 'Bread' },
       { x: -1, z: -6, icon: '🐜', label: 'Ant farm' },
+      { x: stand.group.position.x, z: stand.group.position.z, icon: '🍪', label: 'Snack stand', alert: starved(stand) },
+      { x: this.standPad.zone.x, z: this.standPad.zone.z, icon: '💵', label: 'Cash' },
       { x: 8.8, z: -3.2, icon: '🙋', label: 'Orders', alert: !!order && this.neighbor?.state === 'wait' && order.have < order.want },
-      { x: 1.5, z: 9, icon: '🗑️', label: 'Trash' },
+      { x: this.bin.zone.x, z: this.bin.zone.z, icon: '🗑️', label: 'Trash' },
     ];
-    if (this.basket) markers.push({ x: -7.5, z: 1.6, icon: '🧺' }); // (no name: it's right by the bread box)
     if (this.crate) markers.push(this.home.crate.away > 0 ? { x: 9, z: 7, icon: '🚚', label: 'Crate (away)' } : { x: 9, z: 7, icon: '📦', label: 'Crate' });
-    if (this.cafe) {
-      markers.push({ x: 23, z: 1.5, icon: '☕', label: 'Café' }, { x: 21, z: -4, icon: '💵', label: 'Cash' });
+    const cafe = this.cafe;
+    if (cafe) {
+      markers.push({ x: cafe.group.position.x, z: cafe.group.position.z, icon: '☕', label: 'Café', alert: starved(cafe) });
+      if (this.cafePad) markers.push({ x: this.cafePad.zone.x, z: this.cafePad.zone.z, icon: '💵', label: 'Cash' });
+      if (this.beans) markers.push({ x: this.beans.zone.x, z: this.beans.zone.z, icon: '🫘', label: 'Beans' });
+      if (this.machine) markers.push({ x: this.machine.group.position.x, z: this.machine.group.position.z, icon: '⚙️', label: 'Coffee machine' });
       if (!this.home.chest) markers.push({ x: 28, z: 8.5, icon: '🎁', label: 'Chest' });
     } else {
       markers.push({ x: 26, z: 0, icon: '🏷️', label: 'For sale' });
@@ -1308,30 +1488,48 @@ function homeTutorial(w: HomeWorld): TutorialScript {
     }
     return want ? got / want : null;
   };
+  const carrying = (t: ItemType) => w.player.stack.has(t);
   return {
     intro: {
       title: '🏝️ Welcome to Anthill Island!',
-      html: `<p>You've set up an <b>ant farm</b> in your backyard. Feed your ants, fill your neighbors' orders, and as the
-        farm grows, <b>the ants take over the chores</b>: gathering, carrying, selling.</p>
+      html: `<p>You've set up an <b>ant farm</b> in your backyard. Feed your ants, sell their snack packs at your
+        <b>snack stand</b>, fill your neighbors' orders, and as the farm grows, <b>the ants take over the chores</b>:
+        gathering, carrying, selling.</p>
         <p>🧪 This is a <b>test version</b>: just the backyard and the first café plot, so you can see how it feels.</p>
         <p>Want a quick walkthrough? A yellow arrow 🔽 shows you where to go.</p>`,
     },
     finish: {
       title: '🎉 That\'s the first test!',
-      html: `<p>Your ants feed the farm, the neighbors keep ordering, and the <b>Corner Café</b> buys your snack packs.</p>
+      html: `<p>Your backyard runs by itself, and the <b>Corner Café</b> sells coffee.</p>
         <ul>
-          <li>☕ Hire a <b>cashier</b> at the café (Lv 8), then a <b>banker ant</b> (Lv 9) to collect its cash, so it runs by itself.</li>
+          <li>☕ Hire the café's own helpers: a <b>gatherer</b> (Lv 8) and a <b>carrier</b> ant (Lv 9), a <b>cashier</b> (Lv 10)
+            and a <b>banker ant</b> (Lv 11). Then it runs by itself too.</li>
+          <li>👥 A 2nd cashier: tap a counter's ⬆️ (the LINE upgrade).</li>
           <li>📦 The crate keeps bringing 🪵 planks: they're for the next plots.</li>
-          <li>⬆️ Walk up to a building and tap ⬆️ (or tap it) to upgrade it.</li>
+          <li>💤 While you're away, your ants keep earning (the +$/min under your cash).</li>
         </ul>
         <p>Thanks for testing! 🐜</p>`,
       button: '👍 Got it',
     },
     defs: HOME_UNLOCKS,
+    // (an action finishes the steps listed in STEP: keep the two in the same order)
     steps: (t) => [
+      // 0-2: the farm
       { text: () => '👆 Drag anywhere to walk. Grab some crumbs from the bread box 🍞', target: () => t.at(w.bread.zone) },
       { text: () => '🐜 Drop the crumbs on your ANT FARM\'s IN tray: the ants turn them into snack packs', target: () => t.at(w.farm.inZone) },
       { text: () => '📦 Take the snack packs from the OUT tray', target: () => t.at(w.farm.outZone) },
+      // 3-4: the snack stand
+      {
+        text: () => '🍪 Sell them at your SNACK STAND: stand on SELL, and people from the street buy them',
+        target: () => (carrying('snack') || w.stand.shelf!.count > 0 ? t.at(w.stand.staffZone) : t.at(w.farm.outZone)),
+        done: () => home().standSales > 0,
+      },
+      {
+        text: () => '💵 Pick up your cash from the stand\'s cash pad',
+        target: () => t.at(w.standPad.zone),
+        done: () => t.owns('ai-stand-banker'), // (or picking up a bill: STEP.cash)
+      },
+      // 5-6: orders
       {
         text: () => {
           const o = home().order;
@@ -1342,13 +1540,17 @@ function homeTutorial(w: HomeWorld): TutorialScript {
         progress: orderProgress,
       },
       {
-        text: () => '📋 More neighbors, more orders: they pay cash and lots of XP',
+        text: () => '📋 More neighbors, more orders: they pay more than the stand, and lots of XP',
         target: () => (home().order ? t.at(w.orderSpot.zone) : null),
         done: () => home().orders >= 2,
         progress: orderProgress,
       },
-      t.unlockStep('ai-farm2', '🐜 Grow your ant farm! Lv 2 sends out a Gatherer ant'),
-      t.unlockStep('ai-farm3', '🐜 Farm Lv 3: a Carrier ant feeds the farm for you'),
+      // 7-10: the helpers, until the backyard runs by itself
+      t.unlockStep('ai-farm2', '🐜 Grow your ant farm! Lv 2: a Gatherer ant feeds it crumbs'),
+      t.unlockStep('ai-farm3', '🐜 Farm Lv 3: a Carrier ant takes the snack packs to your stand'),
+      t.unlockStep('ai-stand-cashier', '🍪 Hire a cashier for your snack stand: she sells while you\'re busy'),
+      t.unlockStep('ai-stand-banker', '🏦 A banker ant collects the stand\'s cash: now your backyard runs by itself!'),
+      // 11-12: planks, and the next plot
       {
         text: () => '📦 Fill the delivery crate with snack packs and crumbs: it brings back 🪵 planks',
         target: () => (w.crate ? t.at(w.crate.zone) : null),
@@ -1364,10 +1566,15 @@ function homeTutorial(w: HomeWorld): TutorialScript {
           return (met + (t.paidOf('ai-cafe') ?? 0)) / 4;
         },
       },
+      // 13-15: coffee, and the chest
       {
-        text: () => '☕ The café buys your snack packs: bring some to its SELL spot',
-        target: () => (w.cafe ? t.at(w.cafe.staffZone) : null),
-        done: () => home().cafeSales > 0,
+        text: () => (carrying('beans') ? '☕ Drop the beans on the COFFEE MACHINE\'s IN tray' : '🫘 The café sells coffee! Grab a few sacks of coffee beans'),
+        target: () => (!w.machine || !w.beans ? null : carrying('beans') ? t.at(w.machine.inZone) : t.at(w.beans.zone)),
+        done: () => t.owns('ai-cafe-gatherer'), // (or dropping beans in: STEP.beans. With a gatherer, its tray is often full)
+      },
+      {
+        text: () => (carrying('coffee') ? '☕ Bring the coffee to the café\'s SELL spot' : '☕ Take the coffee from the machine\'s OUT tray to the café'),
+        target: () => (!w.cafe || !w.machine ? null : carrying('coffee') || (w.cafe.shelf?.count ?? 0) > 0 ? t.at(w.cafe.staffZone) : t.at(w.machine.outZone)),
       },
       {
         text: () => '🎁 Every new plot hides a chest. Find it!',

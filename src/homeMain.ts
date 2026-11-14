@@ -20,7 +20,7 @@ import { tickClock } from './core/clock';
 import { income } from './core/income';
 import { bump } from './core/totals';
 import { pace } from './core/pace';
-import { GAME_SPEED } from './data/config';
+import { GAME_SPEED, OFFLINE } from './data/config';
 import { Updater, versionLabel } from './core/updater';
 import { HOME_HOWTO_HTML, HOME_HOWTO_TITLE } from './ui/howto';
 import { Minimap } from './ui/minimap';
@@ -34,9 +34,11 @@ export interface HomeContext {
   input: Input;
   progress: Progress;
   queenProgress: QueenProgress;
+  /** Seconds since this slot was last saved (= since you last played): 💤 offline earnings. */
+  away: number;
 }
 
-export async function startHome({ app, renderer, save, hud, sfx, input, progress, queenProgress }: HomeContext) {
+export async function startHome({ app, renderer, save, hud, sfx, input, progress, queenProgress, away }: HomeContext) {
   // 1) The models: the bugs (your helper ants), then the people (you, the neighbors)
   await loadModels((d, t) => hud.setLoading((d / t) * 0.5));
   await loadHumans((d, t) => hud.setLoading(0.5 + (d / t) * 0.5));
@@ -113,10 +115,18 @@ export async function startHome({ app, renderer, save, hud, sfx, input, progress
   window.addEventListener('orientationchange', () => setTimeout(resize, 250));
   resize();
 
-  // 7) Save every few seconds and whenever the app is hidden
+  // 7) Save every few seconds and whenever the app is hidden (coming back pays for the
+  // time away: see 8b)
   window.setInterval(() => writeSave(save), 5000);
+  let hiddenAt = 0;
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden) writeSave(save);
+    if (document.hidden) {
+      writeSave(save);
+      hiddenAt = Date.now();
+    } else if (hiddenAt) {
+      void offerOffline((Date.now() - hiddenAt) / 1000);
+      hiddenAt = 0;
+    }
   });
 
   // 8) The +$/min idle rate: only cash the helpers collect (the Banker ant), smoothed
@@ -143,6 +153,55 @@ export async function startHome({ app, renderer, save, hud, sfx, input, progress
     }
   };
 
+  // 8b) 💤 Offline earnings: your helpers keep working while you're away. You get a share
+  // of the measured +$/min rate (only cash the banker ants collect) for the time away:
+  // the same rules as the classic game (core/progress.ts offlineHours / offlineShare),
+  // just no bonus gate run (this game has none).
+  let welcomeOpen = false;
+  let pendingAway = 0; // (away again while the card was up: offered right after it)
+  const offerOffline = async (secs: number): Promise<void> => {
+    if (welcomeOpen) {
+      pendingAway += secs;
+      return;
+    }
+    if (secs < OFFLINE.minAwaySecs) return;
+    const counted = Math.min(secs, progress.offlineHours * 3600);
+    const share = progress.offlineShare;
+    const amount = Math.floor(save.rate * counted * share);
+    if (amount < 1) return; // (no banker ant yet: nothing earns while you're away)
+    welcomeOpen = true;
+    await hud.showWelcome(secs, counted, share, amount, { run: false, who: 'Your ants' });
+    welcomeOpen = false;
+    sfx.welcome();
+    home.addCash(amount);
+    prevCash = save.cash; // (not counted as idle income or as "earned while playing")
+    writeSave(save);
+    if (pendingAway) {
+      const more = pendingAway;
+      pendingAway = 0;
+      await offerOffline(more);
+    }
+  };
+  // 📰 Then, once, for a save from before v0.28: what's new (its tutorial may be long done)
+  const news = () => {
+    if (!home.fromOld || save.paid['news-ai28']) return;
+    save.paid['news-ai28'] = 1;
+    writeSave(save);
+    hud.showGuide('🆕 New on Anthill Island', `
+      <p>Every station is now a little business of its own, and each one gets the same <b>four helpers</b>:
+        a 🐜 <b>gatherer</b>, a 🐜 <b>carrier</b>, a 🧑 <b>cashier</b> and a 🏦 <b>banker ant</b>.</p>
+      <ul>
+        <li>🍪 Your backyard has a <b>snack stand</b> by the street. Your Carrier ant stocks it now.</li>
+        <li>☕ The café makes <b>coffee</b>: 🫘 beans → the coffee machine → the counter. Your café cashier and banker are still there.</li>
+        <li>✨ Their new helpers are on the glowing tiles by each station (the 🗺️ map shows them as gold squares).</li>
+        <li>💤 Your ants now <b>earn while you're away</b>.</li>
+      </ul>`, [{ label: '👍 Got it', cls: 'big-btn' }]);
+  };
+  window.setTimeout(async () => {
+    await offerOffline(away);
+    news();
+  }, 900);
+
   // 9) 📊 Lifetime stats (Level panel → Lifetime stats)
   hud.initTotals(() => {
     const n = (k: string) => save.totals[k] ?? 0;
@@ -155,6 +214,7 @@ export async function startHome({ app, renderer, save, hud, sfx, input, progress
       { icon: '⏱️', label: 'Time played', value: `${Math.floor(secs / 3600)}h ${Math.floor((secs % 3600) / 60)}m` },
       { icon: '⭐', label: 'Your level', value: String(save.level) },
       { icon: '🍪', label: 'Snack packs made', value: h.made.toLocaleString() },
+      { icon: '🛒', label: 'Snack stand sales', value: (h.standSales ?? 0).toLocaleString() },
       { icon: '🙋', label: 'Orders filled', value: h.orders.toLocaleString() },
       { icon: '☕', label: 'Café sales', value: h.cafeSales.toLocaleString() },
       { icon: '📦', label: 'Crate trips', value: h.crate.trips.toLocaleString() },
@@ -180,7 +240,7 @@ export async function startHome({ app, renderer, save, hud, sfx, input, progress
 
   // 11) Auto-update: a newer build reloads into it (after saving)
   const updater = new Updater({
-    canReload: () => true,
+    canReload: () => !welcomeOpen, // (never with the welcome-back card up: it would lose the payout)
     beforeReload: () => writeSave(save),
     onStatus: (t) => hud.setUpdateStatus(t),
     confirm: (version) => hud.showUpdate(version, 10),

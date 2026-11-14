@@ -76,7 +76,8 @@ function box(w: number, h: number, d: number, material: THREE.Material, x = 0, y
 // ----------------------------------------------------------------------------
 export type PileStyle = 'bread' | 'plant' | 'vending' | 'crate' | 'fruit' | 'supply' | 'nest'
   | 'rock' | 'vent' | 'vault'  // Act 4: obsidian outcrop, lava vent, Fire Crystal vault
-  | 'chute' | 'pantry';        // Act 5: the laundry chute, the grocery delivery
+  | 'chute' | 'pantry'         // Act 5: the laundry chute, the grocery delivery
+  | 'beans';                   // 🏝️ Anthill Island: sacks of coffee beans (the Corner Café)
 
 export class ResourcePile {
   group = new THREE.Group();
@@ -200,6 +201,31 @@ export class ResourcePile {
       const stamp = new TextSprite(0.42, '#ffe7b0');
       stamp.setText('🥬 FRESH DELIVERY');
       stamp.sprite.position.set(0, 2.1, 0.2);
+      source.add(stamp.sprite);
+    } else if (style === 'beans') {
+      // 🏝️ Anthill Island: big burlap sacks of coffee beans, one open with beans spilling out
+      const burlap = mat(0xb08a5a, 1);
+      for (const [px, pz, k] of [[-0.75, 0.1, 1], [0.75, 0.15, 0.92], [0, -0.45, 1.08]]) {
+        const sack = new THREE.Mesh(new THREE.SphereGeometry(0.72, 14, 10), burlap);
+        sack.scale.set(k, 1.2 * k, 0.9 * k);
+        sack.position.set(px, 0.8 * k, pz);
+        sack.castShadow = true;
+        source.add(sack);
+        const tie = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.24, 0.26, 10), mat(0x7a5530, 0.9));
+        tie.position.set(px, 1.72 * k, pz);
+        source.add(tie);
+      }
+      const beanMat = mat(0x4a2c1a, 0.55);
+      for (let i = 0; i < 14; i++) {
+        const bean = new THREE.Mesh(new THREE.SphereGeometry(0.11, 8, 6), beanMat);
+        bean.scale.set(1, 0.6, 1.3);
+        bean.position.set(-0.4 + Math.random() * 1.0, 0.08, 0.75 + Math.random() * 0.5);
+        bean.rotation.y = Math.random() * 3;
+        source.add(bean);
+      }
+      const stamp = new TextSprite(0.42, '#ffe7b0');
+      stamp.setText('☕ COFFEE BEANS');
+      stamp.sprite.position.set(0, 2.55, 0.2);
       source.add(stamp.sprite);
     } else if (style === 'crate') {
       // Act 2: the colony's shipping crate (stenciled, with a little ant flag)

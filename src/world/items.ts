@@ -17,10 +17,12 @@ export type ItemType = 'crumb' | 'snack' | 'leaf' | 'wrap' | 'sugar' | 'candy' |
   // Act 4 (Volcano)
   | 'obsidian' | 'gem' | 'magma' | 'crystal'
   // Act 5 (Hotel)
-  | 'laundry' | 'towel' | 'grocery' | 'tray';
+  | 'laundry' | 'towel' | 'grocery' | 'tray'
+  // 🏝️ Anthill Island: the Corner Café's coffee
+  | 'beans' | 'coffee';
 
 /** Height of one item when stacked. */
-export const ITEM_H: Record<ItemType, number> = { crumb: 0.3, snack: 0.32, leaf: 0.14, wrap: 0.32, sugar: 0.4, candy: 0.3, cash: 0.11, bag: 0.48, snackbox: 0.36, fruit: 0.4, smoothie: 0.5, meat: 0.32, egg: 0.42, ticket: 0.1, obsidian: 0.36, gem: 0.4, magma: 0.4, crystal: 0.52, laundry: 0.4, towel: 0.2, grocery: 0.42, tray: 0.36 };
+export const ITEM_H: Record<ItemType, number> = { crumb: 0.3, snack: 0.32, leaf: 0.14, wrap: 0.32, sugar: 0.4, candy: 0.3, cash: 0.11, bag: 0.48, snackbox: 0.36, fruit: 0.4, smoothie: 0.5, meat: 0.32, egg: 0.42, ticket: 0.1, obsidian: 0.36, gem: 0.4, magma: 0.4, crystal: 0.52, laundry: 0.4, towel: 0.2, grocery: 0.42, tray: 0.36, beans: 0.38, coffee: 0.4 };
 
 // Shared geometry + materials: every crumb reuses the same ones (fast).
 const geo = {
@@ -54,6 +56,11 @@ const geo = {
   laundry: new THREE.IcosahedronGeometry(0.26, 1).scale(1.2, 0.8, 1),   // a lumpy bundle of sheets
   towel: new THREE.BoxGeometry(0.5, 0.18, 0.36),                          // a folded towel
   grocery: new THREE.BoxGeometry(0.46, 0.34, 0.34),                       // a crate of groceries
+  beans: new THREE.SphereGeometry(0.22, 12, 9).scale(1.1, 0.8, 1.0),       // a little burlap bag of coffee beans...
+  beanTie: new THREE.CylinderGeometry(0.06, 0.09, 0.1, 8),                  // ...tied at the top
+  coffee: new THREE.CylinderGeometry(0.18, 0.13, 0.34, 16),                 // a takeaway coffee cup...
+  coffeeLid: new THREE.CylinderGeometry(0.19, 0.19, 0.05, 16),             // ...its lid...
+  coffeeSleeve: new THREE.CylinderGeometry(0.172, 0.155, 0.13, 16),        // ...and its cardboard sleeve
   tray: new THREE.CylinderGeometry(0.28, 0.28, 0.04, 18),                 // a silver tray...
   cloche: new THREE.SphereGeometry(0.2, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2), // ...with a dome lid
   veg: new THREE.SphereGeometry(0.1, 8, 6),
@@ -91,10 +98,15 @@ const mat = {
   grocery: new THREE.MeshStandardMaterial({ color: 0xc89b5e, roughness: 0.9 }),
   veg: new THREE.MeshStandardMaterial({ color: 0x4caf50, roughness: 0.8 }),
   silver: new THREE.MeshStandardMaterial({ color: 0xdfe4ea, roughness: 0.25, metalness: 0.8 }),
+  beans: new THREE.MeshStandardMaterial({ color: 0xa47a4a, roughness: 1 }),
+  beanTie: new THREE.MeshStandardMaterial({ color: 0x5b3a1e, roughness: 0.9 }),
+  coffee: new THREE.MeshStandardMaterial({ color: 0xf7f4ee, roughness: 0.45 }),
+  coffeeLid: new THREE.MeshStandardMaterial({ color: 0x4a2c1a, roughness: 0.5 }),
+  coffeeSleeve: new THREE.MeshStandardMaterial({ color: 0xc8975a, roughness: 0.85 }),
 };
 
 /** Cash value of each sellable item (counter price; gate runs pay the same per item). */
-export const ITEM_VALUE: Record<ItemType, number> = { crumb: 2, snack: 5, leaf: 3, wrap: 14, sugar: 10, candy: 40, cash: 0, bag: 15, snackbox: 25, fruit: 0, smoothie: 60, meat: 0, egg: 80, ticket: 50, obsidian: 0, gem: 150, magma: 0, crystal: 450, laundry: 0, towel: 0, grocery: 0, tray: 220 };
+export const ITEM_VALUE: Record<ItemType, number> = { crumb: 2, snack: 5, leaf: 3, wrap: 14, sugar: 10, candy: 40, cash: 0, bag: 15, snackbox: 25, fruit: 0, smoothie: 60, meat: 0, egg: 80, ticket: 50, obsidian: 0, gem: 150, magma: 0, crystal: 450, laundry: 0, towel: 0, grocery: 0, tray: 220, beans: 2, coffee: 12 };
 
 /** Build the 3D mesh for one item. Box faces order: +x, -x, +y(top), -y, +z, -z */
 export function makeItem(type: ItemType): THREE.Mesh {
@@ -173,6 +185,19 @@ export function makeItem(type: ItemType): THREE.Mesh {
     m = new THREE.Mesh(geo.gem, mat.gem);
   } else if (type === 'crystal') {
     m = new THREE.Mesh(geo.crystal, mat.crystal);
+  } else if (type === 'beans') {
+    m = new THREE.Mesh(geo.beans, mat.beans);
+    const tie = new THREE.Mesh(geo.beanTie, mat.beanTie);
+    tie.position.y = 0.2;
+    m.add(tie);
+    m.rotation.y = Math.random() * 3;
+  } else if (type === 'coffee') {
+    m = new THREE.Mesh(geo.coffee, mat.coffee);
+    const lid = new THREE.Mesh(geo.coffeeLid, mat.coffeeLid);
+    lid.position.y = 0.19;
+    const sleeve = new THREE.Mesh(geo.coffeeSleeve, mat.coffeeSleeve);
+    sleeve.position.y = -0.01;
+    m.add(lid, sleeve);
   } else if (type === 'snackbox') {
     const s = mat.boxSide;
     m = new THREE.Mesh(geo.snackbox, [s, s, mat.boxTop, s, s, s]);

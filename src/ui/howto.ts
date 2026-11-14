@@ -135,11 +135,13 @@ export const HOME_HOWTO_HTML = `
 </section>
 
 <section>
-  <h3>🐜 Your ant farm</h3>
+  <h3>🐜 Your ant farm and 🍪 snack stand</h3>
   <ol>
     <li>Grab crumbs 🍞 from the bread box.</li>
     <li>Drop them on the farm's <b>IN</b> tray: the ants turn them into snack packs 🍪.</li>
     <li>Pick the packs up from the <b>OUT</b> tray.</li>
+    <li>Stand on <b>SELL</b> at your snack stand: people from the street line up and buy them.</li>
+    <li>Pick the cash up from the stand's 💵 cash pad.</li>
   </ol>
 </section>
 
@@ -147,16 +149,20 @@ export const HOME_HOWTO_HTML = `
   <h3>🙋 Neighbors' orders</h3>
   <ul>
     <li>Neighbors come to the table by the fence and ask for snack packs.</li>
-    <li>Stand on <b>ORDER</b> to hand them over: each order pays <b>cash and lots of XP</b>.</li>
+    <li>Stand on <b>ORDER</b> to hand them over: each order pays <b>more than the stand, and lots of XP</b>.</li>
     <li>A new neighbor comes by a few seconds later.</li>
   </ul>
 </section>
 
 <section>
-  <h3>🐜 Farm levels = ant helpers</h3>
+  <h3>🐜 Helpers: every station runs by itself</h3>
   <ul>
-    <li>The glowing tile by the farm grows it. Each level sends out an ant for a job you used to do:</li>
-    <li><b>Lv 2</b> Gatherer (bread box → crumb basket) · <b>Lv 3</b> Carrier (basket → farm, and farm → café).</li>
+    <li>You hire each helper on a glowing tile <b>where it works</b>. Each one takes over a job you used to do:</li>
+    <li>🐜 <b>Gatherer</b> ant: raw supply → the machine (Farm Lv 2: bread box → farm).</li>
+    <li>🐜 <b>Carrier</b> ant: the machine's OUT → the counter (Farm Lv 3: farm → snack stand).</li>
+    <li>🧑 <b>Cashier</b>: sells at the counter while you're busy. A 2nd one: the counter's ⬆️ <b>LINE</b> upgrade.</li>
+    <li>🏦 <b>Banker</b> ant: sweeps the cash pad into your wallet. That's your <b>idle income</b> (the +$/min under your cash).</li>
+    <li>💤 While you're away, your ants keep earning: a share of your +$/min, paid when you come back.</li>
   </ul>
 </section>
 
@@ -172,8 +178,8 @@ export const HOME_HOWTO_HTML = `
   <h3>🏡 New plots</h3>
   <ul>
     <li>The tile by the east gate opens the next plot. It needs a <b>player level</b>, <b>ants working</b>, <b>planks</b> and <b>cash</b>: the sign over the gate ticks them off.</li>
-    <li>☕ The <b>Corner Café</b> buys your snack packs: bring them to its SELL spot. Customers pay on the cash pad.</li>
-    <li>At the café: hire a <b>cashier</b> (sells for you), then a <b>banker ant</b> (collects the cash pad: your idle income).</li>
+    <li>☕ The <b>Corner Café</b> sells coffee: carry 🫘 beans from the sacks to the <b>coffee machine</b>'s IN tray, then the coffee from its OUT tray to the café's SELL spot.</li>
+    <li>The café hires its own four: a gatherer (Lv 8), a carrier (Lv 9), a cashier (Lv 10) and a banker ant (Lv 11).</li>
     <li>🎁 Every new plot hides a chest.</li>
   </ul>
 </section>

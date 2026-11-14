@@ -2,9 +2,16 @@
 // home.ts — 🏝️ ANTHILL ISLAND (test version): the numbers for the backyard.
 //
 // The new one-island game from the design doc ("Anthill Island: Design Doc").
-// This first test is the opening only:
-//   backyard ant farm -> neighbors' orders -> the first ant helpers ->
-//   the delivery crate (planks) -> the next plot: the Corner Café (+ a chest)
+// This test is the opening: two stations, each one a full little business
+// (raw supply -> converter -> seller -> cash), each run by its own helpers.
+//
+//   🏡 THE BACKYARD: 🍞 bread box -> 🐜 ANT FARM -> 🍪 SNACK STAND by the street
+//      (+ the neighbors' 🙋 orders and the 📦 delivery crate, by hand)
+//   ☕ THE CORNER CAFÉ (the next plot): 🫘 bean sacks -> COFFEE MACHINE -> café counter
+//
+// At every station: a GATHERER ant (raw supply -> converter), a CARRIER ant
+// (converter -> the counter), a CASHIER (a person; a 2nd one from the ⬆️ panel's
+// LINE upgrade) and a BANKER ant (its cash pad -> your wallet: idle income).
 //
 // Units: people are AIR.humanH (2.8) tall, like the airport. Helper ants are
 // small next to them (HOME.antLength), but big enough to see what they carry.
@@ -23,6 +30,11 @@ export const HOME = {
   speedMult: 1.15,
   /** The ant farm: seconds to turn one crumb into a snack pack. */
   farm: { cookTime: 2.2 },
+  /**
+   * 🍪 The snack stand by the street: people from the sidewalk buy your snack packs
+   * ($5 each: the neighbors' orders pay more, plus XP). The backyard's idle business.
+   */
+  stand: { interval: 10, queueMax: 4, serve: 0.8 },
   order: {
     first: 5,      // the first neighbor wants 5 snack packs...
     second: 10,    // ...the second one 10
@@ -46,11 +58,12 @@ export const HOME = {
   },
   /** The café plot's gate: helpers working + planks (+ the level and price on its tile). */
   plot: { ants: 2, planks: 3 },
+  /** ☕ The coffee machine: seconds to turn one sack of beans into a cup ($12 at the café). */
+  coffee: { cookTime: 3.0 },
   cafe: {
-    priceMult: 1.6, // a snack pack sells for $8 at the café (orders pay $7 + XP)
-    interval: 7,    // seconds between new café customers
+    interval: 8,    // seconds between new café customers
     queueMax: 5,
-    serve: 0.7,     // seconds per pack sold
+    serve: 0.7,     // seconds per cup sold
   },
   chest: { cash: 150, xp: 40 },
 };
@@ -58,20 +71,27 @@ export const HOME = {
 /**
  * Walk-on tiles, in the order you meet them. You hire a helper where it works: the
  * farm levels (ant helpers) share one spot by the farm (only one is out at a time),
- * the café's staff are hired at the café. 'ai-order1' isn't a tile: it's added when
- * the first order is filled. Names are plain words (the ground-text font has no emoji
- * or accents: an unknown letter makes it fetch a fallback font, which hangs offline).
+ * the stand's and the café's staff are hired at their counters. 'ai-order1' isn't a
+ * tile: it's added when the first order is filled. Names are plain words (the
+ * ground-text font has no emoji or accents: an unknown letter makes it fetch a
+ * fallback font, which hangs offline).
  *
  * (v0.27 had the café's cashier and banker as 'ai-farm4' / 'ai-farm5' at the farm:
  * HomeWorld renames them in older saves, so those two ids are never used again.)
  */
 export const HOME_UNLOCKS: UnlockDef[] = [
-  { id: 'ai-farm2', name: 'Farm Lv 2: Gatherer', icon: '🐜', cost: 40, pos: [-4.5, 3], requires: ['ai-order1'], level: 2 },
-  { id: 'ai-farm3', name: 'Farm Lv 3: Carrier', icon: '🐜', cost: 100, pos: [-4.5, 3], requires: ['ai-farm2'], level: 3 },
+  // 🐜 The farm levels: a Gatherer (bread box -> farm), then a Carrier (farm -> snack stand)
+  { id: 'ai-farm2', name: 'Farm Lv 2: Gatherer', icon: '🐜', cost: 40, pos: [-7.8, -6.6], requires: ['ai-order1'], level: 2 },
+  { id: 'ai-farm3', name: 'Farm Lv 3: Carrier', icon: '🐜', cost: 100, pos: [-7.8, -6.6], requires: ['ai-farm2'], level: 3 },
+  // 🍪 At the snack stand: a cashier (a person) by the SELL spot, then a banker ant by its cash
+  { id: 'ai-stand-cashier', name: 'Stand Cashier', icon: '🍪', cost: 150, pos: [-11.4, 6.6], requires: ['ai-farm3'], level: 4 },
+  { id: 'ai-stand-banker', name: 'Stand Banker', icon: '🏦', cost: 250, pos: [0.9, 2.4], requires: ['ai-stand-cashier'], level: 5 },
   { id: 'ai-cafe', name: 'Corner Cafe Plot', icon: '☕', cost: 400, pos: [12.4, 2], requires: ['ai-farm2'], level: 7 },
-  // ☕ At the café, either side of its cash pad: a cashier (a person), then a banker ant
-  { id: 'ai-cashier', name: 'Cafe Cashier', icon: '☕', cost: 400, pos: [17.6, -3.2], requires: ['ai-cafe'], level: 8 },
-  { id: 'ai-banker', name: 'Cafe Banker', icon: '🏦', cost: 600, pos: [25.4, -6.6], requires: ['ai-cashier'], level: 9 },
+  // ☕ At the café: the same four, for coffee (beans -> machine -> counter -> cash)
+  { id: 'ai-cafe-gatherer', name: 'Cafe Gatherer', icon: '🐜', cost: 300, pos: [22.0, -8.4], requires: ['ai-cafe'], level: 8 },
+  { id: 'ai-cafe-carrier', name: 'Cafe Carrier', icon: '🐜', cost: 400, pos: [32.6, -4.4], requires: ['ai-cafe-gatherer'], level: 9 },
+  { id: 'ai-cashier', name: 'Cafe Cashier', icon: '☕', cost: 500, pos: [20.4, 5.6], requires: ['ai-cafe-carrier'], level: 10 },
+  { id: 'ai-banker', name: 'Cafe Banker', icon: '🏦', cost: 700, pos: [21.3, -2.8], requires: ['ai-cashier'], level: 11 },
 ];
 
 /** Old unlock ids -> new ones (see above). */

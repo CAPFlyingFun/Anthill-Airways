@@ -98,6 +98,7 @@ export interface DeskOpts {
   mode: 'checkin' | 'cafe';
   sells?: ItemType;          // café-style desks: what's on the shelf (default snack boxes)
   awning?: number;           // café awning stripe color (default red)
+  machine?: boolean;         // café-style desks: a coffee machine on the counter (default yes)
   label: string;
   color: number;
   kinds: HumanKind[];        // who shows up
@@ -158,8 +159,10 @@ export class Desk {
       this.group.add(box(0.12, 3.4, 0.12, mat(0x8a949e, 0.4, 0.5), 0, 1.7, -1.75));
     } else {
       // Café: a coffee machine and a striped awning
-      this.group.add(box(0.6, 0.8, 0.6, mat(0x3a3f45, 0.3, 0.6), -0.2, 2.06, 1.3));
-      this.group.add(box(0.2, 0.2, 0.2, mat(0xffffff, 0.3), 0.15, 1.75, 1.3));
+      if (opts.machine !== false) {
+        this.group.add(box(0.6, 0.8, 0.6, mat(0x3a3f45, 0.3, 0.6), -0.2, 2.06, 1.3));
+        this.group.add(box(0.2, 0.2, 0.2, mat(0xffffff, 0.3), 0.15, 1.75, 1.3));
+      }
       for (let i = 0; i < 6; i++) {
         this.group.add(box(1.9, 0.08, 0.66, mat(i % 2 ? 0xffffff : opts.awning ?? 0xc0392b, 0.6), -0.2, 3.3, -1.65 + i * 0.66));
       }

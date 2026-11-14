@@ -149,7 +149,7 @@ function showSlots() {
 async function start() {
   // 🏝️ An Anthill Island slot plays the new game instead (homeMain.ts), on the same
   // renderer, HUD, sounds, input and save.
-  if (save.campaign === 'anthill') return startHome({ app, renderer, save, hud, sfx, input, progress, queenProgress });
+  if (save.campaign === 'anthill') return startHome({ app, renderer, save, hud, sfx, input, progress, queenProgress, away: awayAtLaunch });
 
   // 1) Load the real bug models (shows the loading bar).
   await loadModels((done, total) => hud.setLoading(done / total));
