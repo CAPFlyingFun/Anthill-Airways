@@ -61,7 +61,7 @@ at the snack stand, two neighbors at once), and after it **Bigger orders** (cust
 Code: `src/homeMain.ts` (boot + loop + offline pay), `src/world/homeWorld.ts` (the backyard and the café),
 `src/data/home.ts` (every number). Not in this test yet: the farm close-up and ride-along cam, more plots.
 
-## 🧪 DEV Room (temporary, v0.29.2 to v0.29.4)
+## 🧪 DEV Room (temporary, v0.29.2 to v0.29.5)
 
 ⚙️ Settings -> **🧪 DEV Room** (or `?devroom=1`) opens a performance test for the Custom Character Builder
 System's female body: the builder's model is loaded **once** from the builder's own site, then cloned 1 to 20
@@ -72,7 +72,9 @@ clothes are not copied here. v0.29.3 adds test switches: **Detail** 100/50/25/10
 in the browser after loading, the model file untouched), body shapes on/off, full/plain materials and 2x/1x
 sharpness, to find what the cost really is. v0.29.4: **Body shapes: live / baked / off** (baked = each person's
 final shape worked out once into her own plain body, nothing blended per frame) and **Hidden pieces: drawn /
-skipped** (the underwear pieces under the painted outfit, about half the body's points and 13 of its 14 draw calls). Nothing in the room touches the save. Code: `src/devRoom.ts`. Remove when the
+skipped** (the underwear pieces under the painted outfit, about half the body's points and 13 of its 14 draw calls). v0.29.5: **Motion: walk / idle / off**, using the builder's own
+posing code (a copy in `src/vendor/ccbs/`, see its README): she breathes and sways standing, and walks with her
+weight, on her bones, so it works the same with baked shapes. Nothing in the room touches the save. Code: `src/devRoom.ts`. Remove when the
 character decision is made.
 
 ## 🎓 Tutorial and How to play

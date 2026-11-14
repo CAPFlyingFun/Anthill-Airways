@@ -25,6 +25,12 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { MeshoptSimplifier } from 'meshoptimizer/simplifier';
+// The builder's own posing code (a copy: see src/vendor/ccbs/README.md): how she stands, breathes and walks
+import { HumanRig } from './vendor/ccbs/HumanRigView';
+import { measureHuman } from './vendor/ccbs/humanSkeleton';
+import { poseHuman, humanStride } from './vendor/ccbs/humanPose';
+import { walkWeight, weighWalk } from './vendor/ccbs/walkWeight';
+import type { HumanMeasure, MutableJointTurn } from './vendor/ccbs/humanRig';
 
 /** The builder's published models (GitHub Pages: the same origin as this game when it's live). */
 const BUILDER = 'https://capflyingfun.github.io/Custom-Character-Builder-System/models/';
@@ -174,6 +180,16 @@ interface Person {
   radius: number;
   speed: number;   // radians per second (its sign is her direction)
   phase: number;
+  /** The builder body's own moving skeleton (v0.29.5): her bones posed each frame by the builder's code. */
+  live?: {
+    rig: HumanRig;
+    measure: HumanMeasure;
+    carry: number;      // her belly, 0..2 (a big belly walks shorter and wider)
+    perUnit: number;    // her skeleton's own units per one of the room's
+    walked: number;     // how far she has walked, in the room's units
+    out: MutableJointTurn[];
+    out2: MutableJointTurn[];
+  };
 }
 
 export async function startDevRoom() {
@@ -279,7 +295,7 @@ export async function startDevRoom() {
   });
   el.addEventListener('wheel', (e) => { view.dist = THREE.MathUtils.clamp(view.dist * (1 + Math.sign(e.deltaY) * 0.1), 4, 60); }, { passive: true });
   const people: Person[] = [];
-  const state = { model: MODELS[0], count: 3, morphs: true, shadows: true, detail: 100, shapes: 'live' as 'live' | 'baked' | 'off', underwear: true, plain: false, sharp: true, loading: '', error: '', info: null as Loaded | null };
+  const state = { model: MODELS[0], count: 3, morphs: true, shadows: true, detail: 100, shapes: 'live' as 'live' | 'baked' | 'off', underwear: true, motion: 'walk' as 'walk' | 'idle' | 'off', plain: false, sharp: true, loading: '', error: '', info: null as Loaded | null };
   const resize = () => {
     renderer.setPixelRatio(state.sharp ? Math.min(window.devicePixelRatio, 2) : 1);
     renderer.setSize(host.clientWidth, host.clientHeight, false);
@@ -478,7 +494,37 @@ export async function startDevRoom() {
     root.add(inner);
     scene.add(root);
     const ring = Math.floor(i / 6);
-    return { root, angle: (i % 6) * (Math.PI / 3) + ring * 0.5, radius: 4 + ring * 3.2, speed: (0.32 - ring * 0.05) * (ring % 2 ? -1 : 1), phase: r() * 6 };
+    const radius = 4 + ring * 3.2;
+    const person: Person = { root, angle: (i % 6) * (Math.PI / 3) + ring * 0.5, radius, speed: ((2.0 - ring * 0.15) / radius) * (ring % 2 ? -1 : 1), phase: r() * 6 };
+    if (def.builder && state.motion !== 'off') {
+      try {
+        const body = inner.children[0];
+        const rig = new HumanRig(body);
+        // Her hair is its own file on its own copy of her skeleton: hang it on her body's bones, by name
+        const byName = new Map<string, THREE.Bone>();
+        body.traverse((o) => { if ((o as THREE.Bone).isBone) byName.set(o.name, o as THREE.Bone); });
+        for (const extra of inner.children.slice(1)) {
+          extra.traverse((o) => {
+            const hair = o as THREE.SkinnedMesh;
+            if (!hair.isSkinnedMesh) return;
+            const old = hair.skeleton;
+            hair.bind(new THREE.Skeleton(old.bones.map((b) => byName.get(b.name) ?? b), old.boneInverses), hair.bindMatrix);
+            old.dispose();
+          });
+        }
+        const measure = measureHuman(rig.bind);
+        // How big her skeleton's units are in the room: two of her joints, measured both ways
+        root.updateWorldMatrix(true, true);
+        const bones = (body.getObjectByProperty('isSkinnedMesh', true as unknown as string) as THREE.SkinnedMesh).skeleton.bones;
+        const a = measure.joints.head, b = measure.joints.ankleL;
+        const inRoom = bones[a].getWorldPosition(new THREE.Vector3()).distanceTo(bones[b].getWorldPosition(new THREE.Vector3()));
+        const inBind = Math.hypot(rig.bind[a].x - rig.bind[b].x, rig.bind[a].y - rig.bind[b].y, rig.bind[a].z - rig.bind[b].z);
+        person.live = { rig, measure, carry: look.bump / 100, perUnit: inBind / Math.max(1e-6, inRoom), walked: r() * 10, out: [], out2: [] };
+      } catch (e) {
+        state.error = `No moving skeleton: ${e instanceof Error ? e.message : String(e)}`;
+      }
+    }
+    return person;
   };
 
   let building = 0;
@@ -508,6 +554,7 @@ export async function startDevRoom() {
         if (mesh.geometry.userData.devRoomOwn) mesh.geometry.dispose();
         mesh.skeleton?.dispose();
       });
+      p.live?.rig.dispose();
       p.root.removeFromParent();
     }
     state.loading = 'Preparing…';
@@ -526,6 +573,7 @@ export async function startDevRoom() {
   const morphBtn = button(optRow, '', () => { state.morphs = !state.morphs; sync(); void rebuild(); });
   const shadowBtn = button(optRow, '', () => { state.shadows = !state.shadows; sync(); });
   const shapeBtn = button(optRow, '', () => { state.shapes = state.shapes === 'live' ? 'baked' : state.shapes === 'baked' ? 'off' : 'live'; sync(); void rebuild(); });
+  const motionBtn = button(optRow, '', () => { state.motion = state.motion === 'walk' ? 'idle' : state.motion === 'idle' ? 'off' : 'walk'; sync(); void rebuild(); });
   const underBtn = button(optRow, '', () => { state.underwear = !state.underwear; sync(); void rebuild(); });
   const plainBtn = button(optRow, '', () => { state.plain = !state.plain; sync(); void rebuild(); });
   const sharpBtn = button(optRow, '', () => { state.sharp = !state.sharp; sync(); resize(); });
@@ -540,6 +588,8 @@ export async function startDevRoom() {
     detailBtns.forEach((b, i) => b.classList.toggle('on', DETAILS[i] === state.detail));
     shapeBtn.textContent = `Body shapes: ${state.shapes}`;
     shapeBtn.classList.toggle('on', state.shapes !== 'off');
+    motionBtn.textContent = `Motion: ${state.motion}`;
+    motionBtn.classList.toggle('on', state.motion !== 'off');
     underBtn.textContent = `Hidden pieces: ${state.underwear ? 'drawn' : 'skipped'}`;
     underBtn.classList.toggle('on', state.underwear);
     plainBtn.textContent = `Materials: ${state.plain ? 'plain' : 'full'}`;
@@ -565,10 +615,20 @@ export async function startDevRoom() {
     const dt = Math.min(0.05, ms / 1000);
     t += dt;
     for (const p of people) {
-      p.angle += p.speed * dt;
+      const walking = state.motion !== 'idle';
+      if (walking) p.angle += p.speed * dt;
       const x = Math.cos(p.angle) * p.radius;
       const z = Math.sin(p.angle) * p.radius;
-      p.root.position.set(x, Math.abs(Math.sin(t * 5 + p.phase)) * 0.05, z);
+      const m = p.live;
+      if (m) {
+        // The builder's own pose for this frame: standing and breathing, or a step of her walk with its weight
+        if (walking) m.walked += Math.abs(p.speed) * p.radius * dt;
+        const phase = ((m.walked * m.perUnit) / humanStride(m.measure, 'walk', m.carry)) % 1;
+        let turns = poseHuman(m.measure, m.rig.bind, { stance: walking ? 'walk' : 'stand', phase, seconds: t + p.phase, lean: 0, carry: m.carry }, m.out);
+        if (walking) turns = weighWalk(m.measure, turns, walkWeight(phase, 'walk'), m.out2);
+        m.rig.apply(turns);
+      }
+      p.root.position.set(x, m ? 0 : Math.abs(Math.sin(t * 5 + p.phase)) * 0.05, z);
       p.root.rotation.y = -p.angle + (p.speed > 0 ? 0 : Math.PI); // (facing the way she goes)
     }
     camera.position.set(Math.sin(view.yaw) * Math.cos(view.pitch) * view.dist, Math.sin(view.pitch) * view.dist + 1.2, Math.cos(view.yaw) * Math.cos(view.pitch) * view.dist);
