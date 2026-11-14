@@ -1,0 +1,475 @@
+// ============================================================================
+// devRoom.ts — 🧪 the DEV ROOM (temporary): a performance test for the Custom
+// Character Builder System's female body in this game.
+//
+// Joshua's idea (2026-11-14): one model in the game, loaded ONCE and cloned,
+// each clone with its own body sizes and painted clothes, instead of a file per
+// person. This room measures what that costs on a phone:
+//
+//   - the builder's own body + hair are loaded once, straight from the builder's
+//     site (same server as this game, so nothing is copied into this repo);
+//   - each person is a clone: the mesh and textures are shared, each one gets
+//     her own skeleton, shape (morph weights, height) and outfit colours;
+//   - pick how many walk around, and read the frames per second on screen. The
+//     game's current (small) Sarah model is there to compare against.
+//
+// The people wear Joshua's first three saved looks (LOOKS below), in turn. Their
+// outfits are painted on in the shader by height (about what one of the builder's
+// painted garments costs to draw), not with the builder's own fabric code.
+//
+// Opened from ⚙️ Settings -> 🧪 DEV Room, or ?devroom=1. It never touches the
+// save: main.ts hands over here before the game starts.
+// ============================================================================
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
+import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
+
+/** The builder's published models (GitHub Pages: the same origin as this game when it's live). */
+const BUILDER = 'https://capflyingfun.github.io/Custom-Character-Builder-System/models/';
+
+interface ModelDef {
+  key: string;
+  label: string;
+  files: string[];       // loaded once, then cloned per person
+  builder: boolean;      // the builder's body: random shape + stand-in outfits
+}
+const MODELS: ModelDef[] = [
+  { key: 'builder', label: "Builder body", files: [BUILDER + 'sarah-v2-body-slim.glb', BUILDER + 'sarah-v2-hair.glb'], builder: true },
+  { key: 'game', label: "Game's Sarah", files: [`${import.meta.env.BASE_URL}models/h-sarah.glb`], builder: false },
+];
+const COUNTS = [1, 3, 6, 10, 15, 20];
+const HEIGHT = 2.8; // people are this tall in the game
+
+/**
+ * JOSHUA'S FIRST THREE LOOKS, saved in the builder on 2026-11-14 (its export, traddomium-characters.json:
+ * Char1, Char2, Char3). What this test takes from each: her belly size (the builder's `bump`, in %), her
+ * height (cm from the standard body), and her painted outfit: which leggings and tee, and their fabric
+ * colours (the builder's swatch tables, fabricLibrary.ts). Her finer body controls (waist, hips, limb
+ * lengths, the belly's and bust's own shapes) and the fabrics' knit are the builder's own code, not copied
+ * here: this room is about what she costs to draw.
+ */
+interface Look {
+  name: string;
+  bump: number;        // belly size, %
+  heightCm: number;    // from the standard body (about 168 cm)
+  top: number;         // tee colour
+  legs: number;        // leggings colour
+  capri: boolean;      // leggings end mid-calf (leggingsCapri) or at the ankle
+  longSleeves: boolean; // teeLong or teeShort
+}
+const LOOKS: Look[] = [
+  { name: 'Char1', bump: 23, heightCm: 3.5, top: 0x4e642e, legs: 0x37383e, capri: false, longSleeves: false },  // jersey: olive tee, charcoal leggings
+  { name: 'Char2', bump: 21, heightCm: -7, top: 0x9c9ca3, legs: 0x1631bc, capri: false, longSleeves: false },   // ribbed: grey tee, blue leggings
+  { name: 'Char3', bump: 5, heightCm: -6.5, top: 0xeec415, legs: 0x0b7e3a, capri: true, longSleeves: true },    // sweater: yellow long tee, green capris
+];
+/** The standard body with the stand-in outfit ("Looks: off"). */
+const PLAIN: Look = { name: 'Base', bump: 0, heightCm: 0, top: 0xd8473f, legs: 0x33343f, capri: false, longSleeves: false };
+const STANDARD_CM = 168;
+const SNEAKERS = 0xf2f2f2;
+
+/**
+ * The builder's belly sizes (its sarahLabTool.ts BELLY_KEYS): the file itself is the 100%
+ * belly, each named morph is that belly at another size ('belly' = flat, 0%), and a size in
+ * between cross-fades the two keys either side of it.
+ */
+const BELLY_KEYS: [number, string | null][] = [
+  [2, 'belly200'], [1.5, 'belly150'], [1, null], [0.75, 'belly75'], [0.6, 'belly60'], [0.5, 'belly50'], [0.3, 'belly30'], [0.25, 'belly25'], [0, 'belly'],
+];
+function bellyWeights(size: number): Record<string, number> {
+  const s = Math.min(2, Math.max(0, size));
+  const out: Record<string, number> = {};
+  for (let i = 0; i + 1 < BELLY_KEYS.length; i++) {
+    const [hi, hiName] = BELLY_KEYS[i];
+    const [lo, loName] = BELLY_KEYS[i + 1];
+    if (s > hi || s < lo) continue;
+    const k = (s - lo) / (hi - lo);
+    if (hiName) out[hiName] = k;
+    if (loName) out[loName] = 1 - k;
+    break;
+  }
+  return out;
+}
+
+/** The builder's bust for a belly size (its breastVolumeRatio / breastGrowWeight): it grows a little with the belly. */
+function bustWeight(bumpPercent: number) {
+  const p = Math.min(200, Math.max(0, bumpPercent));
+  const volume = p <= 100 ? 1 + (0.3 * p) / 100 : 1.3 + (0.25 * (p - 100)) / 100;
+  return (Math.cbrt(volume) - 1) / (Math.cbrt(1.55) - 1);
+}
+
+/** A small seeded random (the same person looks the same every time). */
+function rng(seed: number) {
+  let s = seed >>> 0;
+  return () => {
+    s = (s + 0x6d2b79f5) >>> 0;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/**
+ * Stand-in painted clothes: the skin's own material, with a top and leggings
+ * mixed over it by where each point of her is in her rest pose (height up her
+ * body, distance from her middle). One compiled program for everyone; each
+ * clone has its own two colours.
+ */
+function paintedMaterial(base: THREE.Material, box: THREE.Box3, look: Look) {
+  const m = base.clone();
+  const uniforms = {
+    uTop: { value: new THREE.Color(look.top) },
+    uLegs: { value: new THREE.Color(look.legs) },
+    uShoe: { value: new THREE.Color(SNEAKERS) },
+    uLegEnd: { value: look.capri ? 0.17 : 0.04 },      // where the leggings end (height up her body)
+    uSleeveEnd: { value: look.longSleeves ? 0.56 : 0.71 }, // where the sleeves end
+    uY0: { value: box.min.y },
+    uH: { value: box.max.y - box.min.y },
+  };
+  m.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, uniforms);
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec2 vRest;\nuniform float uY0;\nuniform float uH;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvRest = vec2(abs(position.x) / uH, (position.y - uY0) / uH);');
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying vec2 vRest;\nuniform vec3 uTop;\nuniform vec3 uLegs;\nuniform vec3 uShoe;\nuniform float uLegEnd;\nuniform float uSleeveEnd;\nfloat drCloth = 0.0;')
+      .replace(
+        '#include <color_fragment>',
+        `#include <color_fragment>
+        {
+          // leggings: waist down to their hem. tee: waist to collar, with its sleeves. sneakers.
+          float legs = step(uLegEnd, vRest.y) * step(vRest.y, 0.57) * step(vRest.x, 0.125); // (her hands hang further out than her hips)
+          float torso = step(0.55, vRest.y) * step(vRest.y, 0.835) * step(vRest.x, 0.115);
+          // (below her shoulder, only what is out at her arm is sleeve)
+          float sleeve = step(uSleeveEnd, vRest.y) * step(vRest.y, 0.835) * step(vRest.x, 0.2) * max(step(0.71, vRest.y), step(0.115, vRest.x));
+          float topMask = max(torso, sleeve);
+          float shoe = step(vRest.y, 0.04);
+          diffuseColor.rgb = mix(diffuseColor.rgb, uLegs, legs * (1.0 - topMask));
+          diffuseColor.rgb = mix(diffuseColor.rgb, uTop, topMask);
+          diffuseColor.rgb = mix(diffuseColor.rgb, uShoe, shoe);
+          drCloth = max(max(legs, topMask), shoe);
+        }`,
+      )
+      // (cloth is smooth: her skin's fine detail isn't drawn through it, as under the builder's paint)
+      .replace('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\nnormal = normalize(mix(normal, nonPerturbedNormal, drCloth));')
+      .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(roughnessFactor, 0.85, drCloth);');
+  };
+  m.customProgramCacheKey = () => 'devroom-painted';
+  return m;
+}
+
+interface Person {
+  root: THREE.Group;
+  angle: number;   // where she is on her circle
+  radius: number;
+  speed: number;   // radians per second (its sign is her direction)
+  phase: number;
+}
+
+export async function startDevRoom() {
+  // ---- The page: our own canvas and a small panel, over everything else ----
+  const host = document.createElement('div');
+  host.style.cssText = 'position:fixed;inset:0;z-index:99999;background:#9fd3f5;touch-action:none;font-family:system-ui,sans-serif;';
+  document.body.appendChild(host);
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // (as the game does)
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  host.appendChild(renderer.domElement);
+  const panel = document.createElement('div');
+  panel.style.cssText =
+    'position:absolute;left:calc(8px + env(safe-area-inset-left));right:calc(8px + env(safe-area-inset-right));top:calc(8px + env(safe-area-inset-top));' +
+    'display:flex;flex-direction:column;gap:6px;align-items:flex-start;pointer-events:none;color:#fff;';
+  host.appendChild(panel);
+  const css = document.createElement('style');
+  css.textContent = `
+    .dr-row { display:flex; flex-wrap:wrap; gap:6px; pointer-events:auto; }
+    .dr-b { font:600 15px system-ui,sans-serif; color:#fff; background:rgba(28,35,42,.82); border:0; border-radius:10px; padding:9px 12px; min-width:44px; min-height:40px; }
+    .dr-b.on { background:#2f7fd0; }
+    .dr-stat { font:600 13px/1.35 ui-monospace,Menlo,monospace; background:rgba(28,35,42,.82); border-radius:10px; padding:8px 11px; white-space:pre-wrap; max-width:100%; box-sizing:border-box; pointer-events:none; }
+    .dr-fps { font-size:22px; }
+  `;
+  host.appendChild(css);
+  const row = () => {
+    const d = document.createElement('div');
+    d.className = 'dr-row';
+    panel.appendChild(d);
+    return d;
+  };
+  const button = (parent: HTMLElement, text: string, onClick: () => void) => {
+    const b = document.createElement('button');
+    b.className = 'dr-b';
+    b.textContent = text;
+    b.addEventListener('click', onClick);
+    parent.appendChild(b);
+    return b;
+  };
+  const top = row();
+  button(top, '← Back to the game', () => {
+    const u = new URL(location.href);
+    u.searchParams.delete('devroom');
+    location.href = u.toString();
+  });
+  const title = document.createElement('div');
+  title.className = 'dr-stat';
+  title.textContent = '🧪 DEV Room · character test';
+  top.appendChild(title);
+  const modelRow = row();
+  const countRow = row();
+  const optRow = row();
+  const stat = document.createElement('div');
+  stat.className = 'dr-stat';
+  panel.appendChild(stat);
+
+  // ---- The scene: grass, sky, a sun with shadows (like the backyard) ----
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x9fd3f5);
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x88aa66, 1.15));
+  const sun = new THREE.DirectionalLight(0xfff2d6, 2.0);
+  sun.position.set(-14, 26, 16);
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(2048, 2048);
+  const sc = sun.shadow.camera;
+  sc.left = -20; sc.right = 20; sc.top = 20; sc.bottom = -20; sc.near = 1; sc.far = 80;
+  scene.add(sun);
+  const ground = new THREE.Mesh(new THREE.CircleGeometry(22, 48), new THREE.MeshStandardMaterial({ color: 0x7ec850, roughness: 1 }));
+  ground.rotation.x = -Math.PI / 2;
+  ground.receiveShadow = true;
+  scene.add(ground);
+  const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 300);
+  // Drag: orbit. Pinch / wheel: zoom.
+  const view = { yaw: 0, pitch: 0.62, dist: 26 };
+  const pointers = new Map<number, { x: number; y: number }>();
+  let pinch = 0;
+  const el = renderer.domElement;
+  el.addEventListener('pointerdown', (e) => { pointers.set(e.pointerId, { x: e.clientX, y: e.clientY }); pinch = 0; });
+  const up = (e: PointerEvent) => { pointers.delete(e.pointerId); pinch = 0; };
+  el.addEventListener('pointerup', up);
+  el.addEventListener('pointercancel', up);
+  el.addEventListener('pointermove', (e) => {
+    const p = pointers.get(e.pointerId);
+    if (!p) return;
+    if (pointers.size === 1) {
+      view.yaw -= (e.clientX - p.x) * 0.006;
+      view.pitch = THREE.MathUtils.clamp(view.pitch + (e.clientY - p.y) * 0.004, 0.12, 1.4);
+    }
+    p.x = e.clientX;
+    p.y = e.clientY;
+    if (pointers.size === 2) {
+      const [a, b] = [...pointers.values()];
+      const d = Math.hypot(a.x - b.x, a.y - b.y);
+      if (pinch) view.dist = THREE.MathUtils.clamp(view.dist * (pinch / d), 4, 60);
+      pinch = d;
+    }
+  });
+  el.addEventListener('wheel', (e) => { view.dist = THREE.MathUtils.clamp(view.dist * (1 + Math.sign(e.deltaY) * 0.1), 4, 60); }, { passive: true });
+  const resize = () => {
+    renderer.setSize(host.clientWidth, host.clientHeight, false);
+    el.style.width = '100%';
+    el.style.height = '100%';
+    camera.aspect = host.clientWidth / Math.max(1, host.clientHeight);
+    camera.updateProjectionMatrix();
+  };
+  window.addEventListener('resize', resize);
+  resize();
+
+  // ---- Loading a model (once), then cloning it per person ----
+  const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
+  interface Loaded { parts: THREE.Object3D[]; scale: number; minY: number; box: THREE.Box3; tris: number; mb: number; ms: number }
+  const cache = new Map<string, Promise<Loaded>>();
+  const load = (def: ModelDef) => {
+    let p = cache.get(def.key);
+    if (!p) {
+      p = (async () => {
+        const t0 = performance.now();
+        let bytes = 0;
+        const parts: THREE.Object3D[] = [];
+        for (const url of def.files) {
+          const buf = await (await fetch(url)).arrayBuffer();
+          bytes += buf.byteLength;
+          const gltf = await loader.parseAsync(buf, '');
+          parts.push(gltf.scene);
+        }
+        // Her size as she stands (skinned, in the world), from the first part (the body)
+        const world = new THREE.Box3();
+        const rest = new THREE.Box3(); // ...and in her geometry's own units (for the painted outfit)
+        let tris = 0;
+        for (const part of parts) {
+          part.updateWorldMatrix(true, true);
+          part.traverse((o) => {
+            const mesh = o as THREE.SkinnedMesh;
+            if (!mesh.isMesh) return;
+            mesh.castShadow = true;
+            mesh.frustumCulled = false; // (a skinned mesh's bounds are its rest pose's)
+            const g = mesh.geometry;
+            tris += (g.index ? g.index.count : g.attributes.position.count) / 3;
+            if (part !== parts[0]) return;
+            // (her rest pose alone: a geometry's own bounding box also covers every morph, the 200% belly included)
+            rest.union(new THREE.Box3().setFromBufferAttribute(g.attributes.position as THREE.BufferAttribute));
+            world.union(new THREE.Box3().setFromObject(mesh, true));
+          });
+        }
+        const h = Math.max(0.001, world.max.y - world.min.y);
+        return { parts, scale: HEIGHT / h, minY: world.min.y, box: rest, tris: Math.round(tris), mb: bytes / 1e6, ms: performance.now() - t0 };
+      })();
+      cache.set(def.key, p);
+    }
+    return p;
+  };
+
+  const people: Person[] = [];
+  const state = { model: MODELS[0], count: 3, morphs: true, shadows: true, loading: '', error: '', info: null as Loaded | null };
+
+  const makePerson = (def: ModelDef, src: Loaded, i: number): Person => {
+    const r = rng(1000 + i * 7919);
+    const root = new THREE.Group();
+    const inner = new THREE.Group();
+    // Which look she wears: Joshua's three in turn, or the plain standard body
+    const look = def.builder && state.morphs ? LOOKS[i % LOOKS.length] : PLAIN;
+    const tall = 1 + look.heightCm / STANDARD_CM;
+    inner.scale.setScalar(src.scale * tall);
+    inner.position.y = -src.minY * src.scale * tall;
+    // Her shape, with the builder's own morphs and rules: her belly at her look's size, her bust with it
+    const shape: Record<string, number> = { ...bellyWeights(look.bump / 100), breastGrow: bustWeight(look.bump) };
+    for (const part of src.parts) {
+      const copy = cloneSkinned(part); // (shares the geometry and textures; her skeleton is her own)
+      copy.traverse((o) => {
+        const mesh = o as THREE.SkinnedMesh;
+        if (!mesh.isMesh) return;
+        if (def.builder && part === src.parts[0]) {
+          mesh.material = Array.isArray(mesh.material)
+            ? mesh.material.map((m) => paintedMaterial(m, src.box, look))
+            : paintedMaterial(mesh.material, src.box, look);
+          const dict = mesh.morphTargetDictionary;
+          if (dict && mesh.morphTargetInfluences) {
+            mesh.morphTargetInfluences.fill(0);
+            for (const [name, v] of Object.entries(shape)) if (dict[name] !== undefined) mesh.morphTargetInfluences[dict[name]] = v;
+          }
+        }
+      });
+      inner.add(copy);
+    }
+    root.add(inner);
+    scene.add(root);
+    const ring = Math.floor(i / 6);
+    return { root, angle: (i % 6) * (Math.PI / 3) + ring * 0.5, radius: 4 + ring * 3.2, speed: (0.32 - ring * 0.05) * (ring % 2 ? -1 : 1), phase: r() * 6 };
+  };
+
+  let building = 0;
+  let onBuilt = () => {};
+  const rebuild = async () => {
+    const ticket = ++building;
+    state.loading = `Loading ${state.model.label}…`;
+    state.error = '';
+    let src: Loaded;
+    try {
+      src = await load(state.model);
+    } catch (e) {
+      cache.delete(state.model.key);
+      if (ticket === building) {
+        state.loading = '';
+        state.error = `Couldn't load ${state.model.label}: ${e instanceof Error ? e.message : String(e)}`;
+      }
+      return;
+    }
+    if (ticket !== building) return;
+    for (const p of people.splice(0)) {
+      p.root.traverse((o) => {
+        const mesh = o as THREE.SkinnedMesh;
+        if (!mesh.isMesh) return;
+        // (only what this person owned: her painted materials and her skeleton; the mesh and textures are shared)
+        for (const m of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) if (m.customProgramCacheKey() === 'devroom-painted') m.dispose();
+        mesh.skeleton?.dispose();
+      });
+      p.root.removeFromParent();
+    }
+    for (let i = 0; i < state.count; i++) people.push(makePerson(state.model, src, i));
+    state.info = src;
+    state.loading = '';
+    onBuilt();
+  };
+
+  // ---- The panel's buttons ----
+  const modelBtns = MODELS.map((def) => button(modelRow, def.label, () => { state.model = def; sync(); void rebuild(); }));
+  const countBtns = COUNTS.map((n) => button(countRow, String(n), () => { state.count = n; sync(); void rebuild(); }));
+  const morphBtn = button(optRow, '', () => { state.morphs = !state.morphs; sync(); void rebuild(); });
+  const shadowBtn = button(optRow, '', () => { state.shadows = !state.shadows; sync(); });
+  const sync = () => {
+    modelBtns.forEach((b, i) => b.classList.toggle('on', MODELS[i] === state.model));
+    countBtns.forEach((b, i) => b.classList.toggle('on', COUNTS[i] === state.count));
+    morphBtn.textContent = `Looks (Char1-3): ${state.morphs ? 'on' : 'off'}`;
+    morphBtn.classList.toggle('on', state.morphs);
+    shadowBtn.textContent = `Shadows: ${state.shadows ? 'on' : 'off'}`;
+    shadowBtn.classList.toggle('on', state.shadows);
+    sun.castShadow = state.shadows;
+  };
+  sync();
+  void rebuild();
+
+  // ---- The loop: they walk their circles; frames per second, averaged over a second ----
+  let last = performance.now();
+  let frames = 0;
+  let acc = 0;
+  let worst = 0;
+  let fps = 0;
+  let worstShown = 0;
+  let t = 0;
+  const tick = (now: number) => {
+    requestAnimationFrame(tick);
+    const ms = Math.max(0, now - last);
+    last = now;
+    const dt = Math.min(0.05, ms / 1000);
+    t += dt;
+    for (const p of people) {
+      p.angle += p.speed * dt;
+      const x = Math.cos(p.angle) * p.radius;
+      const z = Math.sin(p.angle) * p.radius;
+      p.root.position.set(x, Math.abs(Math.sin(t * 5 + p.phase)) * 0.05, z);
+      p.root.rotation.y = -p.angle + (p.speed > 0 ? 0 : Math.PI); // (facing the way she goes)
+    }
+    camera.position.set(Math.sin(view.yaw) * Math.cos(view.pitch) * view.dist, Math.sin(view.pitch) * view.dist + 1.2, Math.cos(view.yaw) * Math.cos(view.pitch) * view.dist);
+    camera.lookAt(0, 1.2, 0);
+    renderer.info.reset();
+    renderer.render(scene, camera);
+    if (document.hidden || ms > 3000) return; // (back from the background: not a frame time)
+    frames++;
+    acc += ms;
+    worst = Math.max(worst, ms);
+    if (acc >= 1000) {
+      fps = (frames * 1000) / acc;
+      worstShown = worst;
+      frames = 0;
+      acc = 0;
+      worst = 0;
+      paint();
+    }
+  };
+  const paint = () => {
+    {
+      const info = state.info;
+      const r = renderer.info.render;
+      stat.innerHTML = '';
+      const big = document.createElement('div');
+      big.className = 'dr-fps';
+      big.textContent = `${fps.toFixed(0)} FPS`;
+      big.style.color = fps >= 50 ? '#7dffa0' : fps >= 30 ? '#ffd166' : '#ff7b7b';
+      stat.appendChild(big);
+      const lines = [
+        `slowest frame ${worstShown.toFixed(0)} ms`,
+        `${people.length} x ${state.model.label}`,
+        `${(r.triangles / 1e6).toFixed(2)}M triangles drawn · ${r.calls} draw calls`,
+        info ? `model: ${(info.tris / 1000).toFixed(0)}k triangles · ${info.mb.toFixed(1)} MB · loaded in ${(info.ms / 1000).toFixed(1)} s` : '',
+        `screen ${renderer.domElement.width} x ${renderer.domElement.height}`,
+        state.loading,
+        state.error,
+      ].filter(Boolean);
+      stat.appendChild(document.createTextNode(lines.join('\n')));
+    }
+  };
+  onBuilt = paint;
+  requestAnimationFrame(tick);
+  renderer.info.autoReset = false;
+
+  // (for the headless tests)
+  (window as unknown as { devRoom: unknown }).devRoom = { state, people, renderer, get fps() { return fps; } };
+}

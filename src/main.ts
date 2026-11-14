@@ -147,6 +147,18 @@ function showSlots() {
 }
 
 async function start() {
+  // 🧪 The DEV Room (temporary: a character performance test, devRoom.ts) instead of the game.
+  // It never touches the save. Its code only downloads when it's opened.
+  if (new URLSearchParams(location.search).has('devroom')) {
+    hud.hideLoading();
+    return (await import('./devRoom')).startDevRoom();
+  }
+  document.getElementById('devRoomBtn')!.addEventListener('click', () => {
+    writeSave(save);
+    const u = new URL(location.href);
+    u.searchParams.set('devroom', '1');
+    location.href = u.toString();
+  });
   // 🏝️ An Anthill Island slot plays the new game instead (homeMain.ts), on the same
   // renderer, HUD, sounds, input and save.
   if (save.campaign === 'anthill') return startHome({ app, renderer, save, hud, sfx, input, progress, queenProgress, away: awayAtLaunch });
