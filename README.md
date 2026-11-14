@@ -9,7 +9,7 @@ An idle arcade tycoon (walk around, stack stuff on your back, unlock new land) w
 ▶️ **Play:** https://capflyingfun.github.io/Anthill-Airways-Dino/
 On iPhone: open in Safari → Share → **Add to Home Screen** to install it as an app (works offline).
 
-## 🏝️ Anthill Island (test version, v0.32)
+## 🏝️ Anthill Island (test version, v0.33)
 
 The new one-island game from the design doc, playable in its own save slot: **⚙️ Settings → Save slots →
 an empty slot → 🏝️ Anthill Island (test)**. Your Anthill Airways slots aren't touched. This test is the
@@ -69,6 +69,9 @@ at the snack stand, two neighbors at once), and after it **Bigger orders** (cust
   first-person view the walls and roof are whole; in the top-down view only low wall stubs show, so you see in
   ("roofs off"). A lot's picket fence comes down when its shop goes up. Known: name tags show through walls in
   first person, and the ceiling reads dark from inside.
+- 🚶 **Out on the street** (v0.33): once your first order is filled you can leave the yard by the gap in its fence
+  (and a shop by its front door), walk both sidewalks, cross the street and go up the side street to the corner.
+  Not into the neighbors' gardens; parked cars aren't solid yet. The cars brake for you.
 - 🗺️ **The minimap** (top right, under the 👁️ 🎒 buttons, after Beyond Extinction's): north up, centred on you
   (the blue arrow), the stations as icons (a red **!** on a counter whose buyers wait at an empty shelf), glowing
   tiles as gold squares, and the quest as a pulsing gold ring (or a gold arrow on the edge when it's further
@@ -80,7 +83,7 @@ at the snack stand, two neighbors at once), and after it **Bigger orders** (cust
 Code: `src/homeMain.ts` (boot + loop + offline pay), `src/world/homeWorld.ts` (the backyard and the café),
 `src/data/home.ts` (every number). Not in this test yet: the farm close-up and ride-along cam, and the next areas (airport, hotel, hospital, zoo).
 
-## 🧪 DEV Room (temporary, v0.29.2 to v0.29.5)
+## 🧪 DEV Room (temporary, v0.29.2 to v0.33)
 
 Hidden from Settings since v0.29.6 (the button is still in the page, `hidden`); **`?devroom=1`** opens it. A performance test for the Custom Character Builder
 System's female body: the builder's model is loaded **once** from the builder's own site, then cloned 1 to 20
@@ -93,7 +96,9 @@ sharpness, to find what the cost really is. v0.29.4: **Body shapes: live / baked
 final shape worked out once into her own plain body, nothing blended per frame) and **Hidden pieces: drawn /
 skipped** (the underwear pieces under the painted outfit, about half the body's points and 13 of its 14 draw calls). v0.29.5: **Motion: walk / idle / off**, using the builder's own
 posing code (a copy in `src/vendor/ccbs/`, see its README): she breathes and sways standing, and walks with her
-weight, on her bones, so it works the same with baked shapes. Baked bodies keep four motion shapes live (the belly's sag,
+weight, on her bones, so it works the same with baked shapes. v0.33: Detail **5%** and **3%** (about 11.8k and 7.1k triangles a character with
+hidden pieces skipped), **Smart detail** (her head keeps three times her body's share of triangles, same total), counts of
+30 and 40, and an "each character: N triangles as drawn" line. Baked bodies keep four motion shapes live (the belly's sag,
 drop and swing, the bust's drop), driven by the builder's spring rules; the other 39 are baked in. Nothing in the room touches the save. Code: `src/devRoom.ts`. Remove when the
 character decision is made.
 

@@ -1000,6 +1000,7 @@ export class HomeWorld {
   private canWalk = (x: number, z: number) => {
     const Y = HOME.yard;
     if (x > Y.minX + 0.6 && x < Y.maxX - 0.6 && z > Y.minZ + 0.6 && z < Y.maxZ - 0.6) return true;
+    if (this.onStreet(x, z)) return true;
     if (!this.cafeOpen) return false;
     const P = HOME.cafePlot;
     if (x > P.minX + 0.6 && x < P.maxX - 0.6 && z > P.minZ + 0.6 && z < P.maxZ - 0.6) return true;
@@ -1010,6 +1011,26 @@ export class HomeWorld {
     if (x > S.minX + 0.6 && x < S.maxX - 0.6 && z > S.minZ + 0.6 && z < S.maxZ - 0.6) return true;
     return x >= P.maxX - 0.6 && x <= S.minX + 0.6 && inGate; // through the café's east gate
   };
+
+  /**
+   * 🚶 OUT ON THE STREET (v0.33): once your first order is filled you can leave the yard by the gap in its
+   * fence (and a shop by its front door) and walk the sidewalks, cross the street, and go up the side
+   * street to the corner. Not into the neighbors' gardens. The cars brake for you.
+   */
+  private onStreet(x: number, z: number) {
+    if (!this.owns('ai-order1')) return false;
+    // The main street, sidewalk to sidewalk
+    if (z > 12.4 && z < 26.6 && x > -33 && x < 62) return true;
+    // The side street and its sidewalks, north from the corner
+    if (x > -32.6 && x < -18.4 && z > -46 && z <= 12.4) return true;
+    // The ways out to the sidewalk: the gap in your fence, and each shop's front door
+    if (z >= HOME.yard.maxZ - 0.7 && z <= 12.4) {
+      if (x > 11.9 && x < 14.4) return true;
+      if (this.cafeOpen && x > 32.1 && x < 33.9) return true;
+      if (this.storeOpen && x > 53.1 && x < 54.9) return true;
+    }
+    return false;
+  }
 
   // --------------------------------------------------------------------------
   // Helpers (the ants)
@@ -1452,6 +1473,7 @@ export class HomeWorld {
     this.walkerList.length = 0;
     for (const d of this.desks) d.walkers(this.walkerList);
     this.hood.walkers(this.walkerList);
+    this.walkerList.push(this.player.pos); // (you too)
     this.traffic.update(dt);
     for (const [cx, r] of this.rides) {
       r.age += dt;
@@ -1613,7 +1635,7 @@ export class HomeWorld {
 
     this.hud.setInventory(me.stack.counts(), me.stack.count, me.carryMax);
     // Where you are (+ your planks, once you have some)
-    const place = p.x > HOME.cafePlot.maxX + 0.5 ? '🛒 Corner Store' : p.x > HOME.yard.maxX ? '☕ Corner Café' : '🏡 Your Backyard';
+    const place = p.z > 12 || p.x < HOME.yard.minX ? '🏘️ Your Street' : p.x > HOME.cafePlot.maxX + 0.5 ? '🛒 Corner Store' : p.x > HOME.yard.maxX ? '☕ Corner Café' : '🏡 Your Backyard';
     const name = this.home.planks > 0 ? `${place} · 🪵 ${this.home.planks}` : place;
     if (name !== this.zoneName) {
       this.zoneName = name;

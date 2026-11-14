@@ -46,16 +46,16 @@ const MODELS: ModelDef[] = [
   { key: 'builder', label: "Builder body", files: [BUILDER + 'sarah-v2-body-slim.glb', BUILDER + 'sarah-v2-hair.glb'], builder: true },
   { key: 'game', label: "Game's Sarah", files: [`${import.meta.env.BASE_URL}models/h-sarah.glb`], builder: false },
 ];
-const COUNTS = [1, 3, 6, 10, 15, 20];
+const COUNTS = [1, 3, 6, 10, 15, 20, 30, 40];
 const HEIGHT = 2.8; // people are this tall in the game
 /**
  * DETAIL (v0.29.3, Joshua's "smart LOD" idea): how much of the model's triangles are drawn, in %.
  * The model FILE is never changed: when it has loaded, a lighter triangle list is worked out here for
  * the same points (so her skeleton, her shapes and her outfit all still fit), and swapped in.
  */
-const DETAILS = [100, 50, 25, 10];
+const DETAILS = [100, 50, 25, 10, 5, 3]; // (3% of the builder body is about 9k triangles: the "under 10k" gameplay target)
 const NO_MORPHS = {};
-interface GeoKeep { index0: THREE.BufferAttribute | null; morph0: THREE.BufferGeometry['morphAttributes']; lods: Map<number, THREE.BufferAttribute> }
+interface GeoKeep { index0: THREE.BufferAttribute | null; morph0: THREE.BufferGeometry['morphAttributes']; lods: Map<string, THREE.BufferAttribute> }
 
 /**
  * JOSHUA'S FIRST THREE LOOKS, saved in the builder on 2026-11-14 (its export, traddomium-characters.json:
@@ -302,7 +302,7 @@ export async function startDevRoom() {
   });
   el.addEventListener('wheel', (e) => { view.dist = THREE.MathUtils.clamp(view.dist * (1 + Math.sign(e.deltaY) * 0.1), 4, 60); }, { passive: true });
   const people: Person[] = [];
-  const state = { model: MODELS[0], count: 3, morphs: true, shadows: true, detail: 100, shapes: 'live' as 'live' | 'baked' | 'off', underwear: true, motion: 'walk' as 'walk' | 'idle' | 'off', plain: false, sharp: true, loading: '', error: '', info: null as Loaded | null };
+  const state = { model: MODELS[0], count: 3, morphs: true, shadows: true, detail: 100, shapes: 'live' as 'live' | 'baked' | 'off', underwear: true, smart: false, perChar: 0, motion: 'walk' as 'walk' | 'idle' | 'off', plain: false, sharp: true, loading: '', error: '', info: null as Loaded | null };
   const resize = () => {
     renderer.setPixelRatio(state.sharp ? Math.min(window.devicePixelRatio, 2) : 1);
     renderer.setSize(host.clientWidth, host.clientHeight, false);
@@ -373,15 +373,40 @@ export async function startDevRoom() {
         const keep: GeoKeep = (g.userData.devRoom ??= { index0: g.index, morph0: g.morphAttributes, lods: new Map() });
         let index = keep.index0;
         if (index && state.detail < 100) {
-          let lod = keep.lods.get(state.detail);
+          // SMART DETAIL (v0.33): her head keeps three times the share of triangles her body gets (a face reads
+          // from far away; a back or a thigh doesn't), for the same total. Only on her skin, which has the head.
+          const smart = state.smart && src.box.max.y > src.box.min.y && (mesh.material as THREE.Material).name === 'Material_0';
+          const key = `${state.detail}${smart ? 's' : ''}`;
+          let lod = keep.lods.get(key);
           if (!lod) {
             const pos = g.attributes.position;
             const points = new Float32Array(pos.count * 3);
             for (let i = 0; i < pos.count; i++) { points[i * 3] = pos.getX(i); points[i * 3 + 1] = pos.getY(i); points[i * 3 + 2] = pos.getZ(i); }
+            const all = new Uint32Array(index.array);
             const target = Math.max(3, Math.floor((index.count * state.detail) / 100 / 3) * 3);
-            const [lighter] = MeshoptSimplifier.simplify(new Uint32Array(index.array), points, 3, target, 1);
+            let lighter: Uint32Array;
+            if (smart) {
+              // Split her triangles at the neck (86% of her height), and lighten each part by itself; the
+              // edge between them is kept as it is ('LockBorder'), so the two parts still meet
+              const neckY = src.box.min.y + (src.box.max.y - src.box.min.y) * 0.86;
+              const head: number[] = [], body: number[] = [];
+              for (let t = 0; t < all.length; t += 3) {
+                const y = (points[all[t] * 3 + 1] + points[all[t + 1] * 3 + 1] + points[all[t + 2] * 3 + 1]) / 3;
+                const part = y > neckY ? head : body;
+                part.push(all[t], all[t + 1], all[t + 2]);
+              }
+              const headTarget = Math.min(head.length, Math.floor((head.length * Math.min(1, (state.detail / 100) * 3)) / 3) * 3);
+              const bodyTarget = Math.max(3, Math.floor((target - headTarget) / 3) * 3);
+              const [h2] = MeshoptSimplifier.simplify(new Uint32Array(head), points, 3, Math.max(3, headTarget), 1, ['LockBorder']);
+              const [b2] = MeshoptSimplifier.simplify(new Uint32Array(body), points, 3, bodyTarget, 1, ['LockBorder']);
+              lighter = new Uint32Array(h2.length + b2.length);
+              lighter.set(h2, 0);
+              lighter.set(b2, h2.length);
+            } else {
+              [lighter] = MeshoptSimplifier.simplify(all, points, 3, target, 1);
+            }
             lod = new THREE.BufferAttribute(lighter, 1);
-            keep.lods.set(state.detail, lod);
+            keep.lods.set(key, lod);
           }
           index = lod;
         }
@@ -603,6 +628,15 @@ export async function startDevRoom() {
     await applyModelSettings(src);
     if (ticket !== building) return;
     for (let i = 0; i < state.count; i++) people.push(makePerson(state.model, src, i));
+    // How many triangles ONE of them is, as she is drawn now (her visible pieces and her hair)
+    let tris = 0;
+    people[0]?.root.traverse((o) => {
+      const mesh = o as THREE.Mesh;
+      if (!mesh.isMesh || !mesh.visible) return;
+      const g = mesh.geometry;
+      tris += (g.index ? g.index.count : g.attributes.position.count) / 3;
+    });
+    state.perChar = Math.round(tris);
     state.info = src;
     state.loading = '';
     onBuilt();
@@ -616,6 +650,7 @@ export async function startDevRoom() {
   const shadowBtn = button(optRow, '', () => { state.shadows = !state.shadows; sync(); });
   const shapeBtn = button(optRow, '', () => { state.shapes = state.shapes === 'live' ? 'baked' : state.shapes === 'baked' ? 'off' : 'live'; sync(); void rebuild(); });
   const motionBtn = button(optRow, '', () => { state.motion = state.motion === 'walk' ? 'idle' : state.motion === 'idle' ? 'off' : 'walk'; sync(); void rebuild(); });
+  const smartBtn = button(optRow, '', () => { state.smart = !state.smart; sync(); void rebuild(); });
   const underBtn = button(optRow, '', () => { state.underwear = !state.underwear; sync(); void rebuild(); });
   const plainBtn = button(optRow, '', () => { state.plain = !state.plain; sync(); void rebuild(); });
   const sharpBtn = button(optRow, '', () => { state.sharp = !state.sharp; sync(); resize(); });
@@ -632,6 +667,8 @@ export async function startDevRoom() {
     shapeBtn.classList.toggle('on', state.shapes !== 'off');
     motionBtn.textContent = `Motion: ${state.motion}`;
     motionBtn.classList.toggle('on', state.motion !== 'off');
+    smartBtn.textContent = `Smart detail: ${state.smart ? 'on' : 'off'}`;
+    smartBtn.classList.toggle('on', state.smart);
     underBtn.textContent = `Hidden pieces: ${state.underwear ? 'drawn' : 'skipped'}`;
     underBtn.classList.toggle('on', state.underwear);
     plainBtn.textContent = `Materials: ${state.plain ? 'plain' : 'full'}`;
@@ -713,7 +750,8 @@ export async function startDevRoom() {
         `slowest frame ${worstShown.toFixed(0)} ms`,
         `${people.length} x ${state.model.label}`,
         `${(r.triangles / 1e6).toFixed(2)}M triangles drawn · ${r.calls} draw calls`,
-        info ? `model: ${(info.tris / 1000).toFixed(0)}k triangles · ${info.mb.toFixed(1)} MB · loaded in ${(info.ms / 1000).toFixed(1)} s` : '',
+        state.perChar ? `each character: ${(state.perChar / 1000).toFixed(1)}k triangles as drawn` : '',
+        info ? `the file: ${(info.tris / 1000).toFixed(0)}k triangles · ${info.mb.toFixed(1)} MB · loaded in ${(info.ms / 1000).toFixed(1)} s` : '',
         `screen ${renderer.domElement.width} x ${renderer.domElement.height}`,
         state.loading,
         state.error,
