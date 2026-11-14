@@ -74,7 +74,8 @@ sharpness, to find what the cost really is. v0.29.4: **Body shapes: live / baked
 final shape worked out once into her own plain body, nothing blended per frame) and **Hidden pieces: drawn /
 skipped** (the underwear pieces under the painted outfit, about half the body's points and 13 of its 14 draw calls). v0.29.5: **Motion: walk / idle / off**, using the builder's own
 posing code (a copy in `src/vendor/ccbs/`, see its README): she breathes and sways standing, and walks with her
-weight, on her bones, so it works the same with baked shapes. Nothing in the room touches the save. Code: `src/devRoom.ts`. Remove when the
+weight, on her bones, so it works the same with baked shapes. Baked bodies keep four motion shapes live (the belly's sag,
+drop and swing, the bust's drop), driven by the builder's spring rules; the other 39 are baked in. Nothing in the room touches the save. Code: `src/devRoom.ts`. Remove when the
 character decision is made.
 
 ## 🎓 Tutorial and How to play

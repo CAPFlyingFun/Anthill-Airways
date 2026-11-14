@@ -31,6 +31,7 @@ import { measureHuman } from './vendor/ccbs/humanSkeleton';
 import { poseHuman, humanStride } from './vendor/ccbs/humanPose';
 import { walkWeight, weighWalk } from './vendor/ccbs/walkWeight';
 import type { HumanMeasure, MutableJointTurn } from './vendor/ccbs/humanRig';
+import { MOTION_TARGETS, motionWeights, restingBellySpring, stepBellySpring, stepBreastSpring, walkBounceAccel, walkSwayAccel, type BellySpring } from './vendor/ccbs/bellyMotion';
 
 /** The builder's published models (GitHub Pages: the same origin as this game when it's live). */
 const BUILDER = 'https://capflyingfun.github.io/Custom-Character-Builder-System/models/';
@@ -189,6 +190,12 @@ interface Person {
     walked: number;     // how far she has walked, in the room's units
     out: MutableJointTurn[];
     out2: MutableJointTurn[];
+    // Her belly's and bust's weight: two springs, and where her four motion shapes are on each of her meshes
+    belly: BellySpring;
+    breast: BellySpring;
+    bumpPercent: number;
+    soft: { influences: number[]; at: number[] }[];
+    weights: number[];
   };
 }
 
@@ -392,7 +399,7 @@ export async function startDevRoom() {
    * every point of her on every frame. Baked, her final shape is worked out ONCE, here, into a plain body of
    * her own (only the points her detail level still draws), and nothing is blended while she walks.
    */
-  const bakeGeometry = (g: THREE.BufferGeometry, weights: [number, number][]) => {
+  const bakeGeometry = (g: THREE.BufferGeometry, weights: [number, number][], live: [string, number][]) => {
     const keep = g.userData.devRoom as GeoKeep;
     const index = g.index!;
     const src = g.attributes;
@@ -435,6 +442,28 @@ export async function startDevRoom() {
         out.setAttribute(name, new THREE.BufferAttribute(arr, size, a.normalized));
       }
     }
+    // HER MOTION SHAPES STAY LIVE (Joshua, 2026-11-14: "leave belly/breasts/breathing live, the rest baked"): the
+    // four that move with her walk are carried over, for her own points only. Her breathing is her bones.
+    for (const kind of ['position', 'normal'] as const) {
+      const morphs = keep.morph0[kind] as THREE.BufferAttribute[] | undefined;
+      const base = src[kind] as THREE.BufferAttribute | undefined;
+      if (!morphs || !base || live.length === 0) continue;
+      out.morphAttributes[kind] = live.map(([name, mi]) => {
+        const m = morphs[mi];
+        const arr = new Float32Array(n * 3);
+        for (let k = 0; k < n; k++) {
+          const o = order[k];
+          const rel = g.morphTargetsRelative;
+          arr[k * 3] = m.getX(o) - (rel ? 0 : base.getX(o));
+          arr[k * 3 + 1] = m.getY(o) - (rel ? 0 : base.getY(o));
+          arr[k * 3 + 2] = m.getZ(o) - (rel ? 0 : base.getZ(o));
+        }
+        const a = new THREE.BufferAttribute(arr, 3);
+        a.name = name;
+        return a;
+      });
+    }
+    out.morphTargetsRelative = true;
     out.setIndex(new THREE.BufferAttribute(tri, 1));
     out.userData.devRoomOwn = true;
     return out;
@@ -470,7 +499,10 @@ export async function startDevRoom() {
         if (body && state.shapes === 'baked' && mesh.geometry.index) {
           const weights: [number, number][] = [];
           for (const [name, v] of Object.entries(shape)) if (dict && dict[name] !== undefined && v !== 0) weights.push([dict[name], v]);
-          mesh.geometry = bakeGeometry(mesh.geometry, weights);
+          const live: [string, number][] = [];
+          if (state.motion !== 'off' && dict) for (const name of MOTION_TARGETS) if (dict[name] !== undefined) live.push([name, dict[name]]);
+          mesh.geometry = bakeGeometry(mesh.geometry, weights, live);
+          if (live.length) mesh.updateMorphTargets(); // (only her motion shapes now, by name)
         }
         if (state.plain) {
           // (the cheapest material there is, one flat colour: is it her skin and outfit that cost?)
@@ -483,7 +515,7 @@ export async function startDevRoom() {
               ? mesh.material.map((m) => paintedMaterial(m, src.box, look))
               : paintedMaterial(mesh.material, src.box, look);
           }
-          if (dict && mesh.morphTargetInfluences) {
+          if (state.shapes === 'live' && dict && mesh.morphTargetInfluences) {
             mesh.morphTargetInfluences.fill(0);
             for (const [name, v] of Object.entries(shape)) if (dict[name] !== undefined) mesh.morphTargetInfluences[dict[name]] = v;
           }
@@ -519,7 +551,17 @@ export async function startDevRoom() {
         const a = measure.joints.head, b = measure.joints.ankleL;
         const inRoom = bones[a].getWorldPosition(new THREE.Vector3()).distanceTo(bones[b].getWorldPosition(new THREE.Vector3()));
         const inBind = Math.hypot(rig.bind[a].x - rig.bind[b].x, rig.bind[a].y - rig.bind[b].y, rig.bind[a].z - rig.bind[b].z);
-        person.live = { rig, measure, carry: look.bump / 100, perUnit: inBind / Math.max(1e-6, inRoom), walked: r() * 10, out: [], out2: [] };
+        const soft: { influences: number[]; at: number[] }[] = [];
+        body.traverse((o) => {
+          const mesh = o as THREE.Mesh;
+          const d = mesh.morphTargetDictionary;
+          if (!mesh.isMesh || !mesh.visible || !d || !mesh.morphTargetInfluences) return;
+          soft.push({ influences: mesh.morphTargetInfluences, at: MOTION_TARGETS.map((name) => d[name] ?? -1) });
+        });
+        person.live = {
+          rig, measure, carry: look.bump / 100, perUnit: inBind / Math.max(1e-6, inRoom), walked: r() * 10, out: [], out2: [],
+          belly: restingBellySpring(), breast: restingBellySpring(), bumpPercent: look.bump, soft, weights: [0, 0, 0, 0],
+        };
       } catch (e) {
         state.error = `No moving skeleton: ${e instanceof Error ? e.message : String(e)}`;
       }
@@ -627,6 +669,15 @@ export async function startDevRoom() {
         let turns = poseHuman(m.measure, m.rig.bind, { stance: walking ? 'walk' : 'stand', phase, seconds: t + p.phase, lean: 0, carry: m.carry }, m.out);
         if (walking) turns = weighWalk(m.measure, turns, walkWeight(phase, 'walk'), m.out2);
         m.rig.apply(turns);
+        // Her belly's and bust's weight: the walk's bounce and sway, felt by their springs (the builder's own rule)
+        const stride = humanStride(m.measure, 'walk', m.carry);
+        const strideSeconds = walking ? stride / Math.max(1e-6, Math.abs(p.speed) * p.radius * m.perUnit) : 0;
+        const upA = walking ? walkBounceAccel(phase, strideSeconds) : 0;
+        const leftA = walking ? walkSwayAccel(phase, strideSeconds) : 0;
+        stepBellySpring(m.belly, dt, upA, leftA);
+        stepBreastSpring(m.breast, dt, upA, leftA);
+        motionWeights(m.bumpPercent, m.belly, m.breast, m.weights);
+        for (const sm of m.soft) for (let k = 0; k < 4; k++) if (sm.at[k] >= 0) sm.influences[sm.at[k]] = m.weights[k];
       }
       p.root.position.set(x, m ? 0 : Math.abs(Math.sin(t * 5 + p.phase)) * 0.05, z);
       p.root.rotation.y = -p.angle + (p.speed > 0 ? 0 : Math.PI); // (facing the way she goes)
