@@ -119,7 +119,7 @@ export interface DeskOpts {
   order?: () => { name: string; kind: HumanKind; wants: number };
   /** Seconds until the first guest comes (default: about one interval). */
   firstIn?: number;
-  entry: THREE.Vector3[];    // waypoints from outside to the back of the line
+  entry: THREE.Vector3[] | (() => THREE.Vector3[]); // waypoints from outside to the back of the line (or a new way in for each guest)
   exit: (from: THREE.Vector3) => THREE.Vector3[]; // where they go when done
 }
 
@@ -235,7 +235,7 @@ export class Desk {
     const order = this.opts.order?.();
     const kind = order?.kind ?? this.opts.kinds[Math.floor(Math.random() * this.opts.kinds.length)];
     const model = person(kind);
-    const [start, ...rest] = this.opts.entry;
+    const [start, ...rest] = typeof this.opts.entry === 'function' ? this.opts.entry() : this.opts.entry;
     model.root.position.copy(start);
     this.scene.add(model.root);
     // 1-3 items each (more with ⬆️ Bigger Orders), or what their order says

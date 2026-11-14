@@ -9,7 +9,7 @@ An idle arcade tycoon (walk around, stack stuff on your back, unlock new land) w
 ▶️ **Play:** https://capflyingfun.github.io/Anthill-Airways-Dino/
 On iPhone: open in Safari → Share → **Add to Home Screen** to install it as an app (works offline).
 
-## 🏝️ Anthill Island (test version, v0.30)
+## 🏝️ Anthill Island (test version, v0.31)
 
 The new one-island game from the design doc, playable in its own save slot: **⚙️ Settings → Save slots →
 an empty slot → 🏝️ Anthill Island (test)**. Your Anthill Airways slots aren't touched. This test is the
@@ -55,6 +55,12 @@ at the snack stand, two neighbors at once), and after it **Bigger orders** (cust
 - ⬆️ The building panels work here too (bread box, farm, snack stand, bean sacks, coffee machine, café, Staff),
   and the arrow-and-quest tutorial (15 steps) walks you through all of it (⚙️ Settings → 📖 How to play has this
   game's guide).
+- 🏘️ **The neighborhood** (v0.31, step 1 of "the street comes alive"): real houses across the street and up a side street
+  that meets it at the corner (gable roofs, doors with porches, windows, garages and driveways: built to hold up in
+  the 👁️ first-person view), a second sidewalk and crosswalks. Your customers come **out of a house's front door**,
+  cross at the crosswalk, shop, and **walk home into a house** (not always the same one); a few neighbors are always
+  out for a stroll. Your own house is a real house too. Each house is one merged mesh. Next: cars (step 2), then
+  shops as buildings you walk into, roofs off in the top-down view (step 3). Code: `src/world/neighborhood.ts`.
 - 🗺️ **The minimap** (top right, under the 👁️ 🎒 buttons, after Beyond Extinction's): north up, centred on you
   (the blue arrow), the stations as icons (a red **!** on a counter whose buyers wait at an empty shelf), glowing
   tiles as gold squares, and the quest as a pulsing gold ring (or a gold arrow on the edge when it's further

@@ -41,6 +41,7 @@ import { TextSprite, makePad, titleTag } from './labels';
 import { Blocker, CashPad, ProcessorOpts, ResourcePile, TrashBin, UnlockTile, Zone, gridLayout } from './stations';
 import { Desk, person } from './airportWorld';
 import { TUTORIAL_DONE, Tutorial, TutorialScript } from './tutorial';
+import { Neighborhood } from './neighborhood';
 import type { MapArea, MapMarker, MapRect, MapSeg, MapView } from '../ui/minimap';
 
 const mat = (color: number, roughness = 0.7, metalness = 0) => new THREE.MeshStandardMaterial({ color, roughness, metalness });
@@ -631,6 +632,8 @@ export class HomeWorld {
   private plotSign: TextSprite[] = [];  // what the café plot needs, over its gate
   private plotSignT = 0;
   private cafeOpen = false;
+  /** 🏘️ The streets and houses around you: where your customers come from and go home to. */
+  private hood!: Neighborhood;
   private gate2 = new THREE.Group();    // the closed gate from the café to the store plot
   private lot2 = new THREE.Group();     // the store's empty lot
   private plotSign2: TextSprite[] = []; // what the store plot needs, over its gate
@@ -709,8 +712,9 @@ export class HomeWorld {
     this.stand = new Desk(this.scene, -6, 6.6, this.flyers, this.standPad, null, {
       mode: 'cafe', sells: 'snack', machine: false, awning: 0xe76f51, label: '🍪 SNACK STAND', color: 0xc8975a, kinds: CAFE_KINDS,
       interval: HOME.stand.interval, queueMax: HOME.stand.queueMax, serve: HOME.stand.serve,
-      entry: [new THREE.Vector3(13.8, 0, 16), new THREE.Vector3(13.8, 0, 9.6), new THREE.Vector3(5, 0, 9.6)],
-      exit: (from) => [new THREE.Vector3(from.x, 0, 10.4), new THREE.Vector3(13.8, 0, 10.4), new THREE.Vector3(13.8, 0, 16)],
+      // (they come out of a house across the street, over the crosswalk and in by the gap in the fence; and go home again)
+      entry: () => this.hood.routeIn(13.8, [new THREE.Vector3(13.8, 0, 9.6), new THREE.Vector3(5, 0, 9.6)], this.home.orders < 2),
+      exit: (from) => this.hood.routeOut(13.8, [new THREE.Vector3(from.x, 0, 10.4), new THREE.Vector3(13.8, 0, 10.4)]),
       staff2: () => person('h-crew1'), // (the ⬆️ panel's 2nd cashier: a 2nd line, two neighbors at once)
       order: () => this.nextNeighbor(),
       firstIn: HOME.order.firstIn,
@@ -785,30 +789,10 @@ export class HomeWorld {
       s.add(m);
       return m;
     };
-    flat(120, 2.6, 0xc9c5bd, 10, 13.6, 0.005); // sidewalk
-    flat(120, 9, 0x4a4f55, 10, 19.5, 0.004);   // street
-    for (let x = -46; x <= 66; x += 7) flat(3, 0.3, 0xf2d25a, x, 19.5, 0.008);
-    // Houses across the street (just shapes, for the neighborhood feel)
-    const colors = [0xf4a261, 0x8ecae6, 0xe9c46a, 0xb5e48c, 0xcdb4db];
-    for (let i = 0; i < 6; i++) {
-      const hx = -30 + i * 16;
-      s.add(box(10, 5, 7, mat(colors[i % colors.length], 0.8), hx, 2.5, 30));
-      const roof = new THREE.Mesh(new THREE.ConeGeometry(7.2, 3, 4), mat(0x6d4c41, 0.8));
-      roof.position.set(hx, 6.5, 30);
-      roof.rotation.y = Math.PI / 4;
-      roof.scale.set(1, 1, 0.75);
-      s.add(roof);
-    }
-
-    // Your house, north of the yard, with a back deck
-    s.add(box(20, 6.5, 8, mat(0xf1e3c8, 0.8), -5, 3.25, -17));
-    const roof = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 6.2, 3.4, 4, 1), mat(0x8d5b4c, 0.8));
-    roof.rotation.y = Math.PI / 4;
-    roof.scale.set(1.62, 1, 0.66);
-    roof.position.set(-5, 8.2, -17);
-    s.add(roof);
-    for (const wx of [-12, -7.5, 2]) s.add(box(2.2, 1.8, 0.1, mat(0x4f6d8a, 0.2, 0.3), wx, 3.6, -12.96));
-    s.add(box(1.6, 3.0, 0.1, mat(0x7a4b2a, 0.7), -3, 1.5, -12.96)); // back door
+    // 🏘️ The neighborhood (v0.31): the streets, the sidewalks, the houses across the street and up the
+    // side street, and your own house north of the yard, its back door onto the deck
+    this.hood = new Neighborhood(s);
+    Neighborhood.yourHouse(s);
     s.add(box(14, 0.3, 2.2, mat(0xa0703f, 0.85), -5, 0.15, -12)); // deck
     // A big shade tree, a smaller one behind the picnic table, and some bushes
     this.tree(12, -8.5, 1.0);
@@ -1107,8 +1091,8 @@ export class HomeWorld {
     const cafe = new Desk(this.scene, 23, 1.5, this.flyers, pad, null, {
       mode: 'cafe', sells: 'coffee', awning: 0x2d6cdf, label: '☕ CORNER CAFÉ', color: 0xd9a066, kinds: CAFE_KINDS,
       interval: HOME.cafe.interval, queueMax: HOME.cafe.queueMax, serve: HOME.cafe.serve,
-      entry: [new THREE.Vector3(33, 0, 15), new THREE.Vector3(33, 0, 5)],
-      exit: (from) => [new THREE.Vector3(from.x, 0, 5), new THREE.Vector3(33, 0, 15)],
+      entry: () => this.hood.routeIn(33, [new THREE.Vector3(33, 0, 5)]),
+      exit: (from) => this.hood.routeOut(33, [new THREE.Vector3(from.x, 0, 5)]),
       staff2: () => person('h-balance'), // (the ⬆️ panel's 2nd cashier: someone who looks different from the first)
     });
     cafe.onServe = (byPlayer) => {
@@ -1181,8 +1165,8 @@ export class HomeWorld {
     const store = new Desk(this.scene, 44, 1.5, this.flyers, pad, null, {
       mode: 'cafe', sells: 'shopbag', machine: false, awning: 0x2f9e5b, label: '🛒 CORNER STORE', color: 0xbfd8a8, kinds: STORE_KINDS,
       interval: HOME.store.interval, queueMax: HOME.store.queueMax, serve: HOME.store.serve,
-      entry: [new THREE.Vector3(54, 0, 15), new THREE.Vector3(54, 0, 5)],
-      exit: (from) => [new THREE.Vector3(from.x, 0, 5), new THREE.Vector3(54, 0, 15)],
+      entry: () => this.hood.routeIn(54, [new THREE.Vector3(54, 0, 5)]),
+      exit: (from) => this.hood.routeOut(54, [new THREE.Vector3(from.x, 0, 5)]),
       staff2: () => person('h-exec'),
     });
     store.onServe = (byPlayer) => {
@@ -1365,6 +1349,7 @@ export class HomeWorld {
     this.beans?.update(dt);
     this.machine?.update(dt);
     this.groceries?.update(dt);
+    this.hood.update(dt);
     this.packing?.update(dt);
     for (const w of this.workers) w.update(dt, this.flyers);
     for (const b of this.bankers) b.update(dt, this.flyers);
@@ -1558,15 +1543,14 @@ export class HomeWorld {
   // 🗺️ The minimap
   // --------------------------------------------------------------------------
   /** The whole map (the big view fits it): your house to the street, the yard and the café plot. */
-  static readonly MAP_BOUNDS: MapRect = { minX: -17, maxX: 59, minZ: -22, maxZ: 18 };
+  static readonly MAP_BOUNDS: MapRect = { minX: -34, maxX: 59, minZ: -22, maxZ: 38 };
 
   /** What the minimap draws right now. */
   mapView(): MapView {
     const Y = HOME.yard;
     const P = HOME.cafePlot;
     const areas: MapArea[] = [
-      { rect: { minX: -60, maxX: 90, minZ: 12.3, maxZ: 14.9 }, fill: '#c9c5bd' }, // sidewalk
-      { rect: { minX: -60, maxX: 90, minZ: 14.9, maxZ: 24 }, fill: '#4a4f55' },   // street
+      ...this.hood.mapAreas(), // the streets, the sidewalks and the neighbors' houses
       { rect: Y, fill: '#79c257', label: 'Your backyard' },
       this.cafeOpen
         ? { rect: P, fill: '#d8cbb3', label: 'Corner Café' }
