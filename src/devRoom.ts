@@ -1106,6 +1106,8 @@ export async function startDevRoom() {
   /** Where nobody is drawn any more, right now: SMART FPS's draw range, or the fade's own end. */
   let fadeEnd: number = FADE.end;
   const seen: Person[] = [];
+  /** Everybody inside the camera's picture this frame (SMART FPS picks its number of people from these, nearest first). */
+  const near: Person[] = [];
   /** The one point the draw range and the fade are measured from (see the frame loop). */
   const fadeFrom = new THREE.Vector3();
   // --------------------------------------------------------------------------
@@ -1124,28 +1126,56 @@ export async function startDevRoom() {
   // (v0.48 to v0.51 was a ladder instead: everybody a level lighter, then everybody at the lightest, then ten
   // fewer drawn a step. Joshua: "Let's leave the % alone". It is in the git history at b507cda.)
   // --------------------------------------------------------------------------
-  const SMART = { start: 20 * METRE, least: 5 * METRE, most: 60 * METRE, edge: 3 * METRE, every: 0.5, grow: 1 * METRE, shrink: 2 * METRE, band: 0.1 };
-  const smart = { range: SMART.start, vel: 0, t: 0, frames: 0, ms: 0, cap: 0, rate: 0, reach: 0 };
-  const smartReset = () => { smart.range = SMART.start; smart.vel = 0; smart.t = 0; smart.frames = 0; smart.ms = 0; };
-  /** One frame (`ms` = the real time since the last one): the range moves; every SMART.every seconds its direction is chosen. */
-  const smartTick = (ms: number) => {
-    if (!state.fps) { smart.vel = 0; return; }
-    if (document.hidden || ms > 3000) { smart.t = 0; smart.frames = 0; smart.ms = 0; return; } // (back from the background: not a frame time)
-    // (no growing past the furthest person there is to draw: an empty range would let a crowd in all at once)
-    const room = Math.min(SMART.most, smart.reach + SMART.edge);
-    smart.range = THREE.MathUtils.clamp(smart.range + (smart.vel > 0 && smart.range >= room ? 0 : smart.vel) * (ms / 1000), SMART.least, SMART.most);
-    smart.frames++; smart.ms += ms; smart.t += ms / 1000;
+  // (v0.54, from Joshua's two 30 s logs: "the FPS acts like a yoyo... find a way to balance quicker/smoother".
+  // What the logs showed, every 12 s or so: holding at 30 with the range still; people walk into the range (86 drawn
+  // becomes 101 with nothing changed); the rate falls to 22; the range shrinks 2 m a second and goes on shrinking for
+  // two seconds after there are few enough, because the phone's browser takes that long to come back up from a slow
+  // frame rate; by then a third of the people are gone and it runs at 49; then it grows straight back to the same
+  // edge. And in the top-down view 43 of 92 people were in the 3 m fade at once. So now:
+  //   - the dial is a NUMBER OF PEOPLE, not a distance: the range is wherever that many people end, so people
+  //     walking in and out no longer change the load;
+  //   - too slow: ONE cut, sized by how far under the target it is (5 to 20% fewer), then SMART.settle seconds to
+  //     let the frame rate come back before judging again;
+  //   - a ceiling a little under the number that was too many, so it does not grow straight back into the same
+  //     trouble. Once things have been fast for a while the ceiling is tried again, one person a second, and each
+  //     time that fails soon after, it waits twice as long before the next try (10 s, 20, 40, 60);
+  //   - the fade is the last 15% of the range (1 to 3 m), not always 3 m.)
+  const SMART = { first: 60, fewest: 8, least: 3 * METRE, most: 60 * METRE, every: 0.5, band: 0.1, settle: 1.5, probe: 10, probeMost: 60 };
+  const smart = { count: SMART.first, ceil: MOST_PEOPLE, hold: 0, probe: SMART.probe, cutAt: -999, clock: 0, tries: 0, doing: 'holding', range: 20 * METRE, edge: 3 * METRE, shown: 0, bound: false, t: 0, frames: 0, ms: 0, cap: 0, rate: 0, work: 0, workMs: 0 };
+  const smartReset = () => { smart.count = SMART.first; smart.ceil = MOST_PEOPLE; smart.hold = 0; smart.probe = SMART.probe; smart.cutAt = -999; smart.doing = 'holding'; smart.t = 0; smart.frames = 0; smart.ms = 0; smart.work = 0; };
+  /** One frame (`ms` = the real time since the last one, `work` = how long this frame's own work took): every SMART.every seconds, judge. */
+  const smartTick = (ms: number, work: number) => {
+    if (document.hidden || ms > 3000) { smart.t = 0; smart.frames = 0; smart.ms = 0; smart.work = 0; return; } // (back from the background: not a frame time)
+    smart.frames++; smart.ms += ms; smart.work += work; smart.t += ms / 1000;
     if (smart.t < SMART.every) return;
-    const rate = (smart.frames * 1000) / smart.ms;
-    smart.t = 0; smart.frames = 0; smart.ms = 0;
+    const rate = (smart.frames * 1000) / smart.ms, took = smart.t;
+    smart.workMs = smart.work / smart.frames;
+    smart.t = 0; smart.frames = 0; smart.ms = 0; smart.work = 0;
     smart.rate = rate;
+    smart.clock += took;
     // (the fastest this screen has gone: a phone in Low Power Mode never passes 30, a 60 Hz screen never passes 60,
     // so "10% over the target" could never come. Running flat out at the screen's own limit counts as over.)
     smart.cap = Math.max(smart.cap, Math.min(rate, 125));
+    if (!state.fps) { smart.doing = 'off'; return; }
     const target = state.target;
-    if (rate < target * (1 - SMART.band)) smart.vel = rate < target * 0.67 ? -SMART.shrink * 2 : -SMART.shrink;
-    else if (rate >= target * (1 + SMART.band) || rate >= smart.cap * 0.95) smart.vel = SMART.grow;
-    else smart.vel = 0;
+    smart.hold = Math.max(0, smart.hold - took);
+    if (rate < target * (1 - SMART.band)) {
+      if (smart.hold > 0) { smart.doing = 'waiting'; return; }
+      const had = Math.max(SMART.fewest, Math.min(smart.count, smart.shown));
+      // (a try at the ceiling that failed soon after: wait twice as long before the next)
+      smart.probe = smart.clock - smart.cutAt < smart.probe * 2 + 8 ? Math.min(SMART.probeMost, smart.probe * 2) : SMART.probe;
+      smart.count = Math.max(SMART.fewest, Math.floor(had * THREE.MathUtils.clamp(rate / target, 0.8, 0.95)));
+      smart.ceil = Math.max(smart.count, Math.floor(had * 0.95));
+      smart.hold = SMART.settle;
+      smart.cutAt = smart.clock;
+      smart.tries = 0;
+      smart.doing = 'fewer';
+    } else if (rate >= target * (1 + SMART.band) || rate >= smart.cap * 0.95) {
+      if (!smart.bound) { smart.doing = 'everyone in reach'; return; } // (the number isn't what limits it: nothing to add)
+      // (fast for long enough: the ceiling itself is tried again, half as quickly as the growing under it)
+      if (smart.count >= smart.ceil && smart.clock - smart.cutAt > smart.probe && ++smart.tries % 2 === 0) smart.ceil = Math.min(MOST_PEOPLE, smart.ceil + 1);
+      if (smart.count < smart.ceil) { smart.count++; smart.doing = 'more'; } else smart.doing = 'at its limit';
+    } else smart.doing = 'holding';
   };
   let building = 0;
   let lastSrc: Loaded | null = null;
@@ -1299,7 +1329,7 @@ export async function startDevRoom() {
     stress.results.push({ n, fps, seen });
     const shownNow = people.filter((q) => q.root.visible).length;
     const who = (stress.mode === 'room' ? `${n} (${inView} in view${shownNow < inView ? `, ${shownNow} drawn` : ''})` : shownNow < n ? `${n} (${shownNow} drawn)` : `${n}`);
-    const note = state.fps && stress.mode !== 'view' ? ` · range ${(smart.range / METRE).toFixed(0)} m` : '';
+    const note = state.fps && stress.mode !== 'view' ? ` · ${smart.count} people to ${(smart.range / METRE).toFixed(0)} m` : '';
     stress.t = 0; stress.frames = 0; stress.ms = 0;
     if (fps < STRESS.stopBelow) {
       stressEnd(`${who} = <${STRESS.stopBelow} fps 🛑`);
@@ -1334,7 +1364,7 @@ export async function startDevRoom() {
     rec.head = JSON.stringify({
       devRoom: VERSION, when: new Date().toISOString(), people: people.length, model: state.model.label,
       settings: { detail: state.auto ? 'auto live' : `${state.detail}%`, levels: TABLE.map((a) => `${a.detail}% to ${a.within === Infinity ? 'the end' : m1(a.within) + ' m'}`), shapes: state.shapes, shadows: state.shadows, motion: state.motion, cloth: state.cloth, outOfViewDrawn: !state.cull, fade: state.fade, smartFps: state.fps, target: state.target, sharp: state.sharp },
-      smart: { startM: m1(SMART.start), leastM: m1(SMART.least), mostM: m1(SMART.most), fadeLastM: m1(SMART.edge), growMPerS: m1(SMART.grow), shrinkMPerS: m1(SMART.shrink), band: SMART.band },
+      smart: { firstPeople: SMART.first, fewestPeople: SMART.fewest, mostM: m1(SMART.most), band: SMART.band, settleS: SMART.settle, probeS: SMART.probe, fade: 'last 15% of the range, 1 to 3 m' },
       screen: `${renderer.domElement.width} x ${renderer.domElement.height}`, pixelRatio: window.devicePixelRatio, browser: navigator.userAgent,
       distances: 'metres. cam = from the camera; from = from the point the range is measured from',
     });
@@ -1368,7 +1398,7 @@ export async function startDevRoom() {
     rec.samples.push(JSON.stringify({
       t: Math.round(rec.t * 10) / 10, fps: Math.round((rec.frames * 1000) / rec.ms), worstMs: Math.round(rec.worst),
       total: people.length, inView, drawn, solid, fading: fadingNow,
-      rangeM: state.fps ? m1(smart.range) : null, doing: !state.fps ? 'off' : smart.vel > 0 ? (smart.range >= Math.min(SMART.most, smart.reach + SMART.edge) ? 'all in reach' : 'growing') : smart.vel < 0 ? 'shrinking' : 'holding',
+      budget: state.fps ? smart.count : null, ceiling: state.fps ? smart.ceil : null, rangeM: state.fps ? m1(smart.range) : null, fadeM: state.fps ? m1(smart.edge) : null, doing: smart.doing, probeS: smart.probe, workMs: Math.round(smart.workMs * 10) / 10,
       smartRate: Math.round(smart.rate), cap: Math.round(smart.cap), target: state.target,
       nearestFadingCam: nearFade === Infinity ? null : m1(nearFade), furthestSolidCam: m1(farSolid), nearestNotDrawnCam: nearHidden === Infinity ? null : m1(nearHidden),
       levels: lv, calls: r.calls, tris: r.triangles,
@@ -1454,7 +1484,7 @@ export async function startDevRoom() {
   const cullBtn = button(optRow, '', () => { state.cull = !state.cull; sync(); });
   const fadeBtn = button(optRow, '', () => { state.fade = !state.fade; sync(); void rebuild(); });
   const fpsBtn = button(optRow, '', () => { state.fps = !state.fps; smartReset(); sync(); });
-  const targetBtn = button(optRow, '', () => { state.target = state.target === 30 ? 45 : state.target === 45 ? 60 : 30; sync(); });
+  const targetBtn = button(optRow, '', () => { state.target = state.target === 30 ? 45 : state.target === 45 ? 60 : 30; smartReset(); sync(); });
   const sharpBtn = button(optRow, '', () => { state.sharp = !state.sharp; sync(); resize(); });
   const sync = () => {
     modelBtns.forEach((b, i) => b.classList.toggle('on', MODELS[i] === state.model));
@@ -1513,6 +1543,7 @@ export async function startDevRoom() {
     requestAnimationFrame(tick);
     const ms = Math.max(0, now - last);
     last = now;
+    const frameStart = performance.now();
     const dt = Math.min(0.05, ms / 1000);
     t += dt;
     let simulating = 0;
@@ -1615,7 +1646,8 @@ export async function startDevRoom() {
     // (where nobody is drawn any more: SMART FPS's draw range, or without it the fade's own 18 m; and the stretch
     // before it that she fades over. Smart FPS without the fade is a hard edge.)
     fadeEnd = ranging ? smart.range : fading ? FADE.end : Infinity;
-    const fadeBand = !fading ? 0 : ranging ? SMART.edge : FADE.end - FADE.start;
+    const fadeBand = !fading ? 0 : ranging ? smart.edge : FADE.end - FADE.start;
+    near.length = 0;
     let reach = 0;
     {
       const d = Math.hypot(camera.position.x, camera.position.y - 1.2, camera.position.z), k = Math.min(1, (4 * METRE) / Math.max(0.001, d));
@@ -1637,7 +1669,7 @@ export async function startDevRoom() {
         // `fadeFrom`: the camera itself while it is within 4 m of the spot it looks at, and otherwise the point
         // 4 m from that spot on the way to the camera. So from the camera's side, nearer is always more solid.)
         p.far = Math.hypot(fadeFrom.x - p.root.position.x, fadeFrom.y - 1.4, fadeFrom.z - p.root.position.z);
-        if (show && p.far > reach) reach = p.far;
+        if (show) { near.push(p); if (p.far > reach) reach = p.far; }
         f = fadeBand > 0 ? THREE.MathUtils.clamp((fadeEnd - p.far) / fadeBand, 0, 1) : p.far < fadeEnd ? 1 : 0;
         if (f <= 0) show = false;
       }
@@ -1646,7 +1678,19 @@ export async function startDevRoom() {
       if (show) seen.push(p);
     }
     drawn = seen.length;
-    smart.reach = reach;
+    smart.shown = drawn;
+    if (ranging) {
+      // (SMART FPS: the range is where its number of people ends: just short of the first one too many. It glides
+      // there, quicker coming in than going out, so a cut is a quick fade and not a pop.)
+      let want = Math.min(SMART.most, reach + smart.edge);
+      smart.bound = near.length > smart.count;
+      if (smart.bound) {
+        near.sort((a, b) => (a.far ?? 0) - (b.far ?? 0));
+        want = THREE.MathUtils.clamp(near[smart.count].far ?? want, SMART.least, SMART.most);
+      }
+      smart.range += (want - smart.range) * Math.min(1, (ms / 1000) * (want < smart.range ? 5 : 2));
+      smart.edge = THREE.MathUtils.clamp(smart.range * 0.15, 1 * METRE, 3 * METRE);
+    }
     // (someone not drawn is taken out of the scene: 400 people are some 40,000 bones, and three.js works out where
     // every bone in the scene is each frame, drawn or not. That was most of the cost of a big crowd out of view.)
     for (const p of people) {
@@ -1654,9 +1698,10 @@ export async function startDevRoom() {
       if (on !== p.shown) { p.shown = on; if (on) scene.add(p.root); else scene.remove(p.root); }
     }
     for (const p of people) p.cloth?.show(p.root.visible);
-    smartTick(ms);
     renderer.info.reset();
     renderer.render(scene, camera);
+    // (how long this frame's own work took, start to end: unlike the frame rate, the screen's refresh doesn't round it)
+    smartTick(ms, performance.now() - frameStart);
     if (document.hidden || ms > 3000) return; // (back from the background: not a frame time)
     stressTick(ms);
     recTick(ms);
@@ -1700,7 +1745,7 @@ export async function startDevRoom() {
         `slowest frame ${worstShown.toFixed(0)} ms`,
         `${people.length} x ${state.model.label}${state.cull ? ` · ${inView} in view` : ''}${drawn < inView ? ` · ${drawn} drawn` : ''}`,
         stress.on && stress.mode === 'view' ? 'smart FPS and fade: off for this test'
-          : state.fps ? `smart FPS: drawing to ${(smart.range / METRE).toFixed(0)} m${state.fade ? ' (fading the last 3)' : ''} · ${smart.vel > 0 ? (smart.range >= Math.min(SMART.most, smart.reach + SMART.edge) ? 'everyone in reach' : 'growing') : smart.vel < 0 ? 'shrinking' : 'holding'} · target ${state.target}`
+          : state.fps ? `smart FPS: up to ${smart.count} people, to ${(smart.range / METRE).toFixed(0)} m · ${smart.doing} · target ${state.target}`
           : state.fade ? 'fade: from 15 m · gone at 18 m' : '',
         `${(r.triangles / 1e6).toFixed(2)}M triangles drawn · ${r.calls} draw calls`,
         state.auto && people.some((q) => q.lods.length)
