@@ -11,3 +11,14 @@ springs and motion weights), not a whole file.
 
 They make the builder body stand, breathe and walk in the DEV Room (`src/devRoom.ts`). The builder repo is
 the source of truth: do not edit them here, re-copy them when the builder changes.
+
+## The cloth tee (added 2026-11-14, same commit)
+
+`sarahlab/` holds the builder's procedural cloth tee, for the DEV Room's CLOTH TEE test (`src/devRoomCloth.ts`):
+`sarahlab/garment/*`, and from `src/sarahlab/` `clothSim.ts`, `clothSkin.ts`, `clothTypes.ts`, `clothDetail.ts`,
+`detailSpots.ts`, `bodyRegions.ts`, `softBody.ts`, `breathSkin.ts`, `navelSoft.ts`, `navelPiece.ts` and `faceRig.ts`,
+all unchanged but for one thing: `navelSoft.ts` has three type casts written `as unknown as Float32Array` (this
+project's three.js types are stricter; nothing runs differently).
+
+`sarahlab/sarahLabTool.ts` is an excerpt (the cloth's dials only) and `actor/humanRig.ts` a one-line pointer to the
+copy above, so the copied files' own import paths still resolve.

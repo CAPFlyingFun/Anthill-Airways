@@ -24,6 +24,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
+import { ClothTest, SARAH_TEE } from './devRoomCloth';
 import { MeshoptSimplifier } from 'meshoptimizer/simplifier';
 // The builder's own posing code (a copy: see src/vendor/ccbs/README.md): how she stands, breathes and walks
 import { HumanRig } from './vendor/ccbs/HumanRigView';
@@ -416,6 +417,8 @@ interface Person {
   phase: number;
   /** AUTO detail: her baked body at each level, and the level she is drawn at now. */
   lods: PersonLod[];
+  /** The builder's cloth tee on her (the 'Cloth tee' test: the first person only). */
+  cloth?: ClothTest;
   level: number;
   /** The builder body's own moving skeleton (v0.29.5): her bones posed each frame by the builder's code. */
   live?: {
@@ -539,7 +542,7 @@ export async function startDevRoom() {
   el.addEventListener('wheel', (e) => { view.dist = THREE.MathUtils.clamp(view.dist * (1 + Math.sign(e.deltaY) * 0.1), 4, 60); }, { passive: true });
   const people: Person[] = [];
   // (the defaults are the settings Joshua settled on, 2026-11-14: 40 walking, auto detail, baked, smart, pieces skipped)
-  const state = { model: MODELS[0], count: 40, looks: 'random' as 'random' | 'saved' | 'off', seed: 0, shadows: true, detail: 10, shapes: 'baked' as 'live' | 'baked' | 'off', underwear: false, auto: true, smart: true, perChar: 0, motion: 'walk' as 'walk' | 'idle' | 'off', plain: false, sharp: true, loading: '', error: '', info: null as Loaded | null };
+  const state = { model: MODELS[0], count: 40, looks: 'random' as 'random' | 'saved' | 'off', seed: 0, shadows: true, detail: 10, shapes: 'baked' as 'live' | 'baked' | 'off', underwear: false, auto: true, smart: true, cloth: 'off' as 'off' | 'live' | 'freeze', perChar: 0, motion: 'walk' as 'walk' | 'idle' | 'off', plain: false, sharp: true, loading: '', error: '', info: null as Loaded | null };
   const resize = () => {
     renderer.setPixelRatio(state.sharp ? Math.min(window.devicePixelRatio, 2) : 1);
     renderer.setSize(host.clientWidth, host.clientHeight, false);
@@ -834,13 +837,18 @@ export async function startDevRoom() {
     // Which look she wears: Joshua's three in turn, or the plain standard body
     const picked = !def.builder || state.looks === 'off' ? PLAIN : state.looks === 'random' ? randomLook(i, state.seed) : LOOKS[i % LOOKS.length];
     // (a test's own changes to a look, for side-by-side comparisons: window.devRoom.tweak = (look, i) => ({ ...look, navel: -100 }))
-    const look = def.builder && hooks.tweak ? hooks.tweak(picked, i) : picked;
+    const tweaked = def.builder && hooks.tweak ? hooks.tweak(picked, i) : picked;
+    // (the cloth tee's wearer has its colour painted on her skin beneath it, so a point of skin showing between the
+    // cloth's own points is the tee's colour too)
+    const wearsCloth = def.builder && i === 0 && state.cloth !== 'off';
+    const look = wearsCloth ? { ...tweaked, top: new THREE.Color(SARAH_TEE.colour).getHex(), longSleeves: false } : tweaked;
     const tall = 1 + look.heightCm / STANDARD_CM;
     inner.scale.setScalar(src.scale * tall);
     inner.position.y = -src.minY * src.scale * tall;
     // Her shape, with the builder's own morphs and rules: her belly at her look's size, her bust with it
     const shape: Record<string, number> = { ...bellyWeights(look.bump / 100), ...bustWeights(look.bump, look.bust ?? 0), navelFlat: navelFlatFor(look.bump, look.navel ?? 0) };
     const lods: PersonLod[] = [];
+    let skin: { mesh: THREE.SkinnedMesh; dict: Record<string, number> } | undefined;
     for (const part of src.parts) {
       const copy = cloneSkinned(part); // (shares the geometry and textures; her skeleton is her own)
       copy.traverse((o) => {
@@ -849,6 +857,7 @@ export async function startDevRoom() {
         const body = def.builder && part === src.parts[0];
         let auto: PersonLod | undefined; // (this mesh's entry under AUTO detail, if it has one)
         const dict = mesh.morphTargetDictionary;
+        if (body && dict && mesh.isSkinnedMesh && mesh.geometry.getAttribute('_cloth_cover')) skin = { mesh, dict };
         if (state.shapes !== 'live') {
           mesh.morphTargetInfluences = undefined;
           mesh.morphTargetDictionary = undefined;
@@ -973,6 +982,18 @@ export async function startDevRoom() {
         state.error = `No moving skeleton: ${e instanceof Error ? e.message : String(e)}`;
       }
     }
+    const worn = skin as { mesh: THREE.SkinnedMesh; dict: Record<string, number> } | undefined;
+    if (wearsCloth && worn) {
+      try {
+        const keep = src.parts[0] && (() => { let k: GeoKeep | undefined; src.parts[0].traverse((o) => { const g = (o as THREE.Mesh).geometry; if (!k && g?.getAttribute?.('_cloth_cover')) k = g.userData.devRoom as GeoKeep; }); return k; })();
+        if (!keep?.index0) throw new Error('her body has no triangle list');
+        root.updateMatrixWorld(true);
+        person.cloth = new ClothTest({ part: src.parts[0], display: worn.mesh, inner, tall, index: keep.index0, morphs: keep.morph0, dict: worn.dict, shape, motion: MOTION_TARGETS, scene, freeze: state.cloth === 'freeze' });
+      } catch (e) {
+        console.error('[devroom] the cloth tee could not be put on her', e);
+        state.error = `No cloth tee: ${e instanceof Error ? e.message : String(e)}`;
+      }
+    }
     return person;
   };
 
@@ -1007,6 +1028,7 @@ export async function startDevRoom() {
         for (const geo of l.geos) if (!geo?.userData.devRoomShared) geo?.dispose(); // (her other detail levels; the shared live body isn't hers)
         for (const set of [l.fine, l.plain]) for (const m of set ? (Array.isArray(set) ? set : [set]) : []) m.dispose();
       }
+      p.cloth?.dispose();
       p.live?.rig.dispose();
       p.root.removeFromParent();
     }
@@ -1049,6 +1071,7 @@ export async function startDevRoom() {
   const smartBtn = button(optRow, '', () => { state.smart = !state.smart; sync(); void rebuild(); });
   const underBtn = button(optRow, '', () => { state.underwear = !state.underwear; sync(); void rebuild(); });
   const plainBtn = button(optRow, '', () => { state.plain = !state.plain; sync(); void rebuild(); });
+  const clothBtn = button(optRow, '', () => { state.cloth = state.cloth === 'off' ? 'live' : state.cloth === 'live' ? 'freeze' : 'off'; sync(); void rebuild(); });
   const sharpBtn = button(optRow, '', () => { state.sharp = !state.sharp; sync(); resize(); });
   const sync = () => {
     modelBtns.forEach((b, i) => b.classList.toggle('on', MODELS[i] === state.model));
@@ -1072,6 +1095,8 @@ export async function startDevRoom() {
     underBtn.classList.toggle('on', state.underwear);
     plainBtn.textContent = `Materials: ${state.plain ? 'plain' : 'full'}`;
     plainBtn.classList.toggle('on', !state.plain);
+    clothBtn.textContent = `Cloth tee: ${state.cloth === 'off' ? 'off' : state.cloth === 'live' ? 'simulated' : 'frozen once dressed'}`;
+    clothBtn.classList.toggle('on', state.cloth !== 'off');
     sharpBtn.textContent = `Sharpness: ${state.sharp ? '2x' : '1x'}`;
     sharpBtn.classList.toggle('on', state.sharp);
   };
@@ -1142,6 +1167,7 @@ export async function startDevRoom() {
       }
       p.root.position.set(x, m ? 0 : Math.abs(Math.sin(t * 5 + p.phase)) * 0.05, z);
       p.root.rotation.y = -p.angle + (p.speed > 0 ? 0 : Math.PI); // (facing the way she goes)
+      p.cloth?.update(dt);
     }
     camera.position.set(Math.sin(view.yaw) * Math.cos(view.pitch) * view.dist, Math.sin(view.pitch) * view.dist + 1.2, Math.cos(view.yaw) * Math.cos(view.pitch) * view.dist);
     camera.lookAt(0, 1.2, 0);
@@ -1177,6 +1203,7 @@ export async function startDevRoom() {
         state.auto && people.some((q) => q.lods.length)
           ? `auto${TABLE === AUTO ? '' : ' lite'}: ${TABLE.map((a, k) => [`${a.detail}%${a.live ? ' live' : ''}`, people.filter((q) => q.level === k).length] as const).filter(([, c]) => c > 0).map(([d, c]) => `${c} at ${d}`).join(' · ')}`
           : state.perChar ? `each character: ${(state.perChar / 1000).toFixed(1)}k triangles as drawn` : '',
+        people[0]?.cloth?.line() ?? '',
         info ? `the file: ${(info.tris / 1000).toFixed(0)}k triangles · ${info.mb.toFixed(1)} MB · loaded in ${(info.ms / 1000).toFixed(1)} s` : '',
         `screen ${renderer.domElement.width} x ${renderer.domElement.height}`,
         state.loading,
