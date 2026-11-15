@@ -89,11 +89,12 @@ const AUTO_LITE: { within: number; detail: number; live?: boolean }[] = [
  */
 const AUTO_LIVE: { within: number; detail: number; live?: boolean }[] = AUTO_LITE.map((a) => ({ ...a, live: true }));
 /** The table in use: AUTO, AUTO_LITE or AUTO_LIVE (their buttons). */
+// (v0.48: the room opens on AUTO LIVE with SMART FPS on, as Joshua ran his stress tests.)
 // (v0.43.1, the room's defaults, as Joshua tested them on his phone at 54-56 FPS with 40 walking and about 16 in
 // view: "Set these settings as default": Auto lite, body shapes LIVE, shadows on, cloth tee off, out of view not drawn.
 // With the shapes live everybody is drawn at 3% with all her shapes: Auto lite's lighter levels are baked bodies.)
 // (v0.42.1: the room opens on AUTO LITE. Joshua, 2026-11-14, on his phone with 40 walking: "These settings work best")
-let TABLE: { within: number; detail: number; live?: boolean }[] = AUTO_LITE;
+let TABLE: { within: number; detail: number; live?: boolean }[] = AUTO_LIVE;
 /** A person this far down the table (5% or lighter) lets go of her heaviest bodies again, to save memory. */
 const AUTO_DROP_FROM = 3;
 /** Cloth tees: how many are dressed at a time on their way to being frozen, and the most simulated for good. GAME TUNING. */
@@ -436,6 +437,8 @@ interface Person {
   clothMake?: (freeze: boolean) => ClothTest;
   /** How far she is from the camera (to her middle), as of this frame. */
   dist?: number;
+  /** AUTO detail: the level her distance alone asks for (SMART FPS may draw her lighter: `level` is what she is drawn at). */
+  band?: number;
   /** Her tee is being simulated because she is near the camera ('Cloth tee: near the camera'). */
   clothNear?: boolean;
   level: number;
@@ -577,7 +580,7 @@ export async function startDevRoom() {
   el.addEventListener('wheel', (e) => { view.dist = THREE.MathUtils.clamp(view.dist * (1 + Math.sign(e.deltaY) * 0.1), 4, 60); }, { passive: true });
   const people: Person[] = [];
   // (the defaults are the settings Joshua settled on, 2026-11-14: 40 walking, auto detail, baked, smart, pieces skipped)
-  const state = { model: MODELS[0], count: 40, looks: 'random' as 'random' | 'saved' | 'off', seed: 0, shadows: true, detail: 3, shapes: 'live' as 'live' | 'baked' | 'off', underwear: false, auto: false, smart: true, cull: true, cloth: 'off' as 'off' | 'live' | 'freeze' | 'near', perChar: 0, motion: 'walk' as 'walk' | 'idle' | 'off', plain: false, sharp: true, loading: '', error: '', info: null as Loaded | null };
+  const state = { model: MODELS[0], count: 40, looks: 'random' as 'random' | 'saved' | 'off', seed: 0, shadows: true, detail: 3, shapes: 'baked' as 'live' | 'baked' | 'off', underwear: false, auto: true, fps: true, smart: true, cull: true, cloth: 'off' as 'off' | 'live' | 'freeze' | 'near', perChar: 0, motion: 'walk' as 'walk' | 'idle' | 'off', plain: false, sharp: true, loading: '', error: '', info: null as Loaded | null };
   const resize = () => {
     renderer.setPixelRatio(state.sharp ? Math.min(window.devicePixelRatio, 2) : 1);
     renderer.setSize(host.clientWidth, host.clientHeight, false);
@@ -1038,6 +1041,49 @@ export async function startDevRoom() {
 
   const frustum = new THREE.Frustum(), cullMatrix = new THREE.Matrix4(), cullBall = new THREE.Sphere(new THREE.Vector3(), 2.4), cullAt = new THREE.Vector3();
   let inView = 0;
+  let drawn = 0;
+  const seen: Person[] = [];
+  // --------------------------------------------------------------------------
+  // 🎚️ SMART FPS (v0.48; Joshua, 2026-11-14, from his stress tests: "a smart system that automatically adjusts
+  // the %... reasonably 80 on screen and if FPS drops below 30... it starts moving closer 3% to 2% and 2% to 1, and
+  // if still not enough, everything to 1%, and if still laggy (really older phones), will lower the number of
+  // people drawn in the screen until FPS is good, while only doing the closest").
+  //
+  // A ladder of steps, climbed one at a time while the frame rate is under SMART.low and come back down, slowly,
+  // once it has been over SMART.high for a while:
+  //   0  as the Auto table says, the nearest SMART.most drawn (his tested limit for everybody in view)
+  //   1  everybody one level lighter than her distance asks (3% -> 2%, 2% -> 1%)
+  //   2  everybody at the lightest level
+  //   3+ fewer people drawn, ten fewer a step, always the nearest
+  // A step back up that is undone straight away (the phone could not hold it) doubles how long it waits before
+  // trying that again, so it settles instead of see-sawing.
+  // --------------------------------------------------------------------------
+  const SMART = { low: 30, high: 48, every: 1.5, most: 80, fewer: 10, least: 10, patience: 4 };
+  const smart = { step: 0, shift: 0, most: SMART.most, t: 0, frames: 0, ms: 0, good: 0, need: SMART.patience, rose: 0 };
+  const smartSet = (step: number) => {
+    const top = 2 + Math.ceil((SMART.most - SMART.least) / SMART.fewer);
+    smart.step = Math.min(top, Math.max(0, step));
+    smart.shift = smart.step >= 2 ? TABLE.length : smart.step; // (2: past the table's end, so everybody is at its lightest)
+    smart.most = Math.max(SMART.least, SMART.most - Math.max(0, smart.step - 2) * SMART.fewer);
+  };
+  /** One frame (`ms` = the real time since the last one): every SMART.every seconds, look at the rate and move a step. */
+  const smartTick = (ms: number) => {
+    if (!state.fps) { if (smart.step) smartSet(0); return; }
+    if (state.loading || ms > 1000) return;
+    smart.frames++; smart.ms += ms; smart.t += ms / 1000;
+    if (smart.t < SMART.every) return;
+    const rate = (smart.frames * 1000) / smart.ms;
+    smart.t = 0; smart.frames = 0; smart.ms = 0;
+    smart.rose += SMART.every;
+    if (rate < SMART.low) {
+      // (too slow. If it had only just come back up a step, that step is one this phone can't hold: wait twice as long next time)
+      if (smart.rose < SMART.every * 4) smart.need = Math.min(64, smart.need * 2);
+      smart.good = 0;
+      smartSet(smart.step + 1);
+    } else if (rate > SMART.high && smart.step > 0) {
+      if (++smart.good >= smart.need) { smart.good = 0; smart.rose = 0; smartSet(smart.step - 1); }
+    } else smart.good = 0;
+  };
   let building = 0;
   let lastSrc: Loaded | null = null;
   let onBuilt = () => {};
@@ -1125,7 +1171,7 @@ export async function startDevRoom() {
   const stressSettings = () => [
     state.auto ? (TABLE === AUTO ? 'Auto' : TABLE === AUTO_LITE ? 'Auto lite' : 'Auto live') : `${state.detail}%`,
     `shapes ${state.auto && TABLE === AUTO_LIVE ? 'live' : state.shapes}`, `shadows ${state.shadows ? 'on' : 'off'}`, `motion ${state.motion}`,
-    `out of view ${state.cull ? 'not drawn' : 'drawn'}`, state.cloth === 'off' ? '' : `cloth ${state.cloth}`, `sharpness ${state.sharp ? '2x' : '1x'}`,
+    `out of view ${state.cull ? 'not drawn' : 'drawn'}`, `smart FPS ${state.fps ? 'on' : 'off'}`, state.cloth === 'off' ? '' : `cloth ${state.cloth}`, `sharpness ${state.sharp ? '2x' : '1x'}`,
   ].filter(Boolean).join(' · ');
   const stressEnd = (why: string) => {
     if (!stress.on) return;
@@ -1175,13 +1221,15 @@ export async function startDevRoom() {
     const fps = stress.ms > 0 ? (stress.frames * 1000) / stress.ms : 0;
     const n = people.length, seen = people.filter((q) => q.root.visible).length;
     stress.results.push({ n, fps, seen });
-    const who = stress.mode === 'room' ? `${n} (${seen} in view)` : `${n}`;
+    const shownNow = people.filter((q) => q.root.visible).length;
+    const who = (stress.mode === 'room' ? `${n} (${inView} in view${shownNow < inView ? `, ${shownNow} drawn` : ''})` : shownNow < n ? `${n} (${shownNow} drawn)` : `${n}`);
+    const note = state.fps && smart.step ? ` · smart ${smart.step}` : '';
     stress.t = 0; stress.frames = 0; stress.ms = 0;
     if (fps < STRESS.stopBelow) {
       stressEnd(`${who} = <${STRESS.stopBelow} fps 🛑`);
       return;
     }
-    stress.lines.push(`${who} = ${fps.toFixed(0)} fps`);
+    stress.lines.push(`${who} = ${fps.toFixed(0)} fps${note}`);
     if (n >= STRESS.most || !lastSrc) { stressEnd(`stopped at ${n}: the test's own limit`); return; }
     try {
       const p = makePerson(state.model, lastSrc, n);
@@ -1227,6 +1275,7 @@ export async function startDevRoom() {
   const plainBtn = button(optRow, '', () => { state.plain = !state.plain; sync(); void rebuild(); });
   const clothBtn = button(optRow, '', () => { state.cloth = state.cloth === 'off' ? 'live' : state.cloth === 'live' ? 'freeze' : state.cloth === 'freeze' ? 'near' : 'off'; sync(); void rebuild(); });
   const cullBtn = button(optRow, '', () => { state.cull = !state.cull; sync(); });
+  const fpsBtn = button(optRow, '', () => { state.fps = !state.fps; smartSet(0); smart.need = SMART.patience; sync(); });
   const sharpBtn = button(optRow, '', () => { state.sharp = !state.sharp; sync(); resize(); });
   const sync = () => {
     modelBtns.forEach((b, i) => b.classList.toggle('on', MODELS[i] === state.model));
@@ -1261,6 +1310,8 @@ export async function startDevRoom() {
     stressCopyBtn.style.display = stress.lines.length ? '' : 'none';
     cullBtn.textContent = `Out of view: ${state.cull ? 'not drawn' : 'drawn'}`;
     cullBtn.classList.toggle('on', state.cull);
+    fpsBtn.textContent = `Smart FPS: ${state.fps ? 'on' : 'off'}`;
+    fpsBtn.classList.toggle('on', state.fps);
   };
   sync();
   void rebuild();
@@ -1286,9 +1337,12 @@ export async function startDevRoom() {
         // AUTO detail: her level by her distance from the camera (a level is only left once she is 10% past
         // its edge, so someone walking along an edge doesn't flicker between two)
         const d = Math.hypot(camera.position.x - p.root.position.x, camera.position.y - 1.4, camera.position.z - p.root.position.z); // (to her middle)
-        let level = p.level;
-        while (level > 0 && d < TABLE[level - 1].within * 0.95) level--;
-        while (level < TABLE.length - 1 && d > TABLE[level].within * 1.05) level++;
+        let band = p.band ?? p.level;
+        while (band > 0 && d < TABLE[band - 1].within * 0.95) band--;
+        while (band < TABLE.length - 1 && d > TABLE[band].within * 1.05) band++;
+        p.band = band;
+        // (SMART FPS: when the frame rate is low everybody is drawn a level or two lighter than her distance asks)
+        const level = Math.min(TABLE.length - 1, band + smart.shift);
         if (level !== p.level) {
           p.level = level;
           for (const l of p.lods) {
@@ -1370,12 +1424,22 @@ export async function startDevRoom() {
       frustum.setFromProjectionMatrix(cullMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
       cullBall.radius = state.shadows ? 4.5 : 2.4;
     }
+    seen.length = 0;
     for (const p of people) {
       const show = !state.cull || frustum.intersectsSphere(cullBall.set(cullAt.set(p.root.position.x, 1.4, p.root.position.z), cullBall.radius));
       p.root.visible = show;
-      p.cloth?.show(show);
-      if (show) inView++;
+      if (show) seen.push(p);
     }
+    inView = seen.length;
+    // (SMART FPS: of those in view, only the nearest `smart.most` are drawn)
+    drawn = inView;
+    if (state.fps && seen.length > smart.most) {
+      seen.sort((a, b) => (a.dist ?? 0) - (b.dist ?? 0));
+      for (let i = smart.most; i < seen.length; i++) seen[i].root.visible = false;
+      drawn = smart.most;
+    }
+    for (const p of people) p.cloth?.show(p.root.visible);
+    smartTick(ms);
     renderer.info.reset();
     renderer.render(scene, camera);
     if (document.hidden || ms > 3000) return; // (back from the background: not a frame time)
@@ -1418,7 +1482,8 @@ export async function startDevRoom() {
       stat.appendChild(big);
       const lines = [
         `slowest frame ${worstShown.toFixed(0)} ms`,
-        `${people.length} x ${state.model.label}${state.cull ? ` · ${inView} in view` : ''}`,
+        `${people.length} x ${state.model.label}${state.cull ? ` · ${inView} in view` : ''}${drawn < inView ? ` · ${drawn} drawn` : ''}`,
+        state.fps ? `smart FPS: ${smart.step === 0 ? 'full detail' : smart.step === 1 ? 'one level lighter' : smart.step === 2 ? 'all at the lightest' : `all at the lightest · at most ${smart.most} drawn`}` : '',
         `${(r.triangles / 1e6).toFixed(2)}M triangles drawn · ${r.calls} draw calls`,
         state.auto && people.some((q) => q.lods.length)
           ? `auto${TABLE === AUTO ? '' : TABLE === AUTO_LITE ? ' lite' : ' live'}: ${TABLE.map((a, k) => [`${a.detail}%${a.live ? ' live' : ''}`, people.filter((q) => q.level === k).length] as const).filter(([, c]) => c > 0).map(([d, c]) => `${c} at ${d}`).join(' · ')}`
