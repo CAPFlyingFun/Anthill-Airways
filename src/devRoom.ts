@@ -86,6 +86,8 @@ const AUTO_LITE: { within: number; detail: number; live?: boolean }[] = [
 let TABLE: { within: number; detail: number; live?: boolean }[] = AUTO;
 /** A person this far down the table (5% or lighter) lets go of her heaviest bodies again, to save memory. */
 const AUTO_DROP_FROM = 3;
+/** Cloth tees: how many are dressed at a time on their way to being frozen, and the most simulated for good. GAME TUNING. */
+const CLOTH_DRESSING_AT_ONCE = 2, CLOTH_SIMULATED_AT_MOST = 6;
 interface GeoKeep { index0: THREE.BufferAttribute | null; morph0: THREE.BufferGeometry['morphAttributes']; lods: Map<string, THREE.BufferAttribute>; auto?: THREE.BufferAttribute[]; flat?: Float32Array | null; liveGeo?: THREE.BufferGeometry }
 
 /**
@@ -417,8 +419,9 @@ interface Person {
   phase: number;
   /** AUTO detail: her baked body at each level, and the level she is drawn at now. */
   lods: PersonLod[];
-  /** The builder's cloth tee on her (the 'Cloth tee' test: the first person only). */
+  /** The builder's cloth tee on her (the 'Cloth tee' option), and how to put it on her when her turn comes. */
   cloth?: ClothTest;
+  clothMake?: () => ClothTest;
   level: number;
   /** The builder body's own moving skeleton (v0.29.5): her bones posed each frame by the builder's code. */
   live?: {
@@ -840,8 +843,9 @@ export async function startDevRoom() {
     const tweaked = def.builder && hooks.tweak ? hooks.tweak(picked, i) : picked;
     // (the cloth tee's wearer has its colour painted on her skin beneath it, so a point of skin showing between the
     // cloth's own points is the tee's colour too)
-    const wearsCloth = def.builder && i === 0 && state.cloth !== 'off';
-    const look = wearsCloth ? { ...tweaked, top: new THREE.Color(SARAH_TEE.colour).getHex(), longSleeves: false } : tweaked;
+    // (v0.41: everybody, as a clothing option. The first keeps Sarah's own red; the rest wear it in their own colour)
+    const wearsCloth = def.builder && state.cloth !== 'off';
+    const look = wearsCloth ? { ...tweaked, top: i === 0 ? new THREE.Color(SARAH_TEE.colour).getHex() : tweaked.top, longSleeves: false } : tweaked;
     const tall = 1 + look.heightCm / STANDARD_CM;
     inner.scale.setScalar(src.scale * tall);
     inner.position.y = -src.minY * src.scale * tall;
@@ -984,15 +988,14 @@ export async function startDevRoom() {
     }
     const worn = skin as { mesh: THREE.SkinnedMesh; dict: Record<string, number> } | undefined;
     if (wearsCloth && worn) {
-      try {
-        const keep = src.parts[0] && (() => { let k: GeoKeep | undefined; src.parts[0].traverse((o) => { const g = (o as THREE.Mesh).geometry; if (!k && g?.getAttribute?.('_cloth_cover')) k = g.userData.devRoom as GeoKeep; }); return k; })();
+      // (put on her when her turn comes: see the tick's queue)
+      person.clothMake = () => {
+        let keep: GeoKeep | undefined;
+        src.parts[0].traverse((o) => { const g = (o as THREE.Mesh).geometry; if (!keep && g?.getAttribute?.('_cloth_cover')) keep = g.userData.devRoom as GeoKeep; });
         if (!keep?.index0) throw new Error('her body has no triangle list');
         root.updateMatrixWorld(true);
-        person.cloth = new ClothTest({ part: src.parts[0], display: worn.mesh, inner, tall, index: keep.index0, morphs: keep.morph0, dict: worn.dict, shape, motion: MOTION_TARGETS, scene, freeze: state.cloth === 'freeze' });
-      } catch (e) {
-        console.error('[devroom] the cloth tee could not be put on her', e);
-        state.error = `No cloth tee: ${e instanceof Error ? e.message : String(e)}`;
-      }
+        return new ClothTest({ part: src.parts[0], display: worn.mesh, inner, tall, index: keep.index0, morphs: keep.morph0, dict: worn.dict, shape, motion: MOTION_TARGETS, scene, freeze: state.cloth === 'freeze', colour: look.top });
+      };
     }
     return person;
   };
@@ -1117,6 +1120,7 @@ export async function startDevRoom() {
     last = now;
     const dt = Math.min(0.05, ms / 1000);
     t += dt;
+    let simulating = 0;
     for (const p of people) {
       if (p.lods.length) {
         // AUTO detail: her level by her distance from the camera (a level is only left once she is 10% past
@@ -1168,6 +1172,18 @@ export async function startDevRoom() {
       p.root.position.set(x, m ? 0 : Math.abs(Math.sin(t * 5 + p.phase)) * 0.05, z);
       p.root.rotation.y = -p.angle + (p.speed > 0 ? 0 : Math.PI); // (facing the way she goes)
       p.cloth?.update(dt);
+      if (p.cloth && p.cloth.phase !== 'frozen') simulating++;
+    }
+    // THE CLOTH TEES' QUEUE: a tee being simulated is several milliseconds of every frame, and a copy of her whole
+    // body in memory. So only a few are simulated at once: frozen once dressed, the next in line takes its place, a
+    // few at a time until everybody is dressed; simulated for good, the first few wear cloth and the rest wait in paint.
+    if (simulating < (state.cloth === 'freeze' ? CLOTH_DRESSING_AT_ONCE : CLOTH_SIMULATED_AT_MOST)) {
+      const next = people.find((q) => q.clothMake && !q.cloth);
+      if (next) {
+        const make = next.clothMake!;
+        next.clothMake = undefined;
+        try { next.cloth = make(); } catch (e) { console.error('[devroom] the cloth tee could not be put on her', e); state.error = `No cloth tee: ${e instanceof Error ? e.message : String(e)}`; }
+      }
     }
     camera.position.set(Math.sin(view.yaw) * Math.cos(view.pitch) * view.dist, Math.sin(view.pitch) * view.dist + 1.2, Math.cos(view.yaw) * Math.cos(view.pitch) * view.dist);
     camera.lookAt(0, 1.2, 0);
@@ -1186,6 +1202,20 @@ export async function startDevRoom() {
       paint();
     }
   };
+  /** The cloth tees' line of the readout: how many are where, and what the simulated ones cost a frame. */
+  const clothLine = () => {
+    if (state.cloth === 'off') return '';
+    const worn = people.filter((q) => q.cloth), frozen = worn.filter((q) => q.cloth!.phase === 'frozen'), live = worn.filter((q) => q.cloth!.phase !== 'frozen');
+    const waiting = people.filter((q) => q.clothMake && !q.cloth).length;
+    const costs = live.map((q) => q.cloth!.cost()), ms = costs.reduce((a, c) => a + c.ms, 0);
+    const triangles = worn.reduce((a, q) => a + q.cloth!.cost().triangles, 0);
+    const parts = [
+      live.length ? `${live.length} simulated · ${ms.toFixed(ms < 10 ? 1 : 0)} ms a frame${costs[0] ? ` · ${costs[0].points} points each` : ''}` : '',
+      frozen.length ? `${frozen.length} frozen` : '',
+      waiting ? `${waiting} waiting${state.cloth === 'live' ? ` (at most ${CLOTH_SIMULATED_AT_MOST} simulated at once)` : ''}` : '',
+    ].filter(Boolean);
+    return `cloth tees: ${parts.join(' · ') || 'none yet'}${triangles ? ` · ${(triangles / 1000).toFixed(0)}k triangles` : ''}`;
+  };
   const paint = () => {
     {
       const info = state.info;
@@ -1203,7 +1233,7 @@ export async function startDevRoom() {
         state.auto && people.some((q) => q.lods.length)
           ? `auto${TABLE === AUTO ? '' : ' lite'}: ${TABLE.map((a, k) => [`${a.detail}%${a.live ? ' live' : ''}`, people.filter((q) => q.level === k).length] as const).filter(([, c]) => c > 0).map(([d, c]) => `${c} at ${d}`).join(' · ')}`
           : state.perChar ? `each character: ${(state.perChar / 1000).toFixed(1)}k triangles as drawn` : '',
-        people[0]?.cloth?.line() ?? '',
+        clothLine(),
         info ? `the file: ${(info.tris / 1000).toFixed(0)}k triangles · ${info.mb.toFixed(1)} MB · loaded in ${(info.ms / 1000).toFixed(1)} s` : '',
         `screen ${renderer.domElement.width} x ${renderer.domElement.height}`,
         state.loading,

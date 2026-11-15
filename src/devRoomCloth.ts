@@ -22,9 +22,16 @@
  */
 import * as THREE from 'three';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
-import { RoomGarment } from './vendor/ccbs/sarahlab/garment/roomGarment';
-import { clampGarmentSettings } from './vendor/ccbs/sarahlab/garment/settings';
-import { SARAH_V2_JOINTS } from './vendor/ccbs/sarahlab/garment/bodyInput';
+import { DRAW_LIFT, REST_SCALE } from './vendor/ccbs/sarahlab/garment/roomGarment';
+import { GarmentCloth } from './vendor/ccbs/sarahlab/garment/garmentCloth';
+import { tailor, type Tailored } from './vendor/ccbs/sarahlab/garment/tailor';
+import { teeParams } from './vendor/ccbs/sarahlab/garment/draft';
+import { garmentCuts } from './vendor/ccbs/sarahlab/garment/cuts';
+import { bodyCapsules } from './vendor/ccbs/sarahlab/garment/capsules';
+import { clampGarmentSettings, tailorParams } from './vendor/ccbs/sarahlab/garment/settings';
+import { bodyInputOf, SARAH_V2_ARM_BONES, SARAH_V2_JOINTS } from './vendor/ccbs/sarahlab/garment/bodyInput';
+import { SARAH_V2_DETAIL_POINTS } from './vendor/ccbs/sarahlab/detailSpots';
+import type { Capsules } from './vendor/ccbs/sarahlab/clothSim';
 import { CUT_EDGE_ATTRIBUTE, setCutEdge } from './vendor/ccbs/sarahlab/garment/cutEdge';
 import { FACE_REST_OFFSET, FACE_REST_SCALE } from './vendor/ccbs/sarahlab/faceRig';
 import { CLOTH_TUNE_DEFAULT, clothRestScale, clothTuning, type ClothTune } from './vendor/ccbs/sarahlab/sarahLabTool';
@@ -44,6 +51,14 @@ const DRESS = Object.freeze({ weightless: 1.2, raise: 0.55, out: 1.5, hold: 2.7,
 /** FREEZE happens this long after she is dressed (seconds): the hem has stopped swinging by then. */
 const FREEZE_AFTER_DRESSED = 0.7;
 const BUILDER_UNITS_PER_METRE = 100;
+/**
+ * ONE TAILORING FOR EVERYBODY (v0.41; Joshua: "add as a clothing option so I can test up to 40 at once"). Measuring
+ * her, drafting the pattern, sewing it and laying it round her is two to three seconds' work, and it is done from the
+ * model's own design shape (her 0% belly), which every character here shares. So it is done once per model; what is
+ * each character's own is her cloth: cut for her shape and simulated on her.
+ */
+const TAILORED = new WeakMap<THREE.Object3D, Tailored>();
+const Z_AXIS = new THREE.Vector3(0, 0, 1);
 
 export interface ClothTestOptions {
   /** The loaded model's own body part (never drawn itself): her unseen copy is cloned from it. */
@@ -64,12 +79,16 @@ export interface ClothTestOptions {
   readonly scene: THREE.Scene;
   /** True: turn the tee into ordinary clothing once it is dressed. False: keep simulating. */
   readonly freeze: boolean;
+  /** The tee's colour. */
+  readonly colour: THREE.ColorRepresentation;
 }
 
 export class ClothTest {
   /** 'dressing', 'live' or 'frozen', and what it costs: for the room's readout. */
   phase: 'dressing' | 'live' | 'frozen' = 'dressing';
-  private room: RoomGarment | null;
+  private room: { cloth: GarmentCloth; tailored: Tailored } | null;
+  private raise = 0;
+  private capsules: Capsules | undefined;
   private readonly simRoot = new THREE.Group();
   private readonly simInner = new THREE.Group();
   private simBody: THREE.SkinnedMesh | null;
@@ -80,6 +99,8 @@ export class ClothTest {
   private t = 0;
   private readonly inverse = new THREE.Matrix4();
   private readonly tailorMs: number;
+  /** How long putting it on her took, all told (milliseconds): for the room's readout. */
+  readonly buildMs: number;
   private frozenTriangles = 0;
 
   constructor(private readonly options: ClothTestOptions) {
@@ -123,13 +144,36 @@ export class ClothTest {
     // hundredth of her size, it began as a knot at her feet and never untangled)
     this.simRoot.updateMatrixWorld(true);
     const tuning = clothTuning(SARAH_TEE.dials);
-    this.material = new THREE.MeshStandardMaterial({ color: SARAH_TEE.colour, roughness: 0.85, side: THREE.DoubleSide });
+    this.material = new THREE.MeshStandardMaterial({ color: options.colour, roughness: 0.85, side: THREE.DoubleSide });
     const garment = clampGarmentSettings(SARAH_TEE.settings);
-    this.room = new RoomGarment({
-      body: simBody, root: this.simInner, params: {}, settings: tuning.settings, standOff: tuning.standOff,
-      unitsPerMetre: BUILDER_UNITS_PER_METRE * options.tall, scale: FACE_REST_SCALE, offset: FACE_REST_OFFSET, material: this.material, garment,
-      fitScale: clothRestScale(SARAH_TEE.dials.fit) / clothRestScale(CLOTH_TUNE_DEFAULT.fit),
+    const params = teeParams(tailorParams(garment));
+    let t = TAILORED.get(options.part);
+    this.tailorMs = 0;
+    if (!t) {
+      const t1 = performance.now();
+      t = tailor(bodyInputOf(simBody, { belly: 1 }), params, { scale: FACE_REST_SCALE, offset: FACE_REST_OFFSET });
+      TAILORED.set(options.part, t);
+      this.tailorMs = performance.now() - t1;
+    }
+    // (as the builder's RoomGarment puts it on her, with one tailoring shared: see TAILORED)
+    const units = BUILDER_UNITS_PER_METRE * options.tall, placed = t.placed.positions;
+    const fabricRest = new Float32Array(placed.length);
+    for (let i = 0; i < placed.length; i += 3) for (let c = 0; c < 3; c++) fabricRest[i + c] = (placed[i + c] - FACE_REST_OFFSET[c]) / FACE_REST_SCALE;
+    const cloth = new GarmentCloth({
+      body: simBody, sewn: t.sewn, binding: t.binding, trunkOnly: t.placed.trunkOnly, armBones: SARAH_V2_ARM_BONES,
+      settings: { ...tuning.settings, restScale: REST_SCALE * (clothRestScale(SARAH_TEE.dials.fit) / clothRestScale(CLOTH_TUNE_DEFAULT.fit)) },
+      standOff: tuning.standOff, material: this.material, unitsPerMetre: units,
+      // her design at 0% belly, as she was read to tailor it (her 'belly' shape alone): every cut is measured from there
+      tailoredShape: (measure) => {
+        const inf = simBody.morphTargetInfluences!, at = options.dict.belly, now = inf.slice();
+        inf.fill(0);
+        if (at !== undefined) inf[at] = 1;
+        try { measure(); } finally { for (let j = 0; j < now.length; j++) inf[j] = now[j]; }
+      },
+      cuts: garmentCuts(t, garment), drawLift: DRAW_LIFT * units, fabricRest, neckBand: params.neckBand ?? 1, armpitRule: params.construction !== 'setIn', detail: SARAH_V2_DETAIL_POINTS,
     });
+    cloth.bellyRoom = garment.bellyRoom;
+    this.room = { cloth, tailored: t };
     setCutEdge(this.material, true);
     this.room.cloth.refit();
     this.room.cloth.weightless = true;
@@ -137,7 +181,7 @@ export class ClothTest {
     this.holder.matrixAutoUpdate = false;
     this.holder.add(this.room.cloth.mesh);
     options.scene.add(this.holder);
-    this.tailorMs = performance.now() - t0;
+    this.buildMs = performance.now() - t0;
   }
 
   /** Her copy takes her bones' turns and her shapes as they are this frame. */
@@ -167,20 +211,38 @@ export class ClothTest {
     if (at(DRESS.weightless)) { room.cloth.settle(); room.cloth.weightless = false; }
     if (this.t < DRESS.done) {
       const ss = (a: number, b: number) => { const u = Math.min(1, Math.max(0, (this.t - a) / (b - a))); return u * u * (3 - 2 * u); };
-      room.pose.raise = DRESS.raise * (ss(DRESS.weightless, DRESS.out) - ss(DRESS.hold, DRESS.down));
-    } else room.pose.raise = 0;
+      this.raise = DRESS.raise * (ss(DRESS.weightless, DRESS.out) - ss(DRESS.hold, DRESS.down));
+    } else this.raise = 0;
     if (at(DRESS.done)) { room.cloth.settle(); this.phase = 'live'; }
     this.simRoot.updateMatrixWorld(true);
-    room.applyPose();
-    this.simRoot.updateMatrixWorld(true);
+    if (this.raise) { this.raiseArms(this.raise); this.simRoot.updateMatrixWorld(true); }
     // (a slow frame in two halves, as the builder's room takes it)
     const pieces = dt > 1 / 40 ? 2 : 1;
-    for (let k = 0; k < pieces; k++) room.frame(dt / pieces);
+    const J = SARAH_V2_JOINTS, body = this.simBody!;
+    for (let k = 0; k < pieces; k++) {
+      // (her arms as capsules, read from her copy as she is now: they keep the tee's body out of them)
+      const caps = bodyCapsules(body, { shoulder: J.shoulder, elbow: J.elbow, wrist: J.wrist, hip: J.hip, knee: J.knee }, room.tailored.measure, { arms: true, legs: false, stool: null }, BUILDER_UNITS_PER_METRE * this.options.tall, this.capsules);
+      this.capsules = caps;
+      room.cloth.frame(dt / pieces, caps.count ? caps : undefined);
+    }
     // her copy's world carried onto her
     this.options.inner.updateWorldMatrix(true, false);
     this.holder.matrix.multiplyMatrices(this.options.inner.matrixWorld, this.inverse.copy(this.simInner.matrixWorld).invert());
     this.holder.matrixWorldNeedsUpdate = true;
     if (this.options.freeze && this.t >= DRESS.done + FREEZE_AFTER_DRESSED) this.freeze();
+  }
+
+  /** Her copy's arms out to her sides by `angle` (radians) on top of her pose: the builder's dressing move (RoomGarment.applyPose). */
+  private raiseArms(angle: number): void {
+    const bones = this.simBody!.skeleton.bones, frame = this.simInner.getWorldQuaternion(new THREE.Quaternion());
+    const qa = new THREE.Quaternion(), qb = new THREE.Quaternion(), q = new THREE.Quaternion(), axis = new THREE.Vector3();
+    for (let side = 0; side < 2; side++) {
+      const b = bones[SARAH_V2_JOINTS.shoulder[side]];
+      q.setFromAxisAngle(axis.copy(Z_AXIS).applyQuaternion(frame), (side === 0 ? 1 : -1) * angle);
+      b.parent!.getWorldQuaternion(qa); b.getWorldQuaternion(qb);
+      b.quaternion.copy(qa.invert().multiply(q).multiply(qb));
+      b.updateMatrixWorld(true);
+    }
   }
 
   /**
@@ -237,7 +299,7 @@ export class ClothTest {
     g.setAttribute(CUT_EDGE_ATTRIBUTE, new THREE.BufferAttribute(cut, 1));
     g.setIndex(new THREE.BufferAttribute(tri, 1));
     // (its hem and cuffs are cut within their last row of triangles, by the material, as on the simulated tee)
-    const material = new THREE.MeshStandardMaterial({ color: SARAH_TEE.colour, roughness: 0.85, side: THREE.DoubleSide });
+    const material = new THREE.MeshStandardMaterial({ color: this.options.colour, roughness: 0.85, side: THREE.DoubleSide });
     setCutEdge(material, true);
     const shown = this.options.display;
     const frozen = new THREE.SkinnedMesh(g, material);
@@ -254,7 +316,7 @@ export class ClothTest {
   }
 
   private dropSim(): void {
-    this.room?.dispose();
+    this.room?.cloth.dispose();
     this.room = null;
     this.holder.removeFromParent();
     this.material.dispose();
@@ -265,14 +327,14 @@ export class ClothTest {
     this.simGeo.dispose();
   }
 
-  /** A line for the room's readout. */
-  line(): string {
-    if (this.phase === 'frozen') return `cloth tee: frozen · ${(this.frozenTriangles / 1000).toFixed(1)}k triangles · no simulation`;
-    const s = this.room?.cloth.stats();
-    if (!s) return '';
-    const ms = (x: number) => x.toFixed(x < 10 ? 1 : 0);
-    return `cloth tee: ${this.phase} · ${s.particles} points · ${ms(s.skinMs + s.simMs + s.drawMs)} ms a frame (skin ${ms(s.skinMs)} + cloth ${ms(s.simMs)} + draw ${ms(s.drawMs)}) · tailored in ${(this.tailorMs / 1000).toFixed(1)} s`;
+  /** What it costs this frame while simulated (milliseconds: her skin, the cloth, the drawing) and its size. */
+  cost(): { ms: number; points: number; triangles: number } {
+    if (this.phase === 'frozen') return { ms: 0, points: 0, triangles: this.frozenTriangles };
+    const q = this.room?.cloth.stats();
+    return q ? { ms: q.skinMs + q.simMs + q.drawMs, points: q.particles, triangles: q.triangles } : { ms: 0, points: 0, triangles: 0 };
   }
+  /** The one tailoring's time, on whoever it was done for (0 for the rest). */
+  get tailoredMs(): number { return this.tailorMs; }
 
   dispose(): void {
     if (this.room) this.dropSim();
