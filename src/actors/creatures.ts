@@ -50,7 +50,7 @@ export type TreeKind = 't-palm' | 't-fern' | 't-banyan' | 't-monkeypuzzle' | 't-
 /** Built-in animations of models that have them (the Dodo). */
 const clips = new Map<string, THREE.AnimationClip[]>();
 /** Bump this whenever the people .glb files are replaced (busts phone caches). */
-const HUMAN_REV = 2;
+const HUMAN_REV = 3; // (v0.61: rebuilt from the raw Meshy files: padded textures, 4 bone weights)
 /** Same, for the island models. */
 const ISLAND_REV = 1;
 export type CreatureKind = (typeof CREATURES)[number];
