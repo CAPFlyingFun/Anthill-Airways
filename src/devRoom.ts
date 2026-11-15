@@ -469,6 +469,8 @@ interface Person {
   clothMake?: (freeze: boolean) => ClothTest;
   /** How far she is from the camera (to her middle), as of this frame. */
   dist?: number;
+  /** FADE: how far she is for the fade: from the player's spot or from the camera, whichever is nearer. */
+  far?: number;
   /** FADE: how much of her is drawn, 1 = all (every one of her materials reads this one value). */
   fade: { value: number };
   /** She is in the scene (someone not drawn is taken out of it, so her 80 bones cost nothing: v0.50). */
@@ -1542,7 +1544,11 @@ export async function startDevRoom() {
       let f = 1;
       if (fading) {
         // (how much of her is drawn: all of her up to where the fade starts, none where it ends)
-        f = THREE.MathUtils.clamp((fadeEnd - (p.dist ?? 0)) / fadeBand, 0, 1);
+        // (v0.51, Joshua: "if I zoom out too far, they all disappear... make it distance away from the player's
+        // character and the camera, that way there is always people shown even zoomed way out". The room has no
+        // player, so the spot the camera looks at, its middle, stands in for one: she is as far as the nearer of the two.)
+        p.far = Math.min(p.dist ?? 0, Math.hypot(p.root.position.x, p.root.position.z));
+        f = THREE.MathUtils.clamp((fadeEnd - p.far) / fadeBand, 0, 1);
         if (f <= 0) show = false;
       }
       p.fade.value = f;
@@ -1555,8 +1561,8 @@ export async function startDevRoom() {
       // distance: the fade's end is pulled in to where one too many stands, a little each frame, so nobody pops)
       let want = FADE.end;
       if (state.fps && seen.length > smart.most) {
-        seen.sort((a, b) => (a.dist ?? 0) - (b.dist ?? 0));
-        want = Math.max(FADE.least, seen[smart.most].dist ?? FADE.end);
+        seen.sort((a, b) => (a.far ?? 0) - (b.far ?? 0));
+        want = Math.max(FADE.least, seen[smart.most].far ?? FADE.end);
       } else if (state.fps && seen.length >= smart.most - 2) want = fadeEnd; // (just right: hold it there)
       fadeEnd = Math.min(FADE.end, fadeEnd + (want - fadeEnd) * Math.min(1, dt * (want < fadeEnd ? 3 : 0.6)));
     } else {
