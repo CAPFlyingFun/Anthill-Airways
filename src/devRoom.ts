@@ -412,7 +412,9 @@ export async function startDevRoom() {
                 const xr = Math.abs(points[v * 3] - cx) / H, yr = (points[v * 3 + 1] - B.min.y) / H;
                 const head = ease((yr - 0.84) / 0.04);                                             // above her neck
                 const hand = ease((xr - 0.125) / 0.015) * ease((0.57 - yr) / 0.02) * ease((yr - 0.38) / 0.02); // out at her sides, below her wrists
-                weight[v] = 1 + 2 * Math.max(head, hand);
+                // (between her legs, where her thighs meet her hips: a tight fold that tears first when it's lightened)
+                const groin = ease((0.075 - xr) / 0.02) * ease((yr - 0.43) / 0.02) * ease((0.53 - yr) / 0.02);
+                weight[v] = 1 + 2 * Math.max(head, hand, groin);
               }
               const mark = (names: string[], extra: number, full: number) => {
                 for (const name of names) {
@@ -429,22 +431,23 @@ export async function startDevRoom() {
               mark(['belly'], 1, 0.5);
               mark(['breastGrow'], 2, 0.3);
               mark(['navelIn', 'navelOut', 'navelFlat'], 5, 0.3);
-              const pushed = new Float32Array(n * 3);
-              for (let v = 0; v < n; v++) {
-                pushed[v * 3] = cx + (points[v * 3] - cx) * weight[v];
-                pushed[v * 3 + 1] = cy + (points[v * 3 + 1] - cy) * weight[v];
-                pushed[v * 3 + 2] = cz + (points[v * 3 + 2] - cz) * weight[v];
-              }
-              // (and it is told where each point sits on her skin's picture, so it doesn't drag the picture
-              // sideways when it merges points: without this her face came out blotchy at 3%)
+              // The lightening is told two more things about every point, beside where it is: where it sits on
+              // her skin's picture (so the picture isn't dragged sideways: without it her face came out blotchy),
+              // and its place again, scaled by its extra importance. A mistake at an important point then
+              // counts several times over, so that part keeps more of its triangles; her real shape is what
+              // the lightening works on throughout. (Its first version worked on a copy of her with the
+              // important parts blown up instead; that left thin dark slivers on her inner thighs.)
               const uv = g.attributes.uv as THREE.BufferAttribute | undefined;
-              if (uv) {
-                const where = new Float32Array(n * 2);
-                for (let v = 0; v < n; v++) { where[v * 2] = uv.getX(v); where[v * 2 + 1] = uv.getY(v); }
-                [lighter] = MeshoptSimplifier.simplifyWithAttributes(all, pushed, 3, where, 2, [H * 1.5, H * 1.5], null, target, 1);
-              } else {
-                [lighter] = MeshoptSimplifier.simplify(all, pushed, 3, target, 1);
+              const extra = new Float32Array(n * 5);
+              for (let v = 0; v < n; v++) {
+                extra[v * 5] = uv ? uv.getX(v) : 0;
+                extra[v * 5 + 1] = uv ? uv.getY(v) : 0;
+                const k = weight[v] - 1;
+                extra[v * 5 + 2] = (points[v * 3] - cx) * k;
+                extra[v * 5 + 3] = (points[v * 3 + 1] - cy) * k;
+                extra[v * 5 + 4] = (points[v * 3 + 2] - cz) * k;
               }
+              [lighter] = MeshoptSimplifier.simplifyWithAttributes(all, points, 3, extra, 5, [H * 1.5, H * 1.5, 1, 1, 1], null, target, 1);
             } else {
               [lighter] = MeshoptSimplifier.simplify(all, points, 3, target, 1);
             }
@@ -842,5 +845,5 @@ export async function startDevRoom() {
   renderer.info.autoReset = false;
 
   // (for the headless tests)
-  (window as unknown as { devRoom: unknown }).devRoom = { state, people, renderer, get fps() { return fps; } };
+  (window as unknown as { devRoom: unknown }).devRoom = { state, people, renderer, looks: LOOKS, get fps() { return fps; } };
 }
