@@ -86,6 +86,7 @@ interface GeoKeep { index0: THREE.BufferAttribute | null; morph0: THREE.BufferGe
 interface Look {
   name: string;
   bump: number;        // belly size, %
+  bust?: number;       // the builder's breast SIZE control, -100 (half the volume) to +100 (twice); 0 = as her belly gives
   heightCm: number;    // from the standard body (about 168 cm)
   top: number;         // tee colour
   legs: number;        // leggings colour
@@ -126,10 +127,45 @@ function bellyWeights(size: number): Record<string, number> {
 }
 
 /** The builder's bust for a belly size (its breastVolumeRatio / breastGrowWeight): it grows a little with the belly. */
-function bustWeight(bumpPercent: number) {
+/**
+ * ...and its SIZE control on top (its bustVolume / breastGrowUnits): +100 is twice the volume of her own
+ * 0% bust, -100 is half, whatever her belly. Up to 1.55x is the 'breastGrow' shape; the rest of the way to
+ * 2.0x is 'shape:breastGrowMore'. Under 1x, 'breastGrow' runs backwards.
+ */
+function bustWeights(bumpPercent: number, sizePercent = 0): Record<string, number> {
   const p = Math.min(200, Math.max(0, bumpPercent));
-  const volume = p <= 100 ? 1 + (0.3 * p) / 100 : 1.3 + (0.25 * (p - 100)) / 100;
-  return (Math.cbrt(volume) - 1) / (Math.cbrt(1.55) - 1);
+  const base = p <= 100 ? 1 + (0.3 * p) / 100 : 1.3 + (0.25 * (p - 100)) / 100;
+  const size = Math.min(100, Math.max(-100, sizePercent));
+  const volume = base + ((size >= 0 ? 2.0 : 0.5) - base) * (Math.abs(size) / 100);
+  const units = (Math.cbrt(volume) - 1) / (Math.cbrt(1.55) - 1);
+  return { breastGrow: Math.min(1, units), 'shape:breastGrowMore': Math.max(0, units - 1) };
+}
+
+/**
+ * A RANDOM LOOK (v0.37; Joshua, 2026-11-14: "randomize the belly size from 0-50%, the breast size (-100 to +100),
+ * and the shirt and leggings colors"). The same person number gets the same look every time; SHUFFLE deals
+ * everyone a new one. Her height, sleeves and leggings' length vary too.
+ */
+function randomLook(i: number, seed: number): Look {
+  const r = rng(90001 + i * 7919 + seed * 104729);
+  // (a pale orange or peach tee reads as bare skin from any distance: in that part of the colour wheel only
+  // strong, darker colours are dealt, a real red or a burnt orange)
+  const color = (h: number, sat: number, light: number) => {
+    const skinLike = h < 0.15 || h > 0.94;
+    return new THREE.Color().setHSL(h, skinLike ? Math.max(sat, 0.72) : sat, skinLike ? Math.min(light, 0.46) : light).getHex();
+  };
+  // Tees: any colour, from soft to bright. Leggings: half of them dark neutrals, the rest a deeper colour
+  const top = color(r(), 0.35 + r() * 0.45, 0.42 + r() * 0.3);
+  const legs = r() < 0.5 ? color(r(), 0.05 + r() * 0.12, 0.14 + r() * 0.2) : color(r(), 0.45 + r() * 0.4, 0.22 + r() * 0.2);
+  return {
+    name: `Random ${i + 1}`,
+    bump: Math.round(r() * 50),
+    bust: Math.round(-100 + r() * 200),
+    heightCm: Math.round((-9 + r() * 18) * 2) / 2,
+    top, legs,
+    capri: r() < 0.35,
+    longSleeves: r() < 0.4,
+  };
 }
 
 /** A small seeded random (the same person looks the same every time). */
@@ -330,7 +366,7 @@ export async function startDevRoom() {
   el.addEventListener('wheel', (e) => { view.dist = THREE.MathUtils.clamp(view.dist * (1 + Math.sign(e.deltaY) * 0.1), 4, 60); }, { passive: true });
   const people: Person[] = [];
   // (the defaults are the settings Joshua settled on, 2026-11-14: 40 walking, auto detail, baked, smart, pieces skipped)
-  const state = { model: MODELS[0], count: 40, morphs: true, shadows: true, detail: 10, shapes: 'baked' as 'live' | 'baked' | 'off', underwear: false, auto: true, smart: true, perChar: 0, motion: 'walk' as 'walk' | 'idle' | 'off', plain: false, sharp: true, loading: '', error: '', info: null as Loaded | null };
+  const state = { model: MODELS[0], count: 40, looks: 'random' as 'random' | 'saved' | 'off', seed: 0, shadows: true, detail: 10, shapes: 'baked' as 'live' | 'baked' | 'off', underwear: false, auto: true, smart: true, perChar: 0, motion: 'walk' as 'walk' | 'idle' | 'off', plain: false, sharp: true, loading: '', error: '', info: null as Loaded | null };
   const resize = () => {
     renderer.setPixelRatio(state.sharp ? Math.min(window.devicePixelRatio, 2) : 1);
     renderer.setSize(host.clientWidth, host.clientHeight, false);
@@ -610,12 +646,12 @@ export async function startDevRoom() {
     const root = new THREE.Group();
     const inner = new THREE.Group();
     // Which look she wears: Joshua's three in turn, or the plain standard body
-    const look = def.builder && state.morphs ? LOOKS[i % LOOKS.length] : PLAIN;
+    const look = !def.builder || state.looks === 'off' ? PLAIN : state.looks === 'random' ? randomLook(i, state.seed) : LOOKS[i % LOOKS.length];
     const tall = 1 + look.heightCm / STANDARD_CM;
     inner.scale.setScalar(src.scale * tall);
     inner.position.y = -src.minY * src.scale * tall;
     // Her shape, with the builder's own morphs and rules: her belly at her look's size, her bust with it
-    const shape: Record<string, number> = { ...bellyWeights(look.bump / 100), breastGrow: bustWeight(look.bump) };
+    const shape: Record<string, number> = { ...bellyWeights(look.bump / 100), ...bustWeights(look.bump, look.bust ?? 0) };
     const lods: PersonLod[] = [];
     for (const part of src.parts) {
       const copy = cloneSkinned(part); // (shares the geometry and textures; her skeleton is her own)
@@ -783,7 +819,8 @@ export async function startDevRoom() {
   const countBtns = COUNTS.map((n) => button(countRow, String(n), () => { state.count = n; sync(); void rebuild(); }));
   const detailBtns = DETAILS.map((d) => button(detailRow, `${d}%`, () => { state.detail = d; state.auto = false; sync(); void rebuild(); }));
   const autoBtn = button(detailRow, 'Auto', () => { state.auto = !state.auto; if (state.auto) { state.detail = 10; state.shapes = 'baked'; } sync(); void rebuild(); });
-  const morphBtn = button(optRow, '', () => { state.morphs = !state.morphs; sync(); void rebuild(); });
+  const morphBtn = button(optRow, '', () => { state.looks = state.looks === 'random' ? 'saved' : state.looks === 'saved' ? 'off' : 'random'; sync(); void rebuild(); });
+  const shuffleBtn = button(optRow, '🎲 Shuffle', () => { state.seed++; state.looks = 'random'; sync(); void rebuild(); });
   const shadowBtn = button(optRow, '', () => { state.shadows = !state.shadows; sync(); });
   const shapeBtn = button(optRow, '', () => { state.shapes = state.shapes === 'live' ? 'baked' : state.shapes === 'baked' ? 'off' : 'live'; sync(); void rebuild(); });
   const motionBtn = button(optRow, '', () => { state.motion = state.motion === 'walk' ? 'idle' : state.motion === 'idle' ? 'off' : 'walk'; sync(); void rebuild(); });
@@ -794,8 +831,9 @@ export async function startDevRoom() {
   const sync = () => {
     modelBtns.forEach((b, i) => b.classList.toggle('on', MODELS[i] === state.model));
     countBtns.forEach((b, i) => b.classList.toggle('on', COUNTS[i] === state.count));
-    morphBtn.textContent = `Looks (Char1-3): ${state.morphs ? 'on' : 'off'}`;
-    morphBtn.classList.toggle('on', state.morphs);
+    morphBtn.textContent = `Looks: ${state.looks === 'saved' ? 'Char1-3' : state.looks}`;
+    morphBtn.classList.toggle('on', state.looks !== 'off');
+    shuffleBtn.classList.toggle('on', false);
     shadowBtn.textContent = `Shadows: ${state.shadows ? 'on' : 'off'}`;
     shadowBtn.classList.toggle('on', state.shadows);
     sun.castShadow = state.shadows;
@@ -922,5 +960,5 @@ export async function startDevRoom() {
   renderer.info.autoReset = false;
 
   // (for the headless tests)
-  (window as unknown as { devRoom: unknown }).devRoom = { state, people, renderer, looks: LOOKS, get fps() { return fps; } };
+  (window as unknown as { devRoom: unknown }).devRoom = { state, people, renderer, looks: LOOKS, randomLook, get fps() { return fps; } };
 }

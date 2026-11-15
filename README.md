@@ -83,7 +83,7 @@ at the snack stand, two neighbors at once), and after it **Bigger orders** (cust
 Code: `src/homeMain.ts` (boot + loop + offline pay), `src/world/homeWorld.ts` (the backyard and the café),
 `src/data/home.ts` (every number). Not in this test yet: the farm close-up and ride-along cam, and the next areas (airport, hotel, hospital, zoo).
 
-## 🧪 DEV Room (temporary, v0.29.2 to v0.35)
+## 🧪 DEV Room (temporary, v0.29.2 to v0.37)
 
 Hidden from Settings since v0.29.6 (the button is still in the page, `hidden`); **`?devroom=1`** opens it. A performance test for the Custom Character Builder
 System's female body: the builder's model is loaded **once** from the builder's own site, then cloned 1 to 20
@@ -103,7 +103,9 @@ hidden pieces skipped), **Smart detail** (her head keeps three times her body's 
 no seams; the lightening also respects the skin picture's layout, and light baked bodies get corrected lighting directions. v0.35: **Auto** detail by distance from the camera to each person, in 3D (so zooming in raises it, as walking up to her
 does in first person). Joshua's table, in metres (a unit is 0.6 m, people being 2.8 units tall): 0-4 m 30%, 4-8 m 20%,
 8-12 m 10%, 12-15 m 5%, 15 m+ 3% (v0.36; the first table went up to 100% within 3 m). Each level's body is baked the first time she needs it, the two
-heaviest are let go again once she is far away, and there is a 5% margin at each edge so nobody flickers. Baked bodies keep four motion shapes live (the belly's sag,
+heaviest are let go again once she is far away, and there is a 5% margin at each edge so nobody flickers. v0.37: **Looks: random** (the default): each character gets a belly of 0-50%, the builder's breast SIZE from -100 to +100,
+her own tee and leggings colours (never a skin-toned tee), height, sleeves and leggings' length; **🎲 Shuffle** deals everyone
+new ones. The DEV Room opens on 40 walking with auto detail, baked, smart detail on, hidden pieces skipped. Baked bodies keep four motion shapes live (the belly's sag,
 drop and swing, the bust's drop), driven by the builder's spring rules; the other 39 are baked in. Nothing in the room touches the save. Code: `src/devRoom.ts`. Remove when the
 character decision is made.
 
