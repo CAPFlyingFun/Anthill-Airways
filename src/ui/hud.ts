@@ -84,6 +84,21 @@ export class Hud {
     this.cashEl.textContent = v.toLocaleString();
   }
 
+  /** 🪵 Planks for building, under the cash (🏝️ Anthill Island; null hides it). */
+  private shownPlanks: number | null = -1;
+  setPlanks(n: number | null) {
+    if (n === this.shownPlanks) return;
+    const el = $('planks');
+    if (n !== null && this.shownPlanks !== null && this.shownPlanks >= 0 && n > this.shownPlanks) {
+      el.classList.remove('bump');
+      void el.offsetWidth;
+      el.classList.add('bump');
+    }
+    this.shownPlanks = n;
+    el.classList.toggle('hidden', n === null);
+    $('planksValue').textContent = n === null ? '' : n.toLocaleString();
+  }
+
   setZone(text: string) {
     this.zoneEl.textContent = text;
   }
@@ -668,7 +683,7 @@ export class Hud {
     const p = this.progress;
     if (!p) return;
     const s = p.save;
-    $('lvlText').textContent = `Lv ${s.level}`;
+    $('lvlText').textContent = `LEVEL ${s.level}`;
     $('xpFill').style.width = `${Math.min(100, (s.xp / p.xpToNext()) * 100)}%`;
     const badge = $('ptsBadge');
     // (points only count if there's a stat left to put them in)

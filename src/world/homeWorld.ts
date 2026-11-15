@@ -1783,10 +1783,11 @@ export class HomeWorld {
     this.updatePlotSign(dt);
 
     this.hud.setInventory(me.stack.counts(), me.stack.count, me.carryMax);
-    // Where you are (+ your planks, once you have some)
+    // Where you are (v0.59: your planks have their own counter under the cash, so the place's name fits)
+    this.hud.setPlanks(this.home.planks);
     const onLot = this.lots.find((l) => l.open && p.x > l.rect.minX && p.x < l.rect.maxX && p.z < 15.2);
     const place = onLot ? `${onLot.def.icon} ${onLot.def.name}` : p.z > 12 || p.x < HOME.yard.minX ? '🏘️ Your Street' : p.x > HOME.cafePlot.maxX + 0.5 ? '🛒 Corner Store' : p.x > HOME.yard.maxX ? '☕ Corner Café' : '🏡 Your Backyard';
-    const name = this.home.planks > 0 ? `${place} · 🪵 ${this.home.planks}` : place;
+    const name = place;
     if (name !== this.zoneName) {
       this.zoneName = name;
       this.hud.setZone(name);

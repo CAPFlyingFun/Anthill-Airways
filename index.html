@@ -26,10 +26,14 @@
       <div class="topbar">
         <div class="tl">
           <div class="row">
-            <button id="settingsBtn" class="round-btn" aria-label="Settings">⚙️</button>
-            <button id="levelBtn" class="pill level" aria-label="Stats">
-              <span id="lvlText">Lv 1</span>
-              <span class="xpbar"><i id="xpFill"></i></span>
+            <button id="settingsBtn" class="round-btn sq" aria-label="Settings">⚙️</button>
+            <!-- The player card (v0.59, after the city-builder look Joshua shared): the game's badge, your level, your XP -->
+            <button id="levelBtn" class="pcard" aria-label="Stats">
+              <span class="pc-ava"><img src="icons/icon-192.png" alt="" /></span>
+              <span class="pc-txt">
+                <span id="lvlText" class="pc-lv">LEVEL 1</span>
+                <span class="xpbar"><i id="xpFill"></i></span>
+              </span>
               <b id="ptsBadge" class="pts hidden">+1</b>
             </button>
             <!-- Act 2: hop between the ant colony and the human airport -->
@@ -44,7 +48,9 @@
         <!-- Right: your cash, then the round buttons and (🏝️ Anthill Island) the minimap.
              The bottom corners stay free for your thumbs (the joystick, looking around). -->
         <div class="tr">
-          <div id="cash" class="pill cash"><span class="bill">💵</span><span id="cashValue">0</span></div>
+          <!-- Your resources: cash, and (🏝️ Anthill Island) planks for building -->
+          <div id="cash" class="res-pill cash"><span class="res-ic">💵</span><span id="cashValue">0</span></div>
+          <div id="planks" class="res-pill planks hidden"><span class="res-ic">🪵</span><span id="planksValue">0</span></div>
           <span id="rate" class="rate hidden"></span>
           <div class="tr-btns">
             <!-- First-person / third-person camera -->
