@@ -56,12 +56,23 @@ const HEIGHT = 2.8; // people are this tall in the game
 const DETAILS = [100, 50, 25, 10, 5, 3]; // (3% of the builder body is about 9k triangles: the "under 10k" gameplay target)
 const NO_MORPHS = {};
 /**
- * AUTO DETAIL (v0.35; Joshua: "closer to the camera the higher %, and further away less"). A person within
- * `within` of the camera is drawn at `detail` %. Distances are in the game's units: people are 2.8 units tall
- * (a 1.68 m woman), so ONE UNIT IS 0.6 m: 9 units is about 5.4 m, 18 units about 11 m. The game's top-down
- * camera sits about 22 units from you, so up there everyone is at 3%; the higher levels are for the 👁️ view.
+ * AUTO DETAIL (v0.35; Joshua: "closer to the camera the higher %, and further away less"). The distance is
+ * from the CAMERA to each person (to her middle, in 3D), so zooming in raises her detail in the top-down
+ * view exactly as walking up to her does in the 👁️ view. The table is Joshua's, in metres; the game's units
+ * are smaller: people are 2.8 units tall (a 1.68 m woman), so one metre is 1 / 0.6 units.
  */
-const AUTO = [{ within: 9, detail: 10 }, { within: 18, detail: 5 }, { within: Infinity, detail: 3 }];
+const METRE = 1 / 0.6;
+const AUTO = [
+  { within: 3.5 * METRE, detail: 100 },  // 0-3 m
+  { within: 6.5 * METRE, detail: 50 },   // 4-6 m
+  { within: 8.5 * METRE, detail: 30 },   // 7-8 m
+  { within: 10.5 * METRE, detail: 20 },  // 9-10 m
+  { within: 12.5 * METRE, detail: 10 },  // 11-12 m
+  { within: 14.5 * METRE, detail: 5 },   // 13-14 m
+  { within: Infinity, detail: 3 },       // 15 m and beyond
+];
+/** A person this far down the table (10% or lighter) lets go of her heaviest bodies again, to save memory. */
+const AUTO_DROP_FROM = 4;
 interface GeoKeep { index0: THREE.BufferAttribute | null; morph0: THREE.BufferGeometry['morphAttributes']; lods: Map<string, THREE.BufferAttribute>; auto?: THREE.BufferAttribute[] }
 
 /**
@@ -185,6 +196,9 @@ function paintedMaterial(base: THREE.Material, box: THREE.Box3, look: Look, fine
   return m;
 }
 
+/** One of a person's meshes under AUTO detail: its baked body per level (made when first needed), its two materials. */
+interface PersonLod { mesh: THREE.Mesh; geos: (THREE.BufferGeometry | null)[]; make: (level: number) => THREE.BufferGeometry; fine?: THREE.Material | THREE.Material[]; plain?: THREE.Material | THREE.Material[] }
+
 interface Person {
   root: THREE.Group;
   angle: number;   // where she is on her circle
@@ -192,7 +206,7 @@ interface Person {
   speed: number;   // radians per second (its sign is her direction)
   phase: number;
   /** AUTO detail: her baked body at each level, and the level she is drawn at now. */
-  lods: { mesh: THREE.Mesh; geos: THREE.BufferGeometry[] }[];
+  lods: PersonLod[];
   level: number;
   /** The builder body's own moving skeleton (v0.29.5): her bones posed each frame by the builder's code. */
   live?: {
@@ -388,6 +402,7 @@ export async function startDevRoom() {
         const index0 = keep.index0;
         const lodFor = (detail: number) => {
           const index = index0!;
+          if (detail >= 100) return index; // (as the file has her)
           // SMART DETAIL (v0.33): her head keeps three times the share of triangles her body gets (a face reads
           // from far away; a back or a thigh doesn't), for the same total. Only on her skin, which has the head.
           const smart = state.smart && src.box.max.y > src.box.min.y && (mesh.material as THREE.Material).name === 'Material_0';
@@ -485,7 +500,7 @@ export async function startDevRoom() {
    * every point of her on every frame. Baked, her final shape is worked out ONCE, here, into a plain body of
    * her own (only the points her detail level still draws), and nothing is blended while she walks.
    */
-  const bakeGeometry = (g: THREE.BufferGeometry, weights: [number, number][], live: [string, number][], index: THREE.BufferAttribute = g.index!) => {
+  const bakeGeometry = (g: THREE.BufferGeometry, weights: [number, number][], live: [string, number][], index: THREE.BufferAttribute = g.index!, detail = state.detail) => {
     const keep = g.userData.devRoom as GeoKeep;
     const src = g.attributes;
     // Only the points this detail level uses, renumbered
@@ -554,7 +569,7 @@ export async function startDevRoom() {
     // So the directions are worked out again from the triangles she has now: each triangle's own facing, added
     // up at its three points (points in the same place share one sum, so the skin picture's seams don't show).
     const P = out.attributes.position as THREE.BufferAttribute | undefined;
-    if (state.detail < 25 && P && out.attributes.normal) {
+    if (detail < 25 && P && out.attributes.normal) {
       const sum = new Map<string, [number, number, number]>();
       const key = (i: number) => `${Math.round(P.getX(i) * 4096)},${Math.round(P.getY(i) * 4096)},${Math.round(P.getZ(i) * 4096)}`;
       const keys: string[] = [];
@@ -600,13 +615,14 @@ export async function startDevRoom() {
     inner.position.y = -src.minY * src.scale * tall;
     // Her shape, with the builder's own morphs and rules: her belly at her look's size, her bust with it
     const shape: Record<string, number> = { ...bellyWeights(look.bump / 100), breastGrow: bustWeight(look.bump) };
-    const lods: { mesh: THREE.Mesh; geos: THREE.BufferGeometry[] }[] = [];
+    const lods: PersonLod[] = [];
     for (const part of src.parts) {
       const copy = cloneSkinned(part); // (shares the geometry and textures; her skeleton is her own)
       copy.traverse((o) => {
         const mesh = o as THREE.SkinnedMesh;
         if (!mesh.isMesh) return;
         const body = def.builder && part === src.parts[0];
+        let auto: PersonLod | undefined; // (this mesh's entry under AUTO detail, if it has one)
         const dict = mesh.morphTargetDictionary;
         if (state.shapes !== 'live') {
           mesh.morphTargetInfluences = undefined;
@@ -626,9 +642,13 @@ export async function startDevRoom() {
           const levels = (source.userData.devRoom as GeoKeep | undefined)?.auto;
           if (levels) {
             // (AUTO: her body baked once at each level; she starts at the lightest and switches by her distance)
-            const geos = levels.map((ix) => bakeGeometry(source, weights, live, ix));
-            lods.push({ mesh: mesh as THREE.Mesh, geos });
-            mesh.geometry = geos[geos.length - 1];
+            // (...each one baked the first time she needs it, not all seven up front: her full-detail body is
+            // several megabytes, and most people never come that close)
+            const geos: (THREE.BufferGeometry | null)[] = levels.map(() => null);
+            const make = (k: number) => bakeGeometry(source, weights, live, levels[k], AUTO[k].detail);
+            auto = { mesh: mesh as THREE.Mesh, geos, make };
+            lods.push(auto);
+            mesh.geometry = geos[geos.length - 1] = make(geos.length - 1);
           } else {
             mesh.geometry = bakeGeometry(source, weights, live);
           }
@@ -641,9 +661,15 @@ export async function startDevRoom() {
         }
         if (body) {
           if (!state.plain) {
+            const base = mesh.material;
             mesh.material = Array.isArray(mesh.material)
-              ? mesh.material.map((m) => paintedMaterial(m, src.box, look, state.detail >= 25))
-              : paintedMaterial(mesh.material, src.box, look, state.detail >= 25);
+              ? mesh.material.map((m) => paintedMaterial(m, src.box, look, state.detail >= 25 && !auto))
+              : paintedMaterial(mesh.material, src.box, look, state.detail >= 25 && !auto);
+            if (auto) {
+              // (AUTO: a second material with her fine bump picture, for the levels heavy enough to carry it)
+              auto.plain = mesh.material;
+              auto.fine = Array.isArray(base) ? base.map((m) => paintedMaterial(m, src.box, look, true)) : paintedMaterial(base, src.box, look, true);
+            }
           }
           if (state.shapes === 'live' && dict && mesh.morphTargetInfluences) {
             mesh.morphTargetInfluences.fill(0);
@@ -726,7 +752,10 @@ export async function startDevRoom() {
         if (mesh.geometry.userData.devRoomOwn) mesh.geometry.dispose();
         mesh.skeleton?.dispose();
       });
-      for (const l of p.lods) for (const geo of l.geos) geo.dispose(); // (her other detail levels)
+      for (const l of p.lods) {
+        for (const geo of l.geos) geo?.dispose(); // (her other detail levels)
+        for (const set of [l.fine, l.plain]) for (const m of set ? (Array.isArray(set) ? set : [set]) : []) m.dispose();
+      }
       p.live?.rig.dispose();
       p.root.removeFromParent();
     }
@@ -805,13 +834,19 @@ export async function startDevRoom() {
       if (p.lods.length) {
         // AUTO detail: her level by her distance from the camera (a level is only left once she is 10% past
         // its edge, so someone walking along an edge doesn't flicker between two)
-        const d = camera.position.distanceTo(p.root.position);
+        const d = Math.hypot(camera.position.x - p.root.position.x, camera.position.y - 1.4, camera.position.z - p.root.position.z); // (to her middle)
         let level = p.level;
         while (level > 0 && d < AUTO[level - 1].within * 0.95) level--;
         while (level < AUTO.length - 1 && d > AUTO[level].within * 1.05) level++;
         if (level !== p.level) {
           p.level = level;
-          for (const l of p.lods) l.mesh.geometry = l.geos[level];
+          for (const l of p.lods) {
+            l.mesh.geometry = l.geos[level] ??= l.make(level);
+            // (her skin's fine bump picture only on the heavier levels: see paintedMaterial)
+            const mat = AUTO[level].detail >= 25 ? l.fine : l.plain;
+            if (mat) l.mesh.material = mat;
+            if (level >= AUTO_DROP_FROM) for (let k = 0; k < 2; k++) { l.geos[k]?.dispose(); l.geos[k] = null; }
+          }
         }
       }
       const walking = state.motion !== 'idle';
@@ -871,7 +906,7 @@ export async function startDevRoom() {
         `${people.length} x ${state.model.label}`,
         `${(r.triangles / 1e6).toFixed(2)}M triangles drawn · ${r.calls} draw calls`,
         state.auto && people.some((q) => q.lods.length)
-          ? `auto detail: ${AUTO.map((a, k) => `${people.filter((q) => q.level === k).length} at ${a.detail}%`).join(' · ')}`
+          ? `auto: ${AUTO.map((a, k) => [a.detail, people.filter((q) => q.level === k).length]).filter(([, c]) => c > 0).map(([d, c]) => `${c} at ${d}%`).join(' · ')}`
           : state.perChar ? `each character: ${(state.perChar / 1000).toFixed(1)}k triangles as drawn` : '',
         info ? `the file: ${(info.tris / 1000).toFixed(0)}k triangles · ${info.mb.toFixed(1)} MB · loaded in ${(info.ms / 1000).toFixed(1)} s` : '',
         `screen ${renderer.domElement.width} x ${renderer.domElement.height}`,
