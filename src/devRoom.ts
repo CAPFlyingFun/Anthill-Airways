@@ -55,7 +55,14 @@ const HEIGHT = 2.8; // people are this tall in the game
  */
 const DETAILS = [100, 50, 25, 10, 5, 3]; // (3% of the builder body is about 9k triangles: the "under 10k" gameplay target)
 const NO_MORPHS = {};
-interface GeoKeep { index0: THREE.BufferAttribute | null; morph0: THREE.BufferGeometry['morphAttributes']; lods: Map<string, THREE.BufferAttribute> }
+/**
+ * AUTO DETAIL (v0.35; Joshua: "closer to the camera the higher %, and further away less"). A person within
+ * `within` of the camera is drawn at `detail` %. Distances are in the game's units: people are 2.8 units tall
+ * (a 1.68 m woman), so ONE UNIT IS 0.6 m: 9 units is about 5.4 m, 18 units about 11 m. The game's top-down
+ * camera sits about 22 units from you, so up there everyone is at 3%; the higher levels are for the 👁️ view.
+ */
+const AUTO = [{ within: 9, detail: 10 }, { within: 18, detail: 5 }, { within: Infinity, detail: 3 }];
+interface GeoKeep { index0: THREE.BufferAttribute | null; morph0: THREE.BufferGeometry['morphAttributes']; lods: Map<string, THREE.BufferAttribute>; auto?: THREE.BufferAttribute[] }
 
 /**
  * JOSHUA'S FIRST THREE LOOKS, saved in the builder on 2026-11-14 (its export, traddomium-characters.json:
@@ -184,6 +191,9 @@ interface Person {
   radius: number;
   speed: number;   // radians per second (its sign is her direction)
   phase: number;
+  /** AUTO detail: her baked body at each level, and the level she is drawn at now. */
+  lods: { mesh: THREE.Mesh; geos: THREE.BufferGeometry[] }[];
+  level: number;
   /** The builder body's own moving skeleton (v0.29.5): her bones posed each frame by the builder's code. */
   live?: {
     rig: HumanRig;
@@ -305,7 +315,7 @@ export async function startDevRoom() {
   });
   el.addEventListener('wheel', (e) => { view.dist = THREE.MathUtils.clamp(view.dist * (1 + Math.sign(e.deltaY) * 0.1), 4, 60); }, { passive: true });
   const people: Person[] = [];
-  const state = { model: MODELS[0], count: 3, morphs: true, shadows: true, detail: 100, shapes: 'live' as 'live' | 'baked' | 'off', underwear: true, smart: false, perChar: 0, motion: 'walk' as 'walk' | 'idle' | 'off', plain: false, sharp: true, loading: '', error: '', info: null as Loaded | null };
+  const state = { model: MODELS[0], count: 3, morphs: true, shadows: true, detail: 100, shapes: 'live' as 'live' | 'baked' | 'off', underwear: true, auto: false, smart: false, perChar: 0, motion: 'walk' as 'walk' | 'idle' | 'off', plain: false, sharp: true, loading: '', error: '', info: null as Loaded | null };
   const resize = () => {
     renderer.setPixelRatio(state.sharp ? Math.min(window.devicePixelRatio, 2) : 1);
     renderer.setSize(host.clientWidth, host.clientHeight, false);
@@ -375,18 +385,20 @@ export async function startDevRoom() {
         const g = mesh.geometry;
         const keep: GeoKeep = (g.userData.devRoom ??= { index0: g.index, morph0: g.morphAttributes, lods: new Map() });
         let index = keep.index0;
-        if (index && state.detail < 100) {
+        const index0 = keep.index0;
+        const lodFor = (detail: number) => {
+          const index = index0!;
           // SMART DETAIL (v0.33): her head keeps three times the share of triangles her body gets (a face reads
           // from far away; a back or a thigh doesn't), for the same total. Only on her skin, which has the head.
           const smart = state.smart && src.box.max.y > src.box.min.y && (mesh.material as THREE.Material).name === 'Material_0';
-          const key = `${state.detail}${smart ? 's' : ''}`;
+          const key = `${detail}${smart ? 's' : ''}`;
           let lod = keep.lods.get(key);
           if (!lod) {
             const pos = g.attributes.position;
             const points = new Float32Array(pos.count * 3);
             for (let i = 0; i < pos.count; i++) { points[i * 3] = pos.getX(i); points[i * 3 + 1] = pos.getY(i); points[i * 3 + 2] = pos.getZ(i); }
             const all = new Uint32Array(index.array);
-            const target = Math.max(3, Math.floor((index.count * state.detail) / 100 / 3) * 3);
+            const target = Math.max(3, Math.floor((index.count * detail) / 100 / 3) * 3);
             let lighter: Uint32Array;
             if (smart) {
               // WHICH PARTS OF HER KEEP THEIR TRIANGLES (v0.34; Joshua: "keep certain parts masked as is, but
@@ -454,8 +466,11 @@ export async function startDevRoom() {
             lod = new THREE.BufferAttribute(lighter, 1);
             keep.lods.set(key, lod);
           }
-          index = lod;
-        }
+          return lod;
+        };
+        if (index && state.detail < 100) index = lodFor(state.detail);
+        // (AUTO: the three levels a person switches between by her distance, ready for the baking)
+        keep.auto = index0 && state.auto ? AUTO.map((a) => lodFor(a.detail)) : undefined;
         const morphs = state.shapes === 'live' ? keep.morph0 : NO_MORPHS;
         if (g.index === index && g.morphAttributes === morphs) return;
         g.dispose(); // (so nothing of the old setting stays on the graphics chip: her shapes alone are a big texture)
@@ -470,9 +485,8 @@ export async function startDevRoom() {
    * every point of her on every frame. Baked, her final shape is worked out ONCE, here, into a plain body of
    * her own (only the points her detail level still draws), and nothing is blended while she walks.
    */
-  const bakeGeometry = (g: THREE.BufferGeometry, weights: [number, number][], live: [string, number][]) => {
+  const bakeGeometry = (g: THREE.BufferGeometry, weights: [number, number][], live: [string, number][], index: THREE.BufferAttribute = g.index!) => {
     const keep = g.userData.devRoom as GeoKeep;
-    const index = g.index!;
     const src = g.attributes;
     // Only the points this detail level uses, renumbered
     const remap = new Int32Array(src.position.count).fill(-1);
@@ -586,6 +600,7 @@ export async function startDevRoom() {
     inner.position.y = -src.minY * src.scale * tall;
     // Her shape, with the builder's own morphs and rules: her belly at her look's size, her bust with it
     const shape: Record<string, number> = { ...bellyWeights(look.bump / 100), breastGrow: bustWeight(look.bump) };
+    const lods: { mesh: THREE.Mesh; geos: THREE.BufferGeometry[] }[] = [];
     for (const part of src.parts) {
       const copy = cloneSkinned(part); // (shares the geometry and textures; her skeleton is her own)
       copy.traverse((o) => {
@@ -607,7 +622,16 @@ export async function startDevRoom() {
           for (const [name, v] of Object.entries(shape)) if (dict && dict[name] !== undefined && v !== 0) weights.push([dict[name], v]);
           const live: [string, number][] = [];
           if (state.motion !== 'off' && dict) for (const name of MOTION_TARGETS) if (dict[name] !== undefined) live.push([name, dict[name]]);
-          mesh.geometry = bakeGeometry(mesh.geometry, weights, live);
+          const source = mesh.geometry;
+          const levels = (source.userData.devRoom as GeoKeep | undefined)?.auto;
+          if (levels) {
+            // (AUTO: her body baked once at each level; she starts at the lightest and switches by her distance)
+            const geos = levels.map((ix) => bakeGeometry(source, weights, live, ix));
+            lods.push({ mesh: mesh as THREE.Mesh, geos });
+            mesh.geometry = geos[geos.length - 1];
+          } else {
+            mesh.geometry = bakeGeometry(source, weights, live);
+          }
           if (live.length) mesh.updateMorphTargets(); // (only her motion shapes now, by name)
         }
         if (state.plain) {
@@ -633,7 +657,7 @@ export async function startDevRoom() {
     scene.add(root);
     const ring = Math.floor(i / 6);
     const radius = 4 + ring * 3.2;
-    const person: Person = { root, angle: (i % 6) * (Math.PI / 3) + ring * 0.5, radius, speed: ((2.0 - ring * 0.15) / radius) * (ring % 2 ? -1 : 1), phase: r() * 6 };
+    const person: Person = { root, lods, level: AUTO.length - 1, angle: (i % 6) * (Math.PI / 3) + ring * 0.5, radius, speed: ((2.0 - ring * 0.15) / radius) * (ring % 2 ? -1 : 1), phase: r() * 6 };
     if (def.builder && state.motion !== 'off') {
       try {
         const body = inner.children[0];
@@ -702,6 +726,7 @@ export async function startDevRoom() {
         if (mesh.geometry.userData.devRoomOwn) mesh.geometry.dispose();
         mesh.skeleton?.dispose();
       });
+      for (const l of p.lods) for (const geo of l.geos) geo.dispose(); // (her other detail levels)
       p.live?.rig.dispose();
       p.root.removeFromParent();
     }
@@ -726,7 +751,8 @@ export async function startDevRoom() {
   // ---- The panel's buttons ----
   const modelBtns = MODELS.map((def) => button(modelRow, def.label, () => { state.model = def; sync(); void rebuild(); }));
   const countBtns = COUNTS.map((n) => button(countRow, String(n), () => { state.count = n; sync(); void rebuild(); }));
-  const detailBtns = DETAILS.map((d) => button(detailRow, `${d}%`, () => { state.detail = d; sync(); void rebuild(); }));
+  const detailBtns = DETAILS.map((d) => button(detailRow, `${d}%`, () => { state.detail = d; state.auto = false; sync(); void rebuild(); }));
+  const autoBtn = button(detailRow, 'Auto', () => { state.auto = !state.auto; if (state.auto) { state.detail = 10; state.shapes = 'baked'; } sync(); void rebuild(); });
   const morphBtn = button(optRow, '', () => { state.morphs = !state.morphs; sync(); void rebuild(); });
   const shadowBtn = button(optRow, '', () => { state.shadows = !state.shadows; sync(); });
   const shapeBtn = button(optRow, '', () => { state.shapes = state.shapes === 'live' ? 'baked' : state.shapes === 'baked' ? 'off' : 'live'; sync(); void rebuild(); });
@@ -743,7 +769,8 @@ export async function startDevRoom() {
     shadowBtn.textContent = `Shadows: ${state.shadows ? 'on' : 'off'}`;
     shadowBtn.classList.toggle('on', state.shadows);
     sun.castShadow = state.shadows;
-    detailBtns.forEach((b, i) => b.classList.toggle('on', DETAILS[i] === state.detail));
+    detailBtns.forEach((b, i) => b.classList.toggle('on', !state.auto && DETAILS[i] === state.detail));
+    autoBtn.classList.toggle('on', state.auto);
     shapeBtn.textContent = `Body shapes: ${state.shapes}`;
     shapeBtn.classList.toggle('on', state.shapes !== 'off');
     motionBtn.textContent = `Motion: ${state.motion}`;
@@ -775,6 +802,18 @@ export async function startDevRoom() {
     const dt = Math.min(0.05, ms / 1000);
     t += dt;
     for (const p of people) {
+      if (p.lods.length) {
+        // AUTO detail: her level by her distance from the camera (a level is only left once she is 10% past
+        // its edge, so someone walking along an edge doesn't flicker between two)
+        const d = camera.position.distanceTo(p.root.position);
+        let level = p.level;
+        while (level > 0 && d < AUTO[level - 1].within * 0.95) level--;
+        while (level < AUTO.length - 1 && d > AUTO[level].within * 1.05) level++;
+        if (level !== p.level) {
+          p.level = level;
+          for (const l of p.lods) l.mesh.geometry = l.geos[level];
+        }
+      }
       const walking = state.motion !== 'idle';
       if (walking) p.angle += p.speed * dt;
       const x = Math.cos(p.angle) * p.radius;
@@ -831,7 +870,9 @@ export async function startDevRoom() {
         `slowest frame ${worstShown.toFixed(0)} ms`,
         `${people.length} x ${state.model.label}`,
         `${(r.triangles / 1e6).toFixed(2)}M triangles drawn · ${r.calls} draw calls`,
-        state.perChar ? `each character: ${(state.perChar / 1000).toFixed(1)}k triangles as drawn` : '',
+        state.auto && people.some((q) => q.lods.length)
+          ? `auto detail: ${AUTO.map((a, k) => `${people.filter((q) => q.level === k).length} at ${a.detail}%`).join(' · ')}`
+          : state.perChar ? `each character: ${(state.perChar / 1000).toFixed(1)}k triangles as drawn` : '',
         info ? `the file: ${(info.tris / 1000).toFixed(0)}k triangles · ${info.mb.toFixed(1)} MB · loaded in ${(info.ms / 1000).toFixed(1)} s` : '',
         `screen ${renderer.domElement.width} x ${renderer.domElement.height}`,
         state.loading,
