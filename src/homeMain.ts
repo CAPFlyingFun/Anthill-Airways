@@ -8,6 +8,7 @@
 // the classic worlds. Everything else lives in world/homeWorld.ts.
 // ============================================================================
 import { PLANKS_PER_DOLLAR } from './data/home';
+import { Avatar } from './ui/avatar';
 import * as THREE from 'three';
 import type { Hud } from './ui/hud';
 import type { Sfx } from './core/audio';
@@ -52,7 +53,12 @@ export async function startHome({ app, renderer, save, hud, sfx, input, progress
   hud.initStats(progress, queenProgress, ['luck', 'tough']);
   hud.initShrine(progress, () => false);
   progress.onChange = () => hud.renderLevel();
+  // 🧍 Your character, live in the player card (top left)
+  const avaSlot = document.getElementById('pcAva')!;
+  const avatar = Avatar.make('h-jack', avaSlot);
+  avaSlot.classList.toggle('live', !!avatar);
   progress.onLevelUp = (level) => {
+    avatar?.nod();
     sfx.levelUp();
     hud.banner(`LEVEL UP! Lv ${level}`, 'Tap your level (top left) to spend your point', 2600);
     writeSave(save);
@@ -341,6 +347,7 @@ export async function startHome({ app, renderer, save, hud, sfx, input, progress
     for (const step of steps(dt)) home.update(step, input.move);
     lod.update(home.scene, home.camera, home.focus);
     renderer.render(home.scene, home.camera);
+    avatar?.render(renderer, Math.min(0.05, rawMs / 1000)); // (🧍 your character in the player card)
     map.update(Math.min(0.1, rawMs / 1000)); // (after the 3D frame: the map can never cost you one)
   };
   requestAnimationFrame(frame);
