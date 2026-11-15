@@ -247,6 +247,9 @@ export class CarService {
   }
 
   /** Cars at the bays right now, waiting or being served (for the map's ❗ and the ⬆️ panel's status). */
+  /** The delivery truck, while it is on its way, unloading or pulling out. */
+  private truckRide: Ride | null = null;
+
   get waiting() {
     return this.bays.filter((b) => b.ride && !b.truck && b.ride.state === 'parked').length;
   }
@@ -285,16 +288,18 @@ export class CarService {
 
   update(dt: number, playerServing: boolean, sfx: Sfx) {
     const o = this.opts;
-    // 🚚 The delivery truck: on its round, or sooner if the pile is nearly empty. It takes the second bay's place at the curb.
+    // 🚚 The delivery truck: on its round, or sooner if the pile is nearly empty. It has its OWN place at the curb,
+    // past the second bay. (v0.58: until now it took the second bay's place, and so could not come while a car stood
+    // there. With both bays full of cars waiting for goods that only the truck brings, nothing ever moved again:
+    // Joshua's gas station, 2026-11-15, "the ant isn't grabbing fuel and it's just sitting there".)
     const truck = o.truck;
     if (truck) {
       this.nextTruck -= dt;
+      if (this.truckRide && (this.truckRide.state === 'gone' || this.truckRide.away)) this.truckRide = null;
       const dry = truck.pile.stack.count <= 3;
-      const bay = this.bays[1];
-      if ((this.nextTruck <= 0 || (dry && this.nextTruck < truck.every - 12)) && !bay.ride && !truck.pile.stack.full) {
+      if ((this.nextTruck <= 0 || (dry && this.nextTruck < truck.every - 12)) && !this.truckRide && !truck.pile.stack.full) {
         this.nextTruck = truck.every;
-        bay.truck = true;
-        bay.ride = this.traffic.arrive(bay.x, 'north', {
+        this.truckRide = this.traffic.arrive(this.bays[1].x + 6, 'north', {
           kind: 'truck',
           onParked: (ride) => {
             // (its load hops from the curb onto the pile's pallet, as much as fits)

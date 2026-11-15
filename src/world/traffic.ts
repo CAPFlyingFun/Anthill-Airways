@@ -62,6 +62,8 @@ const R_LEFT = E_Z - (ROAD_N - TURN_IN);            // ...a left turn swings wid
 const CROSSWALKS = [-19.6, 13.8, 33, 54];
 
 const CRUISE = 7;        // units per second
+/** How far before its parking space a vehicle bringing someone comes onto the street (it grows in there). */
+const RIDE_RUN = 45;
 const TURN_SPEED = 3.8;  // round the corner
 const ACCEL = 3.5;       // pulling away
 const BRAKE = 5;         // a comfortable stop (the speed limits below are worked out from this)
@@ -318,6 +320,7 @@ interface Vehicle {
   mesh: THREE.Mesh;
   kind: VehicleKind;
   hl: number;            // half its length
+  s0: number;            // where along its route it came in (it grows in from there)
   hw: number;            // half its width
   cruise: number;
   route: Route;
@@ -493,7 +496,11 @@ export class Traffic {
   private spawn(route: Route, kind: VehicleKind, color: number, ride: RideImpl | null) {
     const size = SIZE[kind];
     const hl = size.len / 2;
-    route.path.at(hl, A);
+    // (v0.58: a vehicle bringing someone comes in at most RIDE_RUN before its parking space, not at the far end of the
+    // street. Since v0.56 the street runs on to the airport, and a car for the gas station drove 370 units, nearly a
+    // minute, to get there: every business on the street waited that long for each customer.)
+    const start = ride ? Math.max(hl, (ride.side === 'north' ? MAX_X - ride.slotX : ride.slotX - MIN_X) - RIDE_RUN) : hl;
+    route.path.at(start, A);
     for (const o of this.vehicles) {
       const reach = hl + o.hl + 2.5;
       const dx = o.x - A.x, dz = o.z - A.z;
@@ -503,7 +510,7 @@ export class Traffic {
     if (!v) {
       const mesh = new THREE.Mesh(vehicleGeo(kind, color), CAR_MAT);
       mesh.castShadow = true;
-      v = { mesh, kind, hl, hw: 0, cruise: 0, route, s: 0, v: 0, x: 0, z: 0, fx: 1, fz: 0, ride: null, parkS: -1, latFull: 0, junction: 0, waited: 0, done: false };
+      v = { mesh, kind, hl, s0: hl, hw: 0, cruise: 0, route, s: 0, v: 0, x: 0, z: 0, fx: 1, fz: 0, ride: null, parkS: -1, latFull: 0, junction: 0, waited: 0, done: false };
     }
     v.mesh.geometry = vehicleGeo(kind, color); // (shared: never disposed)
     v.kind = kind;
@@ -511,7 +518,8 @@ export class Traffic {
     v.hw = size.wid / 2;
     v.cruise = size.speed * (0.94 + Math.random() * 0.12);
     v.route = route;
-    v.s = hl;
+    v.s = start;
+    v.s0 = start - hl;
     v.v = v.cruise * 0.8; // (it arrives already moving)
     v.ride = ride;
     v.parkS = -1;
@@ -537,7 +545,7 @@ export class Traffic {
     const m = v.mesh;
     m.position.set(v.x, 0, v.z);
     m.rotation.y = Math.atan2(-v.fz, v.fx);
-    const edge = Math.min(v.s - v.hl, v.route.path.length - v.hl - v.s);
+    const edge = Math.min(v.s - v.hl - v.s0, v.route.path.length - v.hl - v.s);
     m.scale.setScalar(0.02 + 0.98 * smooth(edge / 2.5));
   }
 
