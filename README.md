@@ -101,8 +101,8 @@ hidden pieces skipped), **Smart detail** (her head keeps three times her body's 
 30 and 40, and an "each character: N triangles as drawn" line. v0.34: Smart detail is an **importance map**: her face and hands count 3x, her bust 3x, her belly 2x and her navel 6x
 (found from her own body shapes: the points the navel, breastGrow and belly shapes move), fading smoothly so there are
 no seams; the lightening also respects the skin picture's layout, and light baked bodies get corrected lighting directions. v0.35: **Auto** detail by distance from the camera to each person, in 3D (so zooming in raises it, as walking up to her
-does in first person). Joshua's table, in metres (a unit is 0.6 m, people being 2.8 units tall): 0-3 m 100%, 4-6 m 50%,
-7-8 m 30%, 9-10 m 20%, 11-12 m 10%, 13-14 m 5%, 15 m+ 3%. Each level's body is baked the first time she needs it, the two
+does in first person). Joshua's table, in metres (a unit is 0.6 m, people being 2.8 units tall): 0-4 m 30%, 4-8 m 20%,
+8-12 m 10%, 12-15 m 5%, 15 m+ 3% (v0.36; the first table went up to 100% within 3 m). Each level's body is baked the first time she needs it, the two
 heaviest are let go again once she is far away, and there is a 5% margin at each edge so nobody flickers. Baked bodies keep four motion shapes live (the belly's sag,
 drop and swing, the bust's drop), driven by the builder's spring rules; the other 39 are baked in. Nothing in the room touches the save. Code: `src/devRoom.ts`. Remove when the
 character decision is made.

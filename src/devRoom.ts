@@ -63,16 +63,16 @@ const NO_MORPHS = {};
  */
 const METRE = 1 / 0.6;
 const AUTO = [
-  { within: 3.5 * METRE, detail: 100 },  // 0-3 m
-  { within: 6.5 * METRE, detail: 50 },   // 4-6 m
-  { within: 8.5 * METRE, detail: 30 },   // 7-8 m
-  { within: 10.5 * METRE, detail: 20 },  // 9-10 m
-  { within: 12.5 * METRE, detail: 10 },  // 11-12 m
-  { within: 14.5 * METRE, detail: 5 },   // 13-14 m
-  { within: Infinity, detail: 3 },       // 15 m and beyond
+  // (v0.36: capped at 30%. Joshua's first table went to 100% within 3 m and 50% within 6 m: thirty times the
+  // triangles of the far level, for a difference a phone screen doesn't show. He approved this one on 2026-11-14.)
+  { within: 4 * METRE, detail: 30 },   // 0-4 m
+  { within: 8 * METRE, detail: 20 },   // 4-8 m
+  { within: 12 * METRE, detail: 10 },  // 8-12 m
+  { within: 15 * METRE, detail: 5 },   // 12-15 m
+  { within: Infinity, detail: 3 },     // 15 m and beyond
 ];
-/** A person this far down the table (10% or lighter) lets go of her heaviest bodies again, to save memory. */
-const AUTO_DROP_FROM = 4;
+/** A person this far down the table (5% or lighter) lets go of her heaviest bodies again, to save memory. */
+const AUTO_DROP_FROM = 3;
 interface GeoKeep { index0: THREE.BufferAttribute | null; morph0: THREE.BufferGeometry['morphAttributes']; lods: Map<string, THREE.BufferAttribute>; auto?: THREE.BufferAttribute[] }
 
 /**
