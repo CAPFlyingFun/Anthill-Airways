@@ -185,7 +185,7 @@ function navelFlatFor(bumpPercent: number, navelPercent: number) {
  * through them. The builder has a BREAST DETAIL setting for how much a fabric lets through; this is the DEV
  * Room's stand-in for it: worked out once per model, how far each point at the tip of each breast would move
  * (and its surface direction turn) if that small raised patch were laid level with the curve round it, as
- * cloth lying across it would. A character then takes (1 - her detail) of it when she is baked.
+ * cloth lying across it would. A character takes (1 - her detail) of it in her painted material.
  *
  * The tip is found without any markings on the model: among the points her 'breastGrow' shape moves, the one
  * furthest forward on each side, then (three times) the one standing furthest out along the way the surface
@@ -361,12 +361,17 @@ function paintedMaterial(base: THREE.Material, box: THREE.Box3, look: Look, fine
     uSleeveEnd: { value: look.longSleeves ? 0.56 : 0.71 }, // where the sleeves end
     uY0: { value: box.min.y },
     uH: { value: box.max.y - box.min.y },
+    // (how much of the levelling of her bust's tips she takes under her tee: all of it at 0 detail; the patch
+    // grows with her bust. Done here, on the graphics chip, as the builder does it, so it holds for a live body
+    // as for a baked one: v0.39.1, Joshua: "I play it live in the CCBS room with no issues")
+    uSoften: { value: (1 - Math.min(1, Math.max(0, look.bustDetail ?? 1))) * bustLinear(look.bump, look.bust ?? 0) },
   };
   m.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, uniforms);
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', '#include <common>\nvarying vec2 vRest;\nuniform float uY0;\nuniform float uH;')
-      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvRest = vec2(abs(position.x) / uH, (position.y - uY0) / uH);');
+      .replace('#include <common>', '#include <common>\nvarying vec2 vRest;\nuniform float uY0;\nuniform float uH;\nuniform float uSoften;\nattribute vec3 softPos;\nattribute vec3 softNrm;')
+      .replace('#include <beginnormal_vertex>', '#include <beginnormal_vertex>\nobjectNormal += softNrm * uSoften;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\ntransformed += softPos * uSoften;\nvRest = vec2(abs(position.x) / uH, (position.y - uY0) / uH);');
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', '#include <common>\nvarying vec2 vRest;\nuniform vec3 uTop;\nuniform vec3 uLegs;\nuniform vec3 uShoe;\nuniform float uLegEnd;\nuniform float uSleeveEnd;\nfloat drCloth = 0.0;')
       .replace(
@@ -607,6 +612,11 @@ export async function startDevRoom() {
         if (keep.flat === undefined) {
           const isSkin = src.box.max.y > src.box.min.y && (mesh.material as THREE.Material).name === 'Material_0';
           keep.flat = isSkin ? bustSmoothing(g, keep, (mesh as THREE.Mesh).morphTargetDictionary ?? {}, src.box) : null;
+          // (as two extra values on each of her points, which her painted material adds in by her own amount)
+          const softPos = new Float32Array(g.attributes.position.count * 3), softNrm = new Float32Array(g.attributes.position.count * 3);
+          if (keep.flat) for (let v = 0; v < g.attributes.position.count; v++) for (let c = 0; c < 3; c++) { softPos[v * 3 + c] = keep.flat[v * 6 + c]; softNrm[v * 3 + c] = keep.flat[v * 6 + 3 + c]; }
+          g.setAttribute('softPos', new THREE.BufferAttribute(softPos, 3));
+          g.setAttribute('softNrm', new THREE.BufferAttribute(softNrm, 3));
         }
         let index = keep.index0;
         const index0 = keep.index0;
@@ -713,7 +723,7 @@ export async function startDevRoom() {
    * every point of her on every frame. Baked, her final shape is worked out ONCE, here, into a plain body of
    * her own (only the points her detail level still draws), and nothing is blended while she walks.
    */
-  const bakeGeometry = (g: THREE.BufferGeometry, weights: [number, number][], live: [string, number][], index: THREE.BufferAttribute = g.index!, detail = state.detail, soften = 0) => {
+  const bakeGeometry = (g: THREE.BufferGeometry, weights: [number, number][], live: [string, number][], index: THREE.BufferAttribute = g.index!, detail = state.detail) => {
     const keep = g.userData.devRoom as GeoKeep;
     const src = g.attributes;
     // Only the points this detail level uses, renumbered
@@ -743,11 +753,6 @@ export async function startDevRoom() {
               if (g.morphTargetsRelative) { x += m.getX(o) * w; y += m.getY(o) * w; z += m.getZ(o) * w; }
               else { x += (m.getX(o) - a.getX(o)) * w; y += (m.getY(o) - a.getY(o)) * w; z += (m.getZ(o) - a.getZ(o)) * w; }
             }
-          }
-          // (her bust's tips smoothed over, as far as her tee hides them: `soften` of bustSmoothing's patch)
-          if (soften && keep.flat) {
-            const f = name === 'position' ? 0 : 3;
-            x += keep.flat[o * 6 + f] * soften; y += keep.flat[o * 6 + f + 1] * soften; z += keep.flat[o * 6 + f + 2] * soften;
           }
           arr[k * 3] = x; arr[k * 3 + 1] = y; arr[k * 3 + 2] = z;
         }
@@ -835,8 +840,6 @@ export async function startDevRoom() {
     inner.position.y = -src.minY * src.scale * tall;
     // Her shape, with the builder's own morphs and rules: her belly at her look's size, her bust with it
     const shape: Record<string, number> = { ...bellyWeights(look.bump / 100), ...bustWeights(look.bump, look.bust ?? 0), navelFlat: navelFlatFor(look.bump, look.navel ?? 0) };
-    // (how much of the smoothing over her bust's tips she takes: all of it at 0 detail; the patch grows with her bust)
-    const soften = (1 - Math.min(1, Math.max(0, look.bustDetail ?? 1))) * bustLinear(look.bump, look.bust ?? 0);
     const lods: PersonLod[] = [];
     for (const part of src.parts) {
       const copy = cloneSkinned(part); // (shares the geometry and textures; her skeleton is her own)
@@ -884,7 +887,7 @@ export async function startDevRoom() {
               }
               return keep.liveGeo;
             };
-            const make = (k: number) => (TABLE[k].live && dict ? liveBody(k) : bakeGeometry(source, weights, live, levels[k], TABLE[k].detail, soften));
+            const make = (k: number) => (TABLE[k].live && dict ? liveBody(k) : bakeGeometry(source, weights, live, levels[k], TABLE[k].detail));
             auto = { mesh: mesh as THREE.Mesh, geos, make };
             if (dict && TABLE.some((a) => a.live)) {
               const influences = new Array<number>(Object.keys(dict).length).fill(0);
@@ -894,7 +897,7 @@ export async function startDevRoom() {
             lods.push(auto);
             mesh.geometry = geos[geos.length - 1] = make(geos.length - 1);
           } else {
-            mesh.geometry = bakeGeometry(source, weights, live, undefined, undefined, soften);
+            mesh.geometry = bakeGeometry(source, weights, live);
           }
           if (live.length) mesh.updateMorphTargets(); // (only her motion shapes now, by name)
           if (auto && mesh.morphTargetDictionary && mesh.morphTargetInfluences) auto.bakedSet = { dict: mesh.morphTargetDictionary, influences: mesh.morphTargetInfluences };
