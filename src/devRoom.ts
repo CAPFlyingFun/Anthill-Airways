@@ -469,6 +469,8 @@ interface Person {
   clothMake?: (freeze: boolean) => ClothTest;
   /** How far she is from the camera (to her middle), as of this frame. */
   dist?: number;
+  /** She is inside the camera's picture (whether or not she is near enough to be drawn). */
+  inView?: boolean;
   /** FADE: how far she is for the fade: from the player's spot or from the camera, whichever is nearer. */
   far?: number;
   /** FADE: how much of her is drawn, 1 = all (every one of her materials reads this one value). */
@@ -1104,6 +1106,8 @@ export async function startDevRoom() {
   /** Where nobody is drawn any more, right now: SMART FPS's draw range, or the fade's own end. */
   let fadeEnd: number = FADE.end;
   const seen: Person[] = [];
+  /** The one point the draw range and the fade are measured from (see the frame loop). */
+  const fadeFrom = new THREE.Vector3();
   // --------------------------------------------------------------------------
   // 🎚️ SMART FPS (v0.52; Joshua, 2026-11-14: "it only draws in a 3D 20m radius around the camera, and if FPS is
   // better... it will slowly (maybe in 1m increments - per second) increase the draw range, but if the FPS drops...
@@ -1313,6 +1317,76 @@ export async function startDevRoom() {
     }
     stressShow();
   };
+  // --------------------------------------------------------------------------
+  // 🎥 RECORD 30 s (v0.53; Joshua: "can you create a 30s auto log that logs everything and I can share it? Maybe
+  // have it save as a JSON or easy file to read the logs to debug a few minor issues"). Twice a second for 30 s:
+  // the frame rate, who is in view, drawn, solid and fading, SMART FPS's range and what it is doing, the camera,
+  // and the three distances that show a fade gone wrong (the nearest person fading, the furthest still solid, the
+  // nearest in view and not drawn). At the end, everybody in view, one by one. Use the room as usual meanwhile.
+  // The result is JSON, one sample a line, in the log box: Copy log, or Save file (the share sheet on a phone).
+  // --------------------------------------------------------------------------
+  const REC = { secs: 30, every: 0.5 };
+  const rec = { on: false, t: 0, next: 0, frames: 0, ms: 0, worst: 0, head: '', samples: [] as string[], file: '' };
+  const m1 = (units: number) => Math.round((units / METRE) * 10) / 10;
+  const recStart = () => {
+    if (stress.on) stressEnd(`stopped at ${people.length}: recording`);
+    rec.on = true; rec.t = 0; rec.next = REC.every; rec.frames = 0; rec.ms = 0; rec.worst = 0; rec.samples = []; rec.file = '';
+    rec.head = JSON.stringify({
+      devRoom: VERSION, when: new Date().toISOString(), people: people.length, model: state.model.label,
+      settings: { detail: state.auto ? 'auto live' : `${state.detail}%`, levels: TABLE.map((a) => `${a.detail}% to ${a.within === Infinity ? 'the end' : m1(a.within) + ' m'}`), shapes: state.shapes, shadows: state.shadows, motion: state.motion, cloth: state.cloth, outOfViewDrawn: !state.cull, fade: state.fade, smartFps: state.fps, target: state.target, sharp: state.sharp },
+      smart: { startM: m1(SMART.start), leastM: m1(SMART.least), mostM: m1(SMART.most), fadeLastM: m1(SMART.edge), growMPerS: m1(SMART.grow), shrinkMPerS: m1(SMART.shrink), band: SMART.band },
+      screen: `${renderer.domElement.width} x ${renderer.domElement.height}`, pixelRatio: window.devicePixelRatio, browser: navigator.userAgent,
+      distances: 'metres. cam = from the camera; from = from the point the range is measured from',
+    });
+    stress.lines = [`recording ${REC.secs} s: use the room as usual…`];
+    stressShow(); sync();
+  };
+  const recEnd = () => {
+    rec.on = false;
+    const each = people.filter((q) => q.inView).sort((a, b) => (a.dist ?? 0) - (b.dist ?? 0))
+      .map((q) => `[${m1(q.dist ?? 0)},${m1(q.far ?? 0)},${Math.round(q.fade.value * 100) / 100},${TABLE[q.level]?.detail ?? 0}]`);
+    rec.file = `{\n"head": ${rec.head},\n"samples": [\n${rec.samples.join(',\n')}\n],\n"inViewAtEnd": { "columns": ["cam m", "from m", "how solid 0-1", "detail %"], "people": [${each.join(',')}] }\n}`;
+    stress.lines = rec.file.split('\n');
+    stressShow(); stressLog.scrollTop = 0; sync();
+  };
+  const recTick = (ms: number) => {
+    if (!rec.on) return;
+    rec.t += ms / 1000; rec.frames++; rec.ms += ms; rec.worst = Math.max(rec.worst, ms);
+    if (rec.t < rec.next) return;
+    rec.next += REC.every;
+    let solid = 0, fadingNow = 0, nearFade = Infinity, farSolid = 0, nearHidden = Infinity;
+    const lv: Record<string, number> = {};
+    for (const q of people) {
+      if (!q.inView) continue;
+      const d = q.dist ?? 0;
+      if (!q.shown) { if (d < nearHidden) nearHidden = d; continue; }
+      const key = `${TABLE[q.level]?.detail ?? 0}%`;
+      lv[key] = (lv[key] ?? 0) + 1;
+      if (q.fade.value >= 1) { solid++; if (d > farSolid) farSolid = d; } else { fadingNow++; if (d < nearFade) nearFade = d; }
+    }
+    const r = renderer.info.render;
+    rec.samples.push(JSON.stringify({
+      t: Math.round(rec.t * 10) / 10, fps: Math.round((rec.frames * 1000) / rec.ms), worstMs: Math.round(rec.worst),
+      total: people.length, inView, drawn, solid, fading: fadingNow,
+      rangeM: state.fps ? m1(smart.range) : null, doing: !state.fps ? 'off' : smart.vel > 0 ? (smart.range >= Math.min(SMART.most, smart.reach + SMART.edge) ? 'all in reach' : 'growing') : smart.vel < 0 ? 'shrinking' : 'holding',
+      smartRate: Math.round(smart.rate), cap: Math.round(smart.cap), target: state.target,
+      nearestFadingCam: nearFade === Infinity ? null : m1(nearFade), furthestSolidCam: m1(farSolid), nearestNotDrawnCam: nearHidden === Infinity ? null : m1(nearHidden),
+      levels: lv, calls: r.calls, tris: r.triangles,
+      cam: { distM: m1(view.dist), pitchDeg: Math.round((view.pitch * 180) / Math.PI), yawDeg: Math.round((((view.yaw * 180) / Math.PI) % 360 + 360) % 360) },
+    }));
+    rec.frames = 0; rec.ms = 0; rec.worst = 0;
+    stress.lines = [`recording… ${Math.max(0, REC.secs - rec.t).toFixed(0)} s left`];
+    stressShow();
+    if (rec.t >= REC.secs) recEnd();
+  };
+  const recBtn = button(stressRow, '', () => { if (rec.on) recEnd(); else recStart(); });
+  const recSaveBtn = button(stressRow, '💾 Save file', () => {
+    const name = `devroom-log-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.json`;
+    const file = new File([rec.file], name, { type: 'application/json' });
+    const download = () => { const a = document.createElement('a'); a.href = URL.createObjectURL(file); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 5000); };
+    // (a phone: its share sheet, to send the file straight on; anything else: an ordinary download)
+    if (navigator.canShare?.({ files: [file] })) navigator.share({ files: [file] }).catch((e) => { if ((e as Error)?.name !== 'AbortError') download(); }); else download();
+  });
   const stressViewBtn = button(stressRow, '▶ Stress test: all in view', () => void stressStart('view'));
   const stressRoomBtn = button(stressRow, '▶ Stress test: room view', () => void stressStart('room'));
   const stressStopBtn = button(stressRow, '🛑 Stop', () => stressEnd(`stopped by hand at ${people.length}`));
@@ -1411,7 +1485,10 @@ export async function startDevRoom() {
     stressViewBtn.classList.toggle('on', stress.on && stress.mode === 'view');
     stressRoomBtn.classList.toggle('on', stress.on && stress.mode === 'room');
     stressStopBtn.style.display = stress.on ? '' : 'none';
-    stressCopyBtn.style.display = stress.lines.length ? '' : 'none';
+    stressCopyBtn.style.display = stress.lines.length && !rec.on ? '' : 'none';
+    recBtn.textContent = rec.on ? '⏹ Stop recording' : '🎥 Record 30 s log';
+    recBtn.classList.toggle('on', rec.on);
+    recSaveBtn.style.display = rec.file && !rec.on && stress.lines[0] === '{' ? '' : 'none';
     cullBtn.textContent = `Out of view: ${state.cull ? 'not drawn' : 'drawn'}`;
     cullBtn.classList.toggle('on', state.cull);
     fadeBtn.textContent = `Far away: ${state.fade ? 'fades out' : 'no fade'}`;
@@ -1540,16 +1617,26 @@ export async function startDevRoom() {
     fadeEnd = ranging ? smart.range : fading ? FADE.end : Infinity;
     const fadeBand = !fading ? 0 : ranging ? SMART.edge : FADE.end - FADE.start;
     let reach = 0;
+    {
+      const d = Math.hypot(camera.position.x, camera.position.y - 1.2, camera.position.z), k = Math.min(1, (4 * METRE) / Math.max(0.001, d));
+      fadeFrom.set(camera.position.x * k, 1.2 + (camera.position.y - 1.2) * k, camera.position.z * k);
+    }
     inView = 0;
     for (const p of people) {
       let show = !state.cull || frustum.intersectsSphere(cullBall.set(cullAt.set(p.root.position.x, 1.4, p.root.position.z), cullBall.radius));
       if (show) inView++;
+      p.inView = show;
       let f = 1;
       if (fading || ranging) {
         // (v0.51, Joshua: "if I zoom out too far, they all disappear... make it distance away from the player's
         // character and the camera, that way there is always people shown even zoomed way out". The room has no
         // player, so the spot the camera looks at, its middle, stands in for one: she is as far as the nearer of the two.)
-        p.far = Math.min(p.dist ?? 0, Math.hypot(p.root.position.x, p.root.position.z));
+        // (v0.53, Joshua: "kind of random who fades and who doesn't and sometimes places the fade person closer
+        // and others further are normal". The nearer of two points made two bubbles, one round the camera and one
+        // round the middle, and someone between them faded while people behind her didn't. Now it is ONE point,
+        // `fadeFrom`: the camera itself while it is within 4 m of the spot it looks at, and otherwise the point
+        // 4 m from that spot on the way to the camera. So from the camera's side, nearer is always more solid.)
+        p.far = Math.hypot(fadeFrom.x - p.root.position.x, fadeFrom.y - 1.4, fadeFrom.z - p.root.position.z);
         if (show && p.far > reach) reach = p.far;
         f = fadeBand > 0 ? THREE.MathUtils.clamp((fadeEnd - p.far) / fadeBand, 0, 1) : p.far < fadeEnd ? 1 : 0;
         if (f <= 0) show = false;
@@ -1572,6 +1659,7 @@ export async function startDevRoom() {
     renderer.render(scene, camera);
     if (document.hidden || ms > 3000) return; // (back from the background: not a frame time)
     stressTick(ms);
+    recTick(ms);
     frames++;
     acc += ms;
     worst = Math.max(worst, ms);
