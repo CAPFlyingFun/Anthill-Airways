@@ -22,3 +22,14 @@ project's three.js types are stricter; nothing runs differently).
 
 `sarahlab/sarahLabTool.ts` is an excerpt (the cloth's dials only) and `actor/humanRig.ts` a one-line pointer to the
 copy above, so the copied files' own import paths still resolve.
+
+## Her head: hairstyles, hair colours, face shapes (added 2026-11-15, builder commit `6e0b67b`, v0.9.27)
+
+From `src/sarahlab/`, unchanged: `headLook.ts`, `hairStyles.ts`, `hairColours.ts`, `hairMaterial.ts`, `faceLook.ts`,
+`faceShapes.ts`, `faceShapeFields.ts`, and `faceRig.ts` re-copied at this commit (it gained the chosen lip colour).
+
+The DEV Room (`src/devRoom.ts`) uses the hairstyles' LIGHT files, the hair colour ramp and the seven face types.
+Not used yet: `faceLook.ts` (eye, brow and lip colours need the builder's face layer, `faceRig.ts`, on her skin's
+material, which the room's stand-in painted outfit does not carry) and the builder's sixteen painted tops
+(`topCut.ts`, `topDetails.ts`, `paintTemplates.ts`, `fabricMaterial.ts`: not copied; the room still paints its own
+stand-in tee and leggings).

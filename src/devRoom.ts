@@ -33,6 +33,12 @@ import { measureHuman } from './vendor/ccbs/humanSkeleton';
 import { poseHuman, humanStride } from './vendor/ccbs/humanPose';
 import { walkWeight, weighWalk } from './vendor/ccbs/walkWeight';
 import type { HumanMeasure, MutableJointTurn } from './vendor/ccbs/humanRig';
+// The builder's heads (v0.57, a copy at its commit 6e0b67b): its hairstyles and their colours, and its face types
+import { HAIR_STYLES, HAIR_LENGTH_MORPH } from './vendor/ccbs/sarahlab/hairStyles';
+import { HAIR_COLOURS } from './vendor/ccbs/sarahlab/hairColours';
+import { patchHairMaterial, setHairColour } from './vendor/ccbs/sarahlab/hairMaterial';
+import { FACE_TYPES } from './vendor/ccbs/sarahlab/faceShapes';
+import { faceFieldOn, headPoints } from './vendor/ccbs/sarahlab/faceShapeFields';
 import { MOTION_TARGETS, motionWeights, restingBellySpring, stepBellySpring, stepBreastSpring, walkBounceAccel, walkSwayAccel, type BellySpring } from './vendor/ccbs/bellyMotion';
 
 /** The builder's published models (GitHub Pages: the same origin as this game when it's live). */
@@ -45,7 +51,7 @@ interface ModelDef {
   builder: boolean;      // the builder's body: random shape + stand-in outfits
 }
 const MODELS: ModelDef[] = [
-  { key: 'builder', label: "Builder body", files: [BUILDER + 'sarah-v2-body-slim.glb', BUILDER + 'sarah-v2-hair.glb'], builder: true },
+  { key: 'builder', label: "Builder body", files: [BUILDER + 'sarah-v2-body-slim.glb'], builder: true }, // (her hair: one of HAIR_STYLES' light files a person, loaded beside her)
   { key: 'game', label: "Game's Sarah", files: [`${import.meta.env.BASE_URL}models/h-sarah.glb`], builder: false },
 ];
 /** How many people the room can hold (v0.49; Joshua: "a slider from 1-400 people but also where I can manually type in a specific number"). */
@@ -132,7 +138,8 @@ const AUTO_DROP_FROM = 3;
 const CLOTH_DRESSING_AT_ONCE = 2, CLOTH_SIMULATED_AT_MOST = 6;
 /** 'Cloth tee: near the camera': within this of the camera a tee is simulated (Auto lite's own live range: up to 4 m). */
 const CLOTH_NEAR = 4 * METRE;
-interface GeoKeep { index0: THREE.BufferAttribute | null; morph0: THREE.BufferGeometry['morphAttributes']; lods: Map<string, THREE.BufferAttribute>; auto?: THREE.BufferAttribute[]; flat?: Float32Array | null; liveGeos?: Map<number, THREE.BufferGeometry> }
+/** `faces`: the face types have been added to this mesh's shapes (once). */
+interface GeoKeep { faces?: boolean; index0: THREE.BufferAttribute | null; morph0: THREE.BufferGeometry['morphAttributes']; lods: Map<string, THREE.BufferAttribute>; auto?: THREE.BufferAttribute[]; flat?: Float32Array | null; liveGeos?: Map<number, THREE.BufferGeometry> }
 
 /**
  * JOSHUA'S FIRST THREE LOOKS, saved in the builder on 2026-11-14 (its export, traddomium-characters.json:
@@ -154,6 +161,61 @@ interface Look {
   legs: number;        // leggings colour
   capri: boolean;      // leggings end mid-calf (leggingsCapri) or at the ankle
   longSleeves: boolean; // teeLong or teeShort
+  /** Her head (v0.57): a hairstyle of the builder's, how long (0 its shortest to 1), its colour ('#rrggbb', or null: her own copper), and her face as FACE_TYPES' weights. */
+  head?: { style: string; length: number; colour: string | null; face: Record<string, number> };
+}
+/** The name a face type has among a mesh's shapes. */
+const FACE_SHAPE = (id: string) => `faceType:${id}`;
+/**
+ * HER HAIR'S MATERIAL: her own copy of the file's, with the builder's two patches (its cards lit as one lock from both
+ * sides; its strands drawn in her colour), and the room's fade after them.
+ */
+function hairMaterialFor(base: THREE.Material, colour: string | null, fade?: { value: number }) {
+  const m = base.clone();
+  patchHairMaterial(m);
+  setHairColour(m, colour);
+  if (fade) {
+    const before = m.onBeforeCompile, key = m.customProgramCacheKey;
+    m.onBeforeCompile = function (shader, renderer) { before.call(this, shader, renderer); fadeShader(shader, fade); };
+    m.customProgramCacheKey = function () { return `${key.call(this)}|devroom-fade`; };
+  }
+  m.userData.devRoomOwn = true;
+  return m;
+}
+/**
+ * THE FACE TYPES AS SHAPES (v0.57). The builder shapes a face on the CPU from 21 sliders, each a smooth field in space
+ * (faceShapes.ts). A crowd can't afford that per person, so each of its seven named faces (oval, round, heart...) is
+ * worked out ONCE for a mesh's own points, as one more of its shapes beside the belly's and the bust's: a person's face
+ * is then a weight or two, blended like the rest of her. Her hair gets the same seven, so her hairline stays on her head.
+ */
+function addFaceTypes(mesh: THREE.Mesh, morph0: THREE.BufferGeometry['morphAttributes']) {
+  const g = mesh.geometry, pos = g.attributes.position, nrm = g.attributes.normal, n = pos.count;
+  const basePos = new Float32Array(n * 3);
+  for (let v = 0; v < n; v++) { basePos[v * 3] = pos.getX(v); basePos[v * 3 + 1] = pos.getY(v); basePos[v * 3 + 2] = pos.getZ(v); }
+  // (normals too only where the mesh's other shapes carry them: three wants as many of one as of the other)
+  const withNormals = !!nrm && !!(morph0.normal?.length || !morph0.position?.length);
+  let baseNrm: Float32Array | null = null;
+  if (withNormals) { baseNrm = new Float32Array(n * 3); for (let v = 0; v < n; v++) { baseNrm[v * 3] = nrm.getX(v); baseNrm[v * 3 + 1] = nrm.getY(v); baseNrm[v * 3 + 2] = nrm.getZ(v); } }
+  const points = headPoints(basePos);
+  const fields = new Map<string, ReturnType<typeof faceFieldOn>>();
+  const positions = (morph0.position ??= []), normals = withNormals ? (morph0.normal ??= []) : null;
+  const dict = (mesh.morphTargetDictionary ??= {}), influences = (mesh.morphTargetInfluences ??= []);
+  for (const type of FACE_TYPES) {
+    const dp = new Float32Array(n * 3), dn = withNormals ? new Float32Array(n * 3) : null;
+    for (const [slider, w] of Object.entries(type.look)) {
+      let f = fields.get(slider);
+      if (!f) fields.set(slider, (f = faceFieldOn(slider, basePos, baseNrm, points)));
+      for (let k = 0; k < f.index.length; k++) {
+        const v = f.index[k] * 3;
+        for (let c = 0; c < 3; c++) { dp[v + c] += f.pos[k * 3 + c] * w; if (dn && f.nrm) dn[v + c] += f.nrm[k * 3 + c] * w; }
+      }
+    }
+    dict[FACE_SHAPE(type.id)] = positions.length;
+    positions.push(new THREE.BufferAttribute(dp, 3));
+    if (normals && dn) normals.push(new THREE.BufferAttribute(dn, 3));
+    influences.push(0);
+  }
+  g.morphTargetsRelative = true;
 }
 const LOOKS: Look[] = [
   { name: 'Char1', bump: 23, heightCm: 3.5, top: 0x4e642e, legs: 0x37383e, capri: false, longSleeves: false, navel: 47, bustDetail: 0.45 },  // jersey: olive tee, charcoal leggings
@@ -375,7 +437,22 @@ function randomLook(i: number, seed: number): Look {
     bustDetail: Math.round(r() * 30) / 100,
     navel: Math.round(35 + r() * 10),
     longSleeves: r() < 0.4,
+    // (v0.57: her head. Drawn last, so everything above is as it was for the same person.)
+    head: randomHead(r),
   };
+}
+/**
+ * A random head: any of the builder's hairstyles at any length; a natural hair colour nine times in ten (the darker
+ * ones a little more often), a dyed one the tenth; and a face that is mostly one of the builder's types, sometimes
+ * with a little of a second.
+ */
+function randomHead(r: () => number): NonNullable<Look['head']> {
+  const pick = <T,>(list: readonly T[]) => list[Math.min(list.length - 1, Math.floor(r() * list.length))];
+  const natural = HAIR_COLOURS.slice(0, 12), dyed = HAIR_COLOURS.slice(12);
+  const colour = r() < 0.9 ? (r() < 0.35 ? pick(natural.slice(0, 4)) : pick(natural)) : pick(dyed.length ? dyed : natural);
+  const face: Record<string, number> = { [pick(FACE_TYPES).id]: Math.round((0.5 + r() * 0.5) * 100) / 100 };
+  if (r() < 0.35) { const second = pick(FACE_TYPES).id; if (!(second in face)) face[second] = Math.round((0.2 + r() * 0.3) * 100) / 100; }
+  return { style: pick(HAIR_STYLES).id, length: Math.round(r() * 100) / 100, colour: colour.colour, face };
 }
 
 /** A small seeded random (the same person looks the same every time). */
@@ -626,7 +703,7 @@ export async function startDevRoom() {
   el.addEventListener('wheel', (e) => { view.dist = THREE.MathUtils.clamp(view.dist * (1 + Math.sign(e.deltaY) * 0.1), 4, 60); }, { passive: true });
   const people: Person[] = [];
   // (the defaults are the settings Joshua settled on, 2026-11-14: 40 walking, auto detail, baked, smart, pieces skipped)
-  const state = { model: MODELS[0], count: 40, looks: 'random' as 'random' | 'saved' | 'off', seed: 0, shadows: true, detail: 3, shapes: 'baked' as 'live' | 'baked' | 'off', underwear: false, auto: true, fps: true, smart: true, cull: true, fade: true, target: 30 as 30 | 45 | 60, cloth: 'off' as 'off' | 'live' | 'freeze' | 'near', perChar: 0, motion: 'walk' as 'walk' | 'idle' | 'off', plain: false, sharp: true, loading: '', error: '', info: null as Loaded | null };
+  const state = { model: MODELS[0], count: 40, looks: 'random' as 'random' | 'saved' | 'off', seed: 0, shadows: true, detail: 3, shapes: 'baked' as 'live' | 'baked' | 'off', underwear: false, auto: true, fps: true, smart: true, cull: true, fade: true, heads: true, target: 30 as 30 | 45 | 60, cloth: 'off' as 'off' | 'live' | 'freeze' | 'near', perChar: 0, motion: 'walk' as 'walk' | 'idle' | 'off', plain: false, sharp: true, loading: '', error: '', info: null as Loaded | null };
   const resize = () => {
     renderer.setPixelRatio(state.sharp ? Math.min(window.devicePixelRatio, 2) : 1);
     renderer.setSize(host.clientWidth, host.clientHeight, false);
@@ -640,7 +717,7 @@ export async function startDevRoom() {
 
   // ---- Loading a model (once), then cloning it per person ----
   const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
-  interface Loaded { parts: THREE.Object3D[]; scale: number; minY: number; box: THREE.Box3; tris: number; mb: number; ms: number }
+  interface Loaded { hairs: Map<string, THREE.Object3D>; parts: THREE.Object3D[]; scale: number; minY: number; box: THREE.Box3; tris: number; mb: number; ms: number }
   const cache = new Map<string, Promise<Loaded>>();
   const load = (def: ModelDef) => {
     let p = cache.get(def.key);
@@ -655,6 +732,26 @@ export async function startDevRoom() {
           const gltf = await loader.parseAsync(buf, '');
           parts.push(gltf.scene);
         }
+        // HER HAIR (v0.57): the builder's hairstyles, each one's LIGHT file (about 5k triangles, a fifth of the full
+        // one), all loaded with her: 2 MB together. If they can't be had, the one hairstyle she had before.
+        const hairs = new Map<string, THREE.Object3D>();
+        if (def.builder) {
+          const one = async (url: string) => {
+            const res = await fetch(url);
+            if (!res.ok) throw new Error(`${res.status}`);
+            const buf = await res.arrayBuffer();
+            bytes += buf.byteLength;
+            return (await loader.parseAsync(buf, '')).scene;
+          };
+          try {
+            const got = await Promise.all(HAIR_STYLES.map((style) => one(BUILDER + style.lightFile.replace(/^models\//, ''))));
+            HAIR_STYLES.forEach((style, k) => hairs.set(style.id, got[k]));
+          } catch {
+            hairs.clear();
+            hairs.set('ponytail', await one(BUILDER + 'sarah-v2-hair.glb'));
+          }
+          parts.push(...hairs.values());
+        }
         // Her size as she stands (skinned, in the world), from the first part (the body)
         const world = new THREE.Box3();
         const rest = new THREE.Box3(); // ...and in her geometry's own units (for the painted outfit)
@@ -667,7 +764,7 @@ export async function startDevRoom() {
             mesh.castShadow = true;
             mesh.frustumCulled = false; // (a skinned mesh's bounds are its rest pose's)
             const g = mesh.geometry;
-            tris += (g.index ? g.index.count : g.attributes.position.count) / 3;
+            if (parts.indexOf(part) < 2) tris += (g.index ? g.index.count : g.attributes.position.count) / 3; // (her body and one hairstyle)
             if (part !== parts[0]) return;
             // (her rest pose alone: a geometry's own bounding box also covers every morph, the 200% belly included)
             rest.union(new THREE.Box3().setFromBufferAttribute(g.attributes.position as THREE.BufferAttribute));
@@ -675,7 +772,7 @@ export async function startDevRoom() {
           });
         }
         const h = Math.max(0.001, world.max.y - world.min.y);
-        return { parts, scale: HEIGHT / h, minY: world.min.y, box: rest, tris: Math.round(tris), mb: bytes / 1e6, ms: performance.now() - t0 };
+        return { hairs, parts, scale: HEIGHT / h, minY: world.min.y, box: rest, tris: Math.round(tris), mb: bytes / 1e6, ms: performance.now() - t0 };
       })();
       cache.set(def.key, p);
     }
@@ -695,6 +792,9 @@ export async function startDevRoom() {
         if (!mesh.isMesh) return;
         const g = mesh.geometry;
         const keep: GeoKeep = (g.userData.devRoom ??= { index0: g.index, morph0: g.morphAttributes, lods: new Map() });
+        const isHair = (mesh.material as THREE.Material).name === 'sarahHair';
+        // (v0.57, once: the builder's face types, as seven more shapes of her skin's and of each hairstyle's)
+        if (!keep.faces && src.hairs.size && (isHair || (mesh.material as THREE.Material).name === 'Material_0')) { keep.faces = true; addFaceTypes(mesh, keep.morph0); }
         // (her skin only, once: what smoothing the tips of her bust under a tee would move: bustSmoothing)
         if (keep.flat === undefined) {
           const isSkin = src.box.max.y > src.box.min.y && (mesh.material as THREE.Material).name === 'Material_0';
@@ -790,13 +890,15 @@ export async function startDevRoom() {
           }
           return lod;
         };
-        if (index && state.detail < 100) index = lodFor(state.detail);
+        // (a hairstyle's light file is already a fifth of its triangles: it is lightened an eighth as hard as her body)
+        if (index && state.detail < 100) index = lodFor(isHair && index.count < 30000 ? Math.min(100, state.detail * 8) : state.detail);
         // (AUTO: the three levels a person switches between by her distance, ready for the baking)
-        keep.auto = index0 && state.auto ? TABLE.map((a) => lodFor(a.detail)) : undefined;
+        keep.auto = index0 && state.auto && !isHair ? TABLE.map((a) => lodFor(a.detail)) : undefined;
         // (AUTO LITE's live body is one for everybody near the camera; a new one for each change of settings)
         for (const lg of keep.liveGeos?.values() ?? []) lg.dispose();
         keep.liveGeos = undefined;
-        const morphs = state.shapes === 'live' ? keep.morph0 : NO_MORPHS;
+        // (her hair always has its shapes: its length and her face's)
+        const morphs = state.shapes === 'live' || (isHair && keep.morph0.position?.length) ? keep.morph0 : NO_MORPHS;
         if (g.index === index && g.morphAttributes === morphs) return;
         g.dispose(); // (so nothing of the old setting stays on the graphics chip: her shapes alone are a big texture)
         g.setIndex(index);
@@ -931,7 +1033,13 @@ export async function startDevRoom() {
     inner.scale.setScalar(src.scale * tall);
     inner.position.y = -src.minY * src.scale * tall;
     // Her shape, with the builder's own morphs and rules: her belly at her look's size, her bust with it
-    const shape: Record<string, number> = { ...bellyWeights(look.bump / 100), ...bustWeights(look.bump, look.bust ?? 0), navelFlat: navelFlatFor(look.bump, look.navel ?? 0) };
+    // (v0.57: her head. 'Heads: all the same' gives everybody the hair and face she had before)
+    const head = state.heads ? look.head : undefined;
+    const faceShape: Record<string, number> = {};
+    for (const [id, w] of Object.entries(head?.face ?? {})) faceShape[FACE_SHAPE(id)] = w;
+    const shape: Record<string, number> = { ...bellyWeights(look.bump / 100), ...bustWeights(look.bump, look.bust ?? 0), navelFlat: navelFlatFor(look.bump, look.navel ?? 0), ...faceShape };
+    const hairPart = src.hairs.get(head?.style ?? 'ponytail') ?? src.hairs.values().next().value;
+    const parts = src.hairs.size ? (hairPart ? [src.parts[0], hairPart] : [src.parts[0]]) : src.parts;
     const lods: PersonLod[] = [];
     // (FADE: one value for all of her, read by each of her materials and by her shadow's)
     const fadeValue = { value: 1 };
@@ -943,7 +1051,7 @@ export async function startDevRoom() {
       fadeDepth.customProgramCacheKey = () => 'devroom-fade';
     }
     let skin: { mesh: THREE.SkinnedMesh; dict: Record<string, number> } | undefined;
-    for (const part of src.parts) {
+    for (const part of parts) {
       const copy = cloneSkinned(part); // (shares the geometry and textures; her skeleton is her own)
       copy.traverse((o) => {
         const mesh = o as THREE.SkinnedMesh;
@@ -952,7 +1060,13 @@ export async function startDevRoom() {
         let auto: PersonLod | undefined; // (this mesh's entry under AUTO detail, if it has one)
         const dict = mesh.morphTargetDictionary;
         if (body && dict && mesh.isSkinnedMesh && mesh.geometry.getAttribute('_cloth_cover')) skin = { mesh, dict };
-        if (state.shapes !== 'live') {
+        const isHair = (mesh.material as THREE.Material).name === 'sarahHair';
+        if (isHair && dict && mesh.morphTargetInfluences && mesh.geometry.morphAttributes.position?.length) {
+          // (her hair's own shapes: how long it is, and her face's, so it sits on the head she has)
+          mesh.morphTargetInfluences.fill(0);
+          if (dict[HAIR_LENGTH_MORPH] !== undefined) mesh.morphTargetInfluences[dict[HAIR_LENGTH_MORPH]] = 1 - (head?.length ?? 1);
+          for (const [name, w] of Object.entries(faceShape)) if (dict[name] !== undefined) mesh.morphTargetInfluences[dict[name]] = w;
+        } else if (state.shapes !== 'live') {
           mesh.morphTargetInfluences = undefined;
           mesh.morphTargetDictionary = undefined;
         }
@@ -1014,8 +1128,11 @@ export async function startDevRoom() {
           mesh.material = new THREE.MeshLambertMaterial({ color: def.builder ? look.top : 0xc9a27e });
           mesh.material.userData.devRoomOwn = true;
           if (fade) { mesh.material.onBeforeCompile = (shader) => fadeShader(shader, fade); mesh.material.customProgramCacheKey = () => 'devroom-fade'; }
+        } else if (isHair) {
+          // (her hair: her own copy of its material, in her own colour, fading with her)
+          mesh.material = Array.isArray(mesh.material) ? mesh.material.map((m) => hairMaterialFor(m, head?.colour ?? null, fade)) : hairMaterialFor(mesh.material, head?.colour ?? null, fade);
         } else if (fade && !body) {
-          // (her hair and anything else of hers: her own copies, so they fade with her)
+          // (anything else of hers: her own copies, so they fade with her)
           mesh.material = Array.isArray(mesh.material) ? mesh.material.map((m) => fadedMaterial(m, fade)) : fadedMaterial(mesh.material, fade);
         }
         // (her shadow thins out with her)
@@ -1479,6 +1596,7 @@ export async function startDevRoom() {
   const motionBtn = button(optRow, '', () => { state.motion = state.motion === 'walk' ? 'idle' : state.motion === 'idle' ? 'off' : 'walk'; sync(); void rebuild(); });
   const smartBtn = button(optRow, '', () => { state.smart = !state.smart; sync(); void rebuild(); });
   const underBtn = button(optRow, '', () => { state.underwear = !state.underwear; sync(); void rebuild(); });
+  const headsBtn = button(optRow, '', () => { state.heads = !state.heads; sync(); void rebuild(); });
   const plainBtn = button(optRow, '', () => { state.plain = !state.plain; sync(); void rebuild(); });
   const clothBtn = button(optRow, '', () => { state.cloth = state.cloth === 'off' ? 'live' : state.cloth === 'live' ? 'freeze' : state.cloth === 'freeze' ? 'near' : 'off'; sync(); void rebuild(); });
   const cullBtn = button(optRow, '', () => { state.cull = !state.cull; sync(); });
@@ -1506,6 +1624,8 @@ export async function startDevRoom() {
     smartBtn.classList.toggle('on', state.smart);
     underBtn.textContent = `Hidden pieces: ${state.underwear ? 'drawn' : 'skipped'}`;
     underBtn.classList.toggle('on', state.underwear);
+    headsBtn.textContent = `Heads: ${state.heads ? 'all different' : 'all the same'}`;
+    headsBtn.classList.toggle('on', state.heads);
     plainBtn.textContent = `Materials: ${state.plain ? 'plain' : 'full'}`;
     plainBtn.classList.toggle('on', !state.plain);
     clothBtn.textContent = `Cloth tee: ${state.cloth === 'off' ? 'off' : state.cloth === 'live' ? 'simulated' : state.cloth === 'freeze' ? 'frozen once dressed' : 'simulated near the camera'}`;
