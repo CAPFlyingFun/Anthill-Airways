@@ -83,7 +83,12 @@ const AUTO_LITE: { within: number; detail: number; live?: boolean }[] = [
   { within: 7 * METRE, detail: 2 },             // 4-6 m (up to 7; v0.42, Joshua: "4-6m = 2% / +7m = 1%")
   { within: Infinity, detail: 1 },              // 7 m and beyond
 ];
-/** The table in use: AUTO or AUTO_LITE (the 'Auto lite' button). */
+/**
+ * AUTO LIVE (v0.44; Joshua: "an Auto Live version that goes 1-3% like the Auto Lite but works with the Live Body"):
+ * Auto lite's distances and detail, with every level's shapes live.
+ */
+const AUTO_LIVE: { within: number; detail: number; live?: boolean }[] = AUTO_LITE.map((a) => ({ ...a, live: true }));
+/** The table in use: AUTO, AUTO_LITE or AUTO_LIVE (their buttons). */
 // (v0.43.1, the room's defaults, as Joshua tested them on his phone at 54-56 FPS with 40 walking and about 16 in
 // view: "Set these settings as default": Auto lite, body shapes LIVE, shadows on, cloth tee off, out of view not drawn.
 // With the shapes live everybody is drawn at 3% with all her shapes: Auto lite's lighter levels are baked bodies.)
@@ -95,7 +100,7 @@ const AUTO_DROP_FROM = 3;
 const CLOTH_DRESSING_AT_ONCE = 2, CLOTH_SIMULATED_AT_MOST = 6;
 /** 'Cloth tee: near the camera': within this of the camera a tee is simulated (Auto lite's own live range: up to 4 m). */
 const CLOTH_NEAR = 4 * METRE;
-interface GeoKeep { index0: THREE.BufferAttribute | null; morph0: THREE.BufferGeometry['morphAttributes']; lods: Map<string, THREE.BufferAttribute>; auto?: THREE.BufferAttribute[]; flat?: Float32Array | null; liveGeo?: THREE.BufferGeometry }
+interface GeoKeep { index0: THREE.BufferAttribute | null; morph0: THREE.BufferGeometry['morphAttributes']; lods: Map<string, THREE.BufferAttribute>; auto?: THREE.BufferAttribute[]; flat?: Float32Array | null; liveGeos?: Map<number, THREE.BufferGeometry> }
 
 /**
  * JOSHUA'S FIRST THREE LOOKS, saved in the builder on 2026-11-14 (its export, traddomium-characters.json:
@@ -564,7 +569,7 @@ export async function startDevRoom() {
   el.addEventListener('wheel', (e) => { view.dist = THREE.MathUtils.clamp(view.dist * (1 + Math.sign(e.deltaY) * 0.1), 4, 60); }, { passive: true });
   const people: Person[] = [];
   // (the defaults are the settings Joshua settled on, 2026-11-14: 40 walking, auto detail, baked, smart, pieces skipped)
-  const state = { model: MODELS[0], count: 40, looks: 'random' as 'random' | 'saved' | 'off', seed: 0, shadows: true, detail: 3, shapes: 'live' as 'live' | 'baked' | 'off', underwear: false, auto: true, smart: true, cull: true, cloth: 'off' as 'off' | 'live' | 'freeze' | 'near', perChar: 0, motion: 'walk' as 'walk' | 'idle' | 'off', plain: false, sharp: true, loading: '', error: '', info: null as Loaded | null };
+  const state = { model: MODELS[0], count: 40, looks: 'random' as 'random' | 'saved' | 'off', seed: 0, shadows: true, detail: 3, shapes: 'live' as 'live' | 'baked' | 'off', underwear: false, auto: false, smart: true, cull: true, cloth: 'off' as 'off' | 'live' | 'freeze' | 'near', perChar: 0, motion: 'walk' as 'walk' | 'idle' | 'off', plain: false, sharp: true, loading: '', error: '', info: null as Loaded | null };
   const resize = () => {
     renderer.setPixelRatio(state.sharp ? Math.min(window.devicePixelRatio, 2) : 1);
     renderer.setSize(host.clientWidth, host.clientHeight, false);
@@ -732,8 +737,8 @@ export async function startDevRoom() {
         // (AUTO: the three levels a person switches between by her distance, ready for the baking)
         keep.auto = index0 && state.auto ? TABLE.map((a) => lodFor(a.detail)) : undefined;
         // (AUTO LITE's live body is one for everybody near the camera; a new one for each change of settings)
-        keep.liveGeo?.dispose();
-        keep.liveGeo = undefined;
+        for (const lg of keep.liveGeos?.values() ?? []) lg.dispose();
+        keep.liveGeos = undefined;
         const morphs = state.shapes === 'live' ? keep.morph0 : NO_MORPHS;
         if (g.index === index && g.morphAttributes === morphs) return;
         g.dispose(); // (so nothing of the old setting stays on the graphics chip: her shapes alone are a big texture)
@@ -907,17 +912,19 @@ export async function startDevRoom() {
             // One body shared by everyone that close, since its shapes are one big picture on the graphics chip;
             // each person's own sizes are her mesh's weights)
             const liveBody = (k: number) => {
-              if (!keep.liveGeo) {
-                const lg = new THREE.BufferGeometry();
-                for (const [name, a] of Object.entries(source.attributes)) lg.setAttribute(name, a);
-                lg.setIndex(levels[k]);
-                lg.morphAttributes = keep.morph0;
-                lg.morphTargetsRelative = source.morphTargetsRelative;
-                lg.boundingBox = source.boundingBox; lg.boundingSphere = source.boundingSphere;
+              // (v0.44: only the points that level draws, with all 43 shapes for those points alone. The whole body's
+              // shapes are one picture of about 160 MB on the graphics chip; a 3% body's are about 7 MB, so each
+              // level can have its own)
+              const made = (keep.liveGeos ??= new Map());
+              let lg = made.get(k);
+              if (!lg) {
+                const all = Object.entries(dict!).sort((a, b) => a[1] - b[1]);
+                lg = bakeGeometry(source, [], all, levels[k], TABLE[k].detail);
                 lg.userData.devRoomShared = true;
-                keep.liveGeo = lg;
+                lg.userData.devRoomOwn = false;
+                made.set(k, lg);
               }
-              return keep.liveGeo;
+              return lg;
             };
             const make = (k: number) => (TABLE[k].live && dict ? liveBody(k) : bakeGeometry(source, weights, live, levels[k], TABLE[k].detail));
             auto = { mesh: mesh as THREE.Mesh, geos, make };
@@ -933,6 +940,8 @@ export async function startDevRoom() {
           }
           if (live.length) mesh.updateMorphTargets(); // (only her motion shapes now, by name)
           if (auto && mesh.morphTargetDictionary && mesh.morphTargetInfluences) auto.bakedSet = { dict: mesh.morphTargetDictionary, influences: mesh.morphTargetInfluences };
+          // (AUTO LIVE: the level she starts at is a live one, so she starts with all her shapes' weights)
+          if (auto?.liveSet && TABLE[TABLE.length - 1].live) { mesh.morphTargetDictionary = auto.liveSet.dict; mesh.morphTargetInfluences = auto.liveSet.influences; }
         }
         if (state.plain) {
           // (the cheapest material there is, one flat colour: is it her skin and outfit that cost?)
@@ -1087,10 +1096,11 @@ export async function startDevRoom() {
   };
   const autoBtn = button(detailRow, 'Auto', () => setAuto(AUTO));
   const liteBtn = button(detailRow, 'Auto lite', () => setAuto(AUTO_LITE));
+  const liveBtn = button(detailRow, 'Auto live', () => setAuto(AUTO_LIVE));
   const morphBtn = button(optRow, '', () => { state.looks = state.looks === 'random' ? 'saved' : state.looks === 'saved' ? 'off' : 'random'; sync(); void rebuild(); });
   const shuffleBtn = button(optRow, '🎲 Shuffle', () => { state.seed++; state.looks = 'random'; sync(); void rebuild(); });
   const shadowBtn = button(optRow, '', () => { state.shadows = !state.shadows; sync(); });
-  const shapeBtn = button(optRow, '', () => { state.shapes = state.shapes === 'live' ? 'baked' : state.shapes === 'baked' ? 'off' : 'live'; sync(); void rebuild(); });
+  const shapeBtn = button(optRow, '', () => { state.shapes = state.shapes === 'live' ? 'baked' : state.shapes === 'baked' ? 'off' : 'live'; if (state.shapes !== 'baked') state.auto = false; sync(); void rebuild(); }); // (the Auto buttons work on baked bodies: off, they'd be lit and doing nothing)
   const motionBtn = button(optRow, '', () => { state.motion = state.motion === 'walk' ? 'idle' : state.motion === 'idle' ? 'off' : 'walk'; sync(); void rebuild(); });
   const smartBtn = button(optRow, '', () => { state.smart = !state.smart; sync(); void rebuild(); });
   const underBtn = button(optRow, '', () => { state.underwear = !state.underwear; sync(); void rebuild(); });
@@ -1110,7 +1120,8 @@ export async function startDevRoom() {
     detailBtns.forEach((b, i) => b.classList.toggle('on', !state.auto && DETAILS[i] === state.detail));
     autoBtn.classList.toggle('on', state.auto && TABLE === AUTO);
     liteBtn.classList.toggle('on', state.auto && TABLE === AUTO_LITE);
-    shapeBtn.textContent = `Body shapes: ${state.shapes}`;
+    liveBtn.classList.toggle('on', state.auto && TABLE === AUTO_LIVE);
+    shapeBtn.textContent = `Body shapes: ${state.auto && TABLE === AUTO_LIVE ? 'live (Auto live)' : state.auto && TABLE === AUTO_LITE ? 'live near, baked far' : state.shapes}`;
     shapeBtn.classList.toggle('on', state.shapes !== 'off');
     motionBtn.textContent = `Motion: ${state.motion}`;
     motionBtn.classList.toggle('on', state.motion !== 'off');
@@ -1285,7 +1296,7 @@ export async function startDevRoom() {
         `${people.length} x ${state.model.label}${state.cull ? ` · ${inView} in view` : ''}`,
         `${(r.triangles / 1e6).toFixed(2)}M triangles drawn · ${r.calls} draw calls`,
         state.auto && people.some((q) => q.lods.length)
-          ? `auto${TABLE === AUTO ? '' : ' lite'}: ${TABLE.map((a, k) => [`${a.detail}%${a.live ? ' live' : ''}`, people.filter((q) => q.level === k).length] as const).filter(([, c]) => c > 0).map(([d, c]) => `${c} at ${d}`).join(' · ')}`
+          ? `auto${TABLE === AUTO ? '' : TABLE === AUTO_LITE ? ' lite' : ' live'}: ${TABLE.map((a, k) => [`${a.detail}%${a.live ? ' live' : ''}`, people.filter((q) => q.level === k).length] as const).filter(([, c]) => c > 0).map(([d, c]) => `${c} at ${d}`).join(' · ')}`
           : state.perChar ? `each character: ${(state.perChar / 1000).toFixed(1)}k triangles as drawn` : '',
         clothLine(),
         info ? `the file: ${(info.tris / 1000).toFixed(0)}k triangles · ${info.mb.toFixed(1)} MB · loaded in ${(info.ms / 1000).toFixed(1)} s` : '',
