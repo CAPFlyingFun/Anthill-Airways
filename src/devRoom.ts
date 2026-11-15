@@ -480,6 +480,7 @@ export async function startDevRoom() {
     .dr-stat { font:600 11px/1.3 ui-monospace,Menlo,monospace; background:rgba(28,35,42,.82); border-radius:8px; padding:5px 8px; white-space:pre-wrap; max-width:100%; box-sizing:border-box; pointer-events:none; }
     .dr-fps { font-size:18px; }
     .dr-shut .dr-set { display:none; }
+    .dr-log { font:600 11px/1.35 ui-monospace,Menlo,monospace; color:#fff; background:rgba(28,35,42,.9); border:0; border-radius:8px; padding:6px 8px; width:min(100%, 340px); height:150px; box-sizing:border-box; pointer-events:auto; resize:none; -webkit-user-select:text; user-select:text; }
   `;
   host.appendChild(css);
   const row = () => {
@@ -521,6 +522,13 @@ export async function startDevRoom() {
   detailRow.appendChild(detailLabel);
   const optRow = row();
   for (const r of [modelRow, countRow, detailRow, optRow]) r.classList.add('dr-set');
+  // 🧪 THE STRESS TEST's row (v0.46): it stays when the settings are folded away
+  const stressRow = row();
+  const stressLog = document.createElement('textarea');
+  stressLog.className = 'dr-log';
+  stressLog.readOnly = true;
+  stressLog.style.display = 'none';
+  panel.appendChild(stressLog);
   const stat = document.createElement('div');
   stat.className = 'dr-stat';
   panel.appendChild(stat);
@@ -1031,8 +1039,10 @@ export async function startDevRoom() {
   const frustum = new THREE.Frustum(), cullMatrix = new THREE.Matrix4(), cullBall = new THREE.Sphere(new THREE.Vector3(), 2.4), cullAt = new THREE.Vector3();
   let inView = 0;
   let building = 0;
+  let lastSrc: Loaded | null = null;
   let onBuilt = () => {};
   const rebuild = async () => {
+    if (stress.on) stressEnd(`stopped at ${people.length}: a setting was changed`);
     const ticket = ++building;
     state.loading = `Loading ${state.model.label}…`;
     state.error = '';
@@ -1079,9 +1089,119 @@ export async function startDevRoom() {
     });
     state.perChar = Math.round(tris);
     state.info = src;
+    lastSrc = src;
     state.loading = '';
     onBuilt();
   };
+
+  // --------------------------------------------------------------------------
+  // 🧪 THE STRESS TEST (v0.46; Joshua, 2026-11-14: "start with one model... it will add another random model once
+  // every 3s while logging the average FPS over that 3s, and then have a manual stop button to stop it or if the
+  // average is below 10 FPS... and I can copy and paste the log", and "there would be total and in view... so do
+  // maybe two tests").
+  //
+  // Two tests, with the room's settings as they stand:
+  //   ALL IN VIEW: the camera pulls back as the crowd grows, so everybody is always drawn.
+  //   ROOM VIEW:   the camera stays where you left it, so as the crowd spreads some are out of view (and not
+  //                drawn, while OUT OF VIEW is on): the log gives the total and how many were in view.
+  // People are packed evenly (a sunflower's spiral, about 1.5 units apart) and walk their own circles.
+  // Each step: one more person, half a second for her to settle (making her is a hitch of its own), then the
+  // frames of the next 2.5 seconds are averaged.
+  // --------------------------------------------------------------------------
+  const STRESS = { every: 3, settle: 0.5, stopBelow: 10, most: 400 };
+  const stress = { on: false, mode: 'view' as 'view' | 'room', t: 0, frames: 0, ms: 0, lines: [] as string[], results: [] as { n: number; fps: number; seen: number }[] };
+  const stressSpot = (i: number) => ({ radius: 1.5 + 1.5 * Math.sqrt(i), angle: i * 2.39996 });
+  const stressPlace = (p: Person, i: number) => {
+    const spot = stressSpot(i);
+    p.radius = spot.radius;
+    p.angle = spot.angle;
+    p.speed = (1.3 / spot.radius) * (i % 2 ? -1 : 1);
+  };
+  const stressShow = () => {
+    stressLog.style.display = stress.lines.length ? '' : 'none';
+    stressLog.value = stress.lines.join('\n');
+    stressLog.scrollTop = stressLog.scrollHeight;
+  };
+  const stressSettings = () => [
+    state.auto ? (TABLE === AUTO ? 'Auto' : TABLE === AUTO_LITE ? 'Auto lite' : 'Auto live') : `${state.detail}%`,
+    `shapes ${state.auto && TABLE === AUTO_LIVE ? 'live' : state.shapes}`, `shadows ${state.shadows ? 'on' : 'off'}`, `motion ${state.motion}`,
+    `out of view ${state.cull ? 'not drawn' : 'drawn'}`, state.cloth === 'off' ? '' : `cloth ${state.cloth}`, `sharpness ${state.sharp ? '2x' : '1x'}`,
+  ].filter(Boolean).join(' · ');
+  const stressEnd = (why: string) => {
+    if (!stress.on) return;
+    stress.on = false;
+    const best = (min: number) => {
+      // (the most people it held `min` FPS with, before the first step that fell below it)
+      let n = 0;
+      for (const r of stress.results) { if (r.fps < min) break; n = r.n; }
+      return n;
+    };
+    stress.lines.push(why, `--- ${best(50)} people at 50+ FPS · ${best(30)} at 30+ FPS · ${best(20)} at 20+ FPS ---`);
+    const top = Math.max(0, ...stress.results.map((r) => r.fps));
+    if (stress.results.length > 3 && top <= 31) stress.lines.push('(never above 30 FPS: Low Power Mode may be on, which caps it at 30)');
+    stressShow();
+    sync();
+  };
+  const stressStart = async (mode: 'view' | 'room') => {
+    stress.on = false;
+    stress.mode = mode;
+    stress.lines = [`DEV Room v${VERSION} · stress test: ${mode === 'view' ? 'ALL IN VIEW' : 'ROOM VIEW (total / in view)'}`, stressSettings(), `screen ${renderer.domElement.width} x ${renderer.domElement.height}`, 'loading the first one…'];
+    stress.results = [];
+    stressShow();
+    state.count = 1;
+    sync();
+    await rebuild();
+    if (!people.length || !lastSrc) { stress.lines.push(`could not start: ${state.error || 'nothing loaded'}`); stressShow(); return; }
+    stressPlace(people[0], 0);
+    // (ROOM VIEW: in among them, as in the game's own view, so the crowd soon spreads past the edges of the screen)
+    if (mode === 'room') { view.dist = 11; view.pitch = 0.42; }
+    stress.lines.pop();
+    stress.t = 0; stress.frames = 0; stress.ms = 0;
+    stress.on = true;
+    sync();
+  };
+  /** One frame of the test (`ms` = the real time since the last frame). */
+  const stressTick = (ms: number) => {
+    if (!stress.on) return;
+    stress.t += ms / 1000;
+    if (stress.t >= STRESS.settle) { stress.frames++; stress.ms += ms; }
+    if (stress.mode === 'view') {
+      // (pulled back far enough to hold the whole crowd, looking down on it)
+      view.pitch = 0.95;
+      view.dist = Math.max(14, stressSpot(people.length).radius * 2.5 + 8);
+    }
+    ground.scale.setScalar(Math.max(1, (stressSpot(people.length).radius + 6) / 22));
+    if (stress.t < STRESS.every) return;
+    const fps = stress.ms > 0 ? (stress.frames * 1000) / stress.ms : 0;
+    const n = people.length, seen = people.filter((q) => q.root.visible).length;
+    stress.results.push({ n, fps, seen });
+    const who = stress.mode === 'room' ? `${n} (${seen} in view)` : `${n}`;
+    stress.t = 0; stress.frames = 0; stress.ms = 0;
+    if (fps < STRESS.stopBelow) {
+      stressEnd(`${who} = <${STRESS.stopBelow} fps 🛑`);
+      return;
+    }
+    stress.lines.push(`${who} = ${fps.toFixed(0)} fps`);
+    if (n >= STRESS.most || !lastSrc) { stressEnd(`stopped at ${n}: the test's own limit`); return; }
+    try {
+      const p = makePerson(state.model, lastSrc, n);
+      stressPlace(p, n);
+      people.push(p);
+    } catch (e) {
+      stressEnd(`stopped at ${n}: ${e instanceof Error ? e.message : String(e)}`);
+      return;
+    }
+    stressShow();
+  };
+  const stressViewBtn = button(stressRow, '▶ Stress test: all in view', () => void stressStart('view'));
+  const stressRoomBtn = button(stressRow, '▶ Stress test: room view', () => void stressStart('room'));
+  const stressStopBtn = button(stressRow, '🛑 Stop', () => stressEnd(`stopped by hand at ${people.length}`));
+  const stressCopyBtn = button(stressRow, '📋 Copy log', () => {
+    const text = stress.lines.join('\n');
+    const done = () => { stressCopyBtn.textContent = '✅ Copied'; setTimeout(() => (stressCopyBtn.textContent = '📋 Copy log'), 1500); };
+    const byHand = () => { stressLog.focus(); stressLog.select(); stressLog.setSelectionRange(0, text.length); try { document.execCommand('copy'); done(); } catch { /* (it is selected: copy from the menu) */ } };
+    if (navigator.clipboard?.writeText) navigator.clipboard.writeText(text).then(done, byHand); else byHand();
+  });
 
   // ---- The panel's buttons ----
   const modelBtns = MODELS.map((def) => button(modelRow, def.label, () => { state.model = def; sync(); void rebuild(); }));
@@ -1135,6 +1255,10 @@ export async function startDevRoom() {
     clothBtn.classList.toggle('on', state.cloth !== 'off');
     sharpBtn.textContent = `Sharpness: ${state.sharp ? '2x' : '1x'}`;
     sharpBtn.classList.toggle('on', state.sharp);
+    stressViewBtn.classList.toggle('on', stress.on && stress.mode === 'view');
+    stressRoomBtn.classList.toggle('on', stress.on && stress.mode === 'room');
+    stressStopBtn.style.display = stress.on ? '' : 'none';
+    stressCopyBtn.style.display = stress.lines.length ? '' : 'none';
     cullBtn.textContent = `Out of view: ${state.cull ? 'not drawn' : 'drawn'}`;
     cullBtn.classList.toggle('on', state.cull);
   };
@@ -1255,6 +1379,7 @@ export async function startDevRoom() {
     renderer.info.reset();
     renderer.render(scene, camera);
     if (document.hidden || ms > 3000) return; // (back from the background: not a frame time)
+    stressTick(ms);
     frames++;
     acc += ms;
     worst = Math.max(worst, ms);
@@ -1312,5 +1437,5 @@ export async function startDevRoom() {
   renderer.info.autoReset = false;
 
   // (for the headless tests)
-  (window as unknown as { devRoom: unknown }).devRoom = Object.assign(hooks, { state, people, renderer, looks: LOOKS, randomLook, get fps() { return fps; } });
+  (window as unknown as { devRoom: unknown }).devRoom = Object.assign(hooks, { stressTest: STRESS, stressLines: () => stress.lines, state, people, renderer, looks: LOOKS, randomLook, get fps() { return fps; } });
 }
