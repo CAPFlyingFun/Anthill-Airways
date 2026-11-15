@@ -1365,8 +1365,8 @@ export async function startDevRoom() {
     if (on) { state.detail = table === AUTO ? 10 : 3; state.shapes = 'baked'; }
     sync(); void rebuild();
   };
-  const autoBtn = button(detailRow, 'Auto', () => setAuto(AUTO));
-  const liteBtn = button(detailRow, 'Auto lite', () => setAuto(AUTO_LITE));
+  // (v0.50: the Auto and Auto lite buttons are gone. Joshua: "let's remove the stuff that doesn't work for Live". Their
+  // tables stay in the code, as he asked for everything to be kept; only Auto live, which is every level live, is offered.)
   const liveBtn = button(detailRow, 'Auto live', () => setAuto(AUTO_LIVE));
   const morphBtn = button(optRow, '', () => { state.looks = state.looks === 'random' ? 'saved' : state.looks === 'saved' ? 'off' : 'random'; sync(); void rebuild(); });
   const shuffleBtn = button(optRow, '🎲 Shuffle', () => { state.seed++; state.looks = 'random'; sync(); void rebuild(); });
@@ -1392,8 +1392,6 @@ export async function startDevRoom() {
     shadowBtn.classList.toggle('on', state.shadows);
     sun.castShadow = state.shadows;
     detailBtns.forEach((b, i) => b.classList.toggle('on', !state.auto && DETAILS[i] === state.detail));
-    autoBtn.classList.toggle('on', state.auto && TABLE === AUTO);
-    liteBtn.classList.toggle('on', state.auto && TABLE === AUTO_LITE);
     liveBtn.classList.toggle('on', state.auto && TABLE === AUTO_LIVE);
     shapeBtn.textContent = `Body shapes: ${state.auto && TABLE === AUTO_LIVE ? 'live (Auto live)' : state.auto && TABLE === AUTO_LITE ? 'live near, baked far' : state.shapes}`;
     shapeBtn.classList.toggle('on', state.shapes !== 'off');
