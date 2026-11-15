@@ -84,7 +84,8 @@ const AUTO_LITE: { within: number; detail: number; live?: boolean }[] = [
   { within: Infinity, detail: 1 },              // 7 m and beyond
 ];
 /** The table in use: AUTO or AUTO_LITE (the 'Auto lite' button). */
-let TABLE: { within: number; detail: number; live?: boolean }[] = AUTO;
+// (v0.42.1: the room opens on AUTO LITE. Joshua, 2026-11-14, on his phone with 40 walking: "These settings work best")
+let TABLE: { within: number; detail: number; live?: boolean }[] = AUTO_LITE;
 /** A person this far down the table (5% or lighter) lets go of her heaviest bodies again, to save memory. */
 const AUTO_DROP_FROM = 3;
 /** Cloth tees: how many are dressed at a time on their way to being frozen, and the most simulated for good. GAME TUNING. */
@@ -465,11 +466,12 @@ export async function startDevRoom() {
   host.appendChild(panel);
   const css = document.createElement('style');
   css.textContent = `
-    .dr-row { display:flex; flex-wrap:wrap; gap:6px; pointer-events:auto; }
-    .dr-b { font:600 15px system-ui,sans-serif; color:#fff; background:rgba(28,35,42,.82); border:0; border-radius:10px; padding:9px 12px; min-width:44px; min-height:40px; }
+    .dr-row { display:flex; flex-wrap:wrap; gap:4px; pointer-events:auto; }
+    .dr-b { font:600 12px system-ui,sans-serif; color:#fff; background:rgba(28,35,42,.82); border:0; border-radius:8px; padding:5px 8px; min-width:32px; min-height:30px; }
     .dr-b.on { background:#2f7fd0; }
-    .dr-stat { font:600 13px/1.35 ui-monospace,Menlo,monospace; background:rgba(28,35,42,.82); border-radius:10px; padding:8px 11px; white-space:pre-wrap; max-width:100%; box-sizing:border-box; pointer-events:none; }
-    .dr-fps { font-size:22px; }
+    .dr-stat { font:600 11px/1.3 ui-monospace,Menlo,monospace; background:rgba(28,35,42,.82); border-radius:8px; padding:5px 8px; white-space:pre-wrap; max-width:100%; box-sizing:border-box; pointer-events:none; }
+    .dr-fps { font-size:18px; }
+    .dr-shut .dr-set { display:none; }
   `;
   host.appendChild(css);
   const row = () => {
@@ -496,6 +498,12 @@ export async function startDevRoom() {
   title.className = 'dr-stat';
   title.textContent = `🧪 DEV Room · v${VERSION}`; // (the build it is: so a phone shows whether it has the latest)
   top.appendChild(title);
+  // (v0.43; Joshua: "fix the UI and compress it so it is easier to see": smaller buttons, and one that folds the
+  // settings away so only the readout is over the picture)
+  const foldBtn = button(top, '▲ Hide settings', () => {
+    const shut = panel.classList.toggle('dr-shut');
+    foldBtn.textContent = shut ? '▼ Settings' : '▲ Hide settings';
+  });
   const modelRow = row();
   const countRow = row();
   const detailRow = row();
@@ -504,6 +512,7 @@ export async function startDevRoom() {
   detailLabel.textContent = 'Detail';
   detailRow.appendChild(detailLabel);
   const optRow = row();
+  for (const r of [modelRow, countRow, detailRow, optRow]) r.classList.add('dr-set');
   const stat = document.createElement('div');
   stat.className = 'dr-stat';
   panel.appendChild(stat);
@@ -552,7 +561,7 @@ export async function startDevRoom() {
   el.addEventListener('wheel', (e) => { view.dist = THREE.MathUtils.clamp(view.dist * (1 + Math.sign(e.deltaY) * 0.1), 4, 60); }, { passive: true });
   const people: Person[] = [];
   // (the defaults are the settings Joshua settled on, 2026-11-14: 40 walking, auto detail, baked, smart, pieces skipped)
-  const state = { model: MODELS[0], count: 40, looks: 'random' as 'random' | 'saved' | 'off', seed: 0, shadows: true, detail: 10, shapes: 'baked' as 'live' | 'baked' | 'off', underwear: false, auto: true, smart: true, cloth: 'off' as 'off' | 'live' | 'freeze' | 'near', perChar: 0, motion: 'walk' as 'walk' | 'idle' | 'off', plain: false, sharp: true, loading: '', error: '', info: null as Loaded | null };
+  const state = { model: MODELS[0], count: 40, looks: 'random' as 'random' | 'saved' | 'off', seed: 0, shadows: true, detail: 3, shapes: 'baked' as 'live' | 'baked' | 'off', underwear: false, auto: true, smart: true, cull: true, cloth: 'off' as 'off' | 'live' | 'freeze' | 'near', perChar: 0, motion: 'walk' as 'walk' | 'idle' | 'off', plain: false, sharp: true, loading: '', error: '', info: null as Loaded | null };
   const resize = () => {
     renderer.setPixelRatio(state.sharp ? Math.min(window.devicePixelRatio, 2) : 1);
     renderer.setSize(host.clientWidth, host.clientHeight, false);
@@ -1007,6 +1016,8 @@ export async function startDevRoom() {
     return person;
   };
 
+  const frustum = new THREE.Frustum(), cullMatrix = new THREE.Matrix4(), cullBall = new THREE.Sphere(new THREE.Vector3(), 2.4), cullAt = new THREE.Vector3();
+  let inView = 0;
   let building = 0;
   let onBuilt = () => {};
   const rebuild = async () => {
@@ -1082,6 +1093,7 @@ export async function startDevRoom() {
   const underBtn = button(optRow, '', () => { state.underwear = !state.underwear; sync(); void rebuild(); });
   const plainBtn = button(optRow, '', () => { state.plain = !state.plain; sync(); void rebuild(); });
   const clothBtn = button(optRow, '', () => { state.cloth = state.cloth === 'off' ? 'live' : state.cloth === 'live' ? 'freeze' : state.cloth === 'freeze' ? 'near' : 'off'; sync(); void rebuild(); });
+  const cullBtn = button(optRow, '', () => { state.cull = !state.cull; sync(); });
   const sharpBtn = button(optRow, '', () => { state.sharp = !state.sharp; sync(); resize(); });
   const sync = () => {
     modelBtns.forEach((b, i) => b.classList.toggle('on', MODELS[i] === state.model));
@@ -1109,6 +1121,8 @@ export async function startDevRoom() {
     clothBtn.classList.toggle('on', state.cloth !== 'off');
     sharpBtn.textContent = `Sharpness: ${state.sharp ? '2x' : '1x'}`;
     sharpBtn.classList.toggle('on', state.sharp);
+    cullBtn.textContent = `Out of view: ${state.cull ? 'not drawn' : 'drawn'}`;
+    cullBtn.classList.toggle('on', state.cull);
   };
   sync();
   void rebuild();
@@ -1130,7 +1144,7 @@ export async function startDevRoom() {
     let simulating = 0;
     for (const p of people) {
       p.dist = Math.hypot(camera.position.x - p.root.position.x, camera.position.y - 1.4, camera.position.z - p.root.position.z);
-      if (p.lods.length) {
+      if (p.lods.length && p.root.visible) { // (someone out of view keeps the level she had: no baking for nobody to see)
         // AUTO detail: her level by her distance from the camera (a level is only left once she is 10% past
         // its edge, so someone walking along an edge doesn't flicker between two)
         const d = Math.hypot(camera.position.x - p.root.position.x, camera.position.y - 1.4, camera.position.z - p.root.position.z); // (to her middle)
@@ -1160,7 +1174,8 @@ export async function startDevRoom() {
       const x = Math.cos(p.angle) * p.radius;
       const z = Math.sin(p.angle) * p.radius;
       const m = p.live;
-      if (m) {
+      // (someone out of view isn't posed either, unless her tee is being simulated on her: her place on her circle goes on)
+      if (m && (p.root.visible || (p.cloth && p.cloth.phase !== 'frozen'))) {
         // The builder's own pose for this frame: standing and breathing, or a step of her walk with its weight
         if (walking) m.walked += Math.abs(p.speed) * p.radius * dt;
         const phase = ((m.walked * m.perUnit) / humanStride(m.measure, 'walk', m.carry)) % 1;
@@ -1206,6 +1221,23 @@ export async function startDevRoom() {
     }
     camera.position.set(Math.sin(view.yaw) * Math.cos(view.pitch) * view.dist, Math.sin(view.pitch) * view.dist + 1.2, Math.cos(view.yaw) * Math.cos(view.pitch) * view.dist);
     camera.lookAt(0, 1.2, 0);
+    // OUT OF VIEW, NOT DRAWN (v0.43; Joshua: "hide completely models that are not in the camera viewing frame... as
+    // soon as the camera or person walks into the camera view, it shows"). three.js can't do this for these bodies by
+    // itself (a skinned body's own bounds are its rest pose's, so its culling is off): each person is a ball round her
+    // middle, tested against the camera's view. The ball is wide enough for her stride, and for her shadow while
+    // shadows are on, so a shadow doesn't vanish from the picture while its owner is just outside it.
+    inView = 0;
+    if (state.cull) {
+      camera.updateMatrixWorld();
+      frustum.setFromProjectionMatrix(cullMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
+      cullBall.radius = state.shadows ? 4.5 : 2.4;
+    }
+    for (const p of people) {
+      const show = !state.cull || frustum.intersectsSphere(cullBall.set(cullAt.set(p.root.position.x, 1.4, p.root.position.z), cullBall.radius));
+      p.root.visible = show;
+      p.cloth?.show(show);
+      if (show) inView++;
+    }
     renderer.info.reset();
     renderer.render(scene, camera);
     if (document.hidden || ms > 3000) return; // (back from the background: not a frame time)
@@ -1247,7 +1279,7 @@ export async function startDevRoom() {
       stat.appendChild(big);
       const lines = [
         `slowest frame ${worstShown.toFixed(0)} ms`,
-        `${people.length} x ${state.model.label}`,
+        `${people.length} x ${state.model.label}${state.cull ? ` · ${inView} in view` : ''}`,
         `${(r.triangles / 1e6).toFixed(2)}M triangles drawn · ${r.calls} draw calls`,
         state.auto && people.some((q) => q.lods.length)
           ? `auto${TABLE === AUTO ? '' : ' lite'}: ${TABLE.map((a, k) => [`${a.detail}%${a.live ? ' live' : ''}`, people.filter((q) => q.level === k).length] as const).filter(([, c]) => c > 0).map(([d, c]) => `${c} at ${d}`).join(' · ')}`

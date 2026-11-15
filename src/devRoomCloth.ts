@@ -328,6 +328,9 @@ export class ClothTest {
     this.simGeo.dispose();
   }
 
+  /** Drawn or not (she is in the camera's view or out of it); frozen, it is part of her and goes as she does. */
+  show(on: boolean): void { this.holder.visible = on; }
+
   /** Stop simulating as soon as it is dressed (she has walked away from the camera): frozen as it then hangs. */
   release(): void { this.released = true; }
 
