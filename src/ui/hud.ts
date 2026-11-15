@@ -171,14 +171,14 @@ export class Hud {
       el.classList.add('hidden');
       return;
     }
-    const isQuest = !!onSkip;
+    const isQuest = !!onSkip || !!quest; // (🦖 the story's objectives are quest cards with no Skip button)
     const hasBar = quest?.progress != null;
-    const key = `${isQuest}|${hasBar}`;
+    const key = `${isQuest}|${hasBar}|${!!onSkip}`;
     if (key !== this.hintKey || !el.firstChild) {
       this.hintKey = key;
       el.innerHTML = (isQuest ? '<div class="q-head"><span class="q-label"></span><span class="q-tick">✓</span></div>' : '') +
         '<div class="q-text"></div>' + (hasBar ? '<div class="q-bar"><i></i></div>' : '');
-      if (isQuest) {
+      if (onSkip) {
         const b = document.createElement('button');
         b.className = 'hint-skip';
         b.textContent = 'Skip';
@@ -575,7 +575,7 @@ export class Hud {
   private invOpen = false;
   private invTimer = 0;
   private invBound = false;
-  private static ICONS: Record<string, string> = { bread: '🥖', parcel: '📦', extinguisher: '🧯', medicine: '💊', medkit: '🩹', luggage: '🧳', meal: '🍔', part: '🔩', fuel: '⛽', crumb: '🍞', snack: '🍪', leaf: '🍃', wrap: '🌯', sugar: '🧊', candy: '🍬', cash: '💵', bag: '🧳', snackbox: '🍱', fruit: '🍈', smoothie: '🥤', meat: '🍖', egg: '🥚', ticket: '🎟️', obsidian: '🪨', gem: '💎', magma: '🔥', crystal: '🔶', laundry: '🧺', towel: '🧻', grocery: '🥬', tray: '🍽️', beans: '🫘', coffee: '☕', shopbag: '🛍️' };
+  private static ICONS: Record<string, string> = { clothes: '👕', antfarm: '🐜', log: '🪵', berry: '🍓', mast: '📡', radio: '📻', bread: '🥖', parcel: '📦', extinguisher: '🧯', medicine: '💊', medkit: '🩹', luggage: '🧳', meal: '🍔', part: '🔩', fuel: '⛽', crumb: '🍞', snack: '🍪', leaf: '🍃', wrap: '🌯', sugar: '🧊', candy: '🍬', cash: '💵', bag: '🧳', snackbox: '🍱', fruit: '🍈', smoothie: '🥤', meat: '🍖', egg: '🥚', ticket: '🎟️', obsidian: '🪨', gem: '💎', magma: '🔥', crystal: '🔶', laundry: '🧺', towel: '🧻', grocery: '🥬', tray: '🍽️', beans: '🫘', coffee: '☕', shopbag: '🛍️' };
 
   /** What you're carrying: the 🎒 badge ("5/8", red when full) + the slots behind it. */
   setInventory(counts: Map<string, number>, used: number, max: number) {

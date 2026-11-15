@@ -41,9 +41,39 @@ export interface SaveData {
   contracts: Record<string, number>;       // 📦 usual load per run type (sets contract goals)
   /** Which game this slot plays: the classic Anthill Airways (default), or 🏝️ Anthill
    *  Island (the new one-island campaign, a test version for now: see world/homeWorld.ts). */
-  campaign?: 'classic' | 'anthill';
+  campaign?: 'classic' | 'anthill' | 'story';
   /** 🏝️ Anthill Island's own progress (orders, the delivery crate, materials...). */
   home?: HomeSave;
+  /** 🦖 The story remake's progress (v0.63: Chapter 1, a test): see story/storyWorld.ts. */
+  story?: StorySave;
+}
+
+/** 🦖 The story: where you are and what's happened. (The current objective is save.tutorial.) */
+export interface StorySave {
+  v: number;
+  /** Who you play, and how they look (null until you've picked). */
+  hero: { id: 'jack' | 'sarah'; outfit?: string; pregnant?: boolean } | null;
+  area: 'home' | 'island';
+  x: number;
+  z: number;
+  ry: number;
+  /** 💧 water and ❤️ health, 0..100 */
+  water: number;
+  health: number;
+  /** What you carry (bottom to top). */
+  carry: string[];
+  /** Story moments that have happened (each happens once). */
+  flags: Record<string, number>;
+  /** Logs dropped into each build plot so far (campfire, workbench). */
+  plots: Record<string, number>;
+  /** The workbench: logs waiting in it, the mast being made (seconds in), masts made and not taken yet. */
+  bench: { logs: number; t: number; made: number };
+  /** Berries given to the ants / to the little dino; fuel cans left by the plane. */
+  fed: { ants: number; dino: number; fuel: number };
+  /** The little dino: hidden (before the rex), trapped, free (scared), trust (follows you). Where it is. */
+  dino: { state: 'hidden' | 'trapped' | 'free' | 'trust'; x: number; z: number; carrying: boolean };
+  /** Logbook pages found (their numbers). */
+  pages: number[];
 }
 
 /** 🏝️ Anthill Island: what the backyard remembers between sessions. */
@@ -109,6 +139,7 @@ export function slotSummary(slot: Slot) {
     if (!raw) return null;
     const d = { ...newSave(), ...JSON.parse(raw) } as SaveData;
     if (d.campaign === 'anthill') return { level: d.level, cash: d.cash, act: '🏝️ Anthill Island (test)', lastSeen: d.lastSeen };
+    if (d.campaign === 'story') return { level: d.level, cash: d.cash, act: '🦖 Story: Chapter 1 (test)', lastSeen: d.lastSeen };
     const act = d.unlocked.includes('h5-open') ? '🏨 Act 5' : d.unlocked.includes('i3-volcano') ? '🌋 Act 4' : d.unlocked.includes('a2-island') ? '🏝️ Act 3' : d.unlocked.includes('expand3') ? '✈️ Act 2' : '🐜 Act 1';
     return { level: d.level, cash: d.cash, act: d.eruptions ? `${act} · 🌋×${d.eruptions}` : act, lastSeen: d.lastSeen };
   } catch {

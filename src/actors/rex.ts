@@ -36,16 +36,22 @@ export interface RexParts {
   glow: THREE.MeshStandardMaterial;
 }
 
+/** 🦖 A rex's colors other than lava (the story's island rex): skin, belly, the stripes down its back, its eyes. */
+export interface RexLook { skin: number; belly: number; stripe: number; eye: number }
+
 /**
  * Build a Lava Rex `length` units from nose to tail tip.
  * `tame` gives it a saddle (once you've tamed it, ARK style).
+ * `look` paints it in other colors, with no glow (v0.63: the story's island rex).
  */
-export function makeRex(length: number, tame = false): CreatureModel & { rex: RexParts } {
+export function makeRex(length: number, tame = false, look?: RexLook): CreatureModel & { rex: RexParts } {
   const L = length;
   const model = newModel(0.45 * L, L) as CreatureModel & { rex: RexParts };
-  const skin = new THREE.MeshStandardMaterial({ color: 0x2f2724, roughness: 0.85 });
-  const belly = new THREE.MeshStandardMaterial({ color: 0x5a4136, roughness: 0.9 });
-  const glow = new THREE.MeshStandardMaterial({ color: 0x5a1606, roughness: 0.6, emissive: 0xff5a12, emissiveIntensity: 1.4 });
+  const skin = new THREE.MeshStandardMaterial({ color: look?.skin ?? 0x2f2724, roughness: 0.85 });
+  const belly = new THREE.MeshStandardMaterial({ color: look?.belly ?? 0x5a4136, roughness: 0.9 });
+  const glow = look
+    ? new THREE.MeshStandardMaterial({ color: look.stripe, roughness: 0.8, emissive: 0x000000 })
+    : new THREE.MeshStandardMaterial({ color: 0x5a1606, roughness: 0.6, emissive: 0xff5a12, emissiveIntensity: 1.4 });
   const tooth = new THREE.MeshStandardMaterial({ color: 0xf2ead8, roughness: 0.5 });
   const b = model.bob;
   b.position.y = -0.012 * L; // plant the feet on the ground
@@ -85,7 +91,7 @@ export function makeRex(length: number, tame = false): CreatureModel & { rex: Re
   head.add(blob(skin, 0.058 * L, 0.06 * L, 0.1 * L, 0, 0.01 * L, 0.06 * L)); // skull + snout
   head.add(blob(skin, 0.045 * L, 0.035 * L, 0.06 * L, 0, 0.0, 0.13 * L));    // nose
   for (const s of [-1, 1]) {
-    head.add(blob(glow, 0.012 * L, 0.012 * L, 0.012 * L, s * 0.045 * L, 0.035 * L, 0.09 * L)); // glowing eyes
+    head.add(blob(look ? new THREE.MeshStandardMaterial({ color: look.eye, roughness: 0.3, emissive: look.eye, emissiveIntensity: 0.25 }) : glow, 0.012 * L, 0.012 * L, 0.012 * L, s * 0.045 * L, 0.035 * L, 0.09 * L)); // (glowing) eyes
     head.add(blob(skin, 0.02 * L, 0.012 * L, 0.03 * L, s * 0.04 * L, 0.055 * L, 0.08 * L));  // brow ridge
   }
   // Upper teeth

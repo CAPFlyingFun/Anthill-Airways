@@ -30,10 +30,13 @@ export type ItemType = 'crumb' | 'snack' | 'leaf' | 'wrap' | 'sugar' | 'candy' |
   | 'meal'
   // 🏝️ Anthill Island, waves 3 to 5 (v0.56): the bakery's loaf, the post office's parcel, the fire station's
   // extinguisher, the pharmacy's medicine, the hospital's medical kit, the airport's suitcase
-  | 'bread' | 'parcel' | 'extinguisher' | 'medicine' | 'medkit' | 'luggage';
+  | 'bread' | 'parcel' | 'extinguisher' | 'medicine' | 'medkit' | 'luggage'
+  // 🦖 The story (v0.63): packing at home (clothes, your ant farm), and on the island: logs, berries,
+  // the radio mast you build at the workbench and the radio's spare power module
+  | 'clothes' | 'antfarm' | 'log' | 'berry' | 'mast' | 'radio';
 
 /** Height of one item when stacked. */
-export const ITEM_H: Record<ItemType, number> = { bread: 0.2, parcel: 0.3, extinguisher: 0.5, medicine: 0.3, medkit: 0.3, luggage: 0.46, meal: 0.42, part: 0.3, fuel: 0.44, crumb: 0.3, snack: 0.32, leaf: 0.14, wrap: 0.32, sugar: 0.4, candy: 0.3, cash: 0.11, bag: 0.48, snackbox: 0.36, fruit: 0.4, smoothie: 0.5, meat: 0.32, egg: 0.42, ticket: 0.1, obsidian: 0.36, gem: 0.4, magma: 0.4, crystal: 0.52, laundry: 0.4, towel: 0.2, grocery: 0.42, tray: 0.36, beans: 0.38, coffee: 0.4, shopbag: 0.5 };
+export const ITEM_H: Record<ItemType, number> = { clothes: 0.24, antfarm: 0.5, log: 0.34, berry: 0.3, mast: 0.3, radio: 0.5, bread: 0.2, parcel: 0.3, extinguisher: 0.5, medicine: 0.3, medkit: 0.3, luggage: 0.46, meal: 0.42, part: 0.3, fuel: 0.44, crumb: 0.3, snack: 0.32, leaf: 0.14, wrap: 0.32, sugar: 0.4, candy: 0.3, cash: 0.11, bag: 0.48, snackbox: 0.36, fruit: 0.4, smoothie: 0.5, meat: 0.32, egg: 0.42, ticket: 0.1, obsidian: 0.36, gem: 0.4, magma: 0.4, crystal: 0.52, laundry: 0.4, towel: 0.2, grocery: 0.42, tray: 0.36, beans: 0.38, coffee: 0.4, shopbag: 0.5 };
 
 // Shared geometry + materials: every crumb reuses the same ones (fast).
 const geo = {
@@ -86,6 +89,13 @@ const geo = {
   fuel: new THREE.BoxGeometry(0.34, 0.42, 0.2),                             // a red jerry can (the Gas Station)
   shopbag: new THREE.BoxGeometry(0.36, 0.44, 0.26),                        // a paper bag of groceries (the Corner Store)
   baguette: new THREE.CylinderGeometry(0.035, 0.035, 0.34, 8),
+  // 🦖 The story
+  clothes: new THREE.BoxGeometry(0.5, 0.22, 0.38),                           // folded clothes
+  antfarm: new THREE.BoxGeometry(0.62, 0.46, 0.16),                          // your ant farm (a thin glass case)
+  log: new THREE.CylinderGeometry(0.16, 0.17, 0.7, 9).rotateZ(Math.PI / 2), // a log, lying across your arms
+  berry: new THREE.SphereGeometry(0.075, 8, 6),                              // one berry of a bunch
+  mast: new THREE.CylinderGeometry(0.05, 0.05, 1.5, 6).rotateZ(Math.PI / 2), // a radio mast, carried sideways
+  radio: new THREE.BoxGeometry(0.62, 0.46, 0.46),                            // the radio's power module (heavy!)
 };
 const mat = {
   crumb: new THREE.MeshStandardMaterial({ color: 0xdca44a, roughness: 0.9 }),
@@ -139,10 +149,19 @@ const mat = {
   coffee: new THREE.MeshStandardMaterial({ color: 0xf7f4ee, roughness: 0.45 }),
   coffeeLid: new THREE.MeshStandardMaterial({ color: 0x4a2c1a, roughness: 0.5 }),
   coffeeSleeve: new THREE.MeshStandardMaterial({ color: 0xc8975a, roughness: 0.85 }),
+  clothes: [0x3a6ea5, 0xd96c4f, 0x6b8f5a, 0xe3c567].map((c) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.95 })),
+  glass: new THREE.MeshStandardMaterial({ color: 0xcfeaff, roughness: 0.1, transparent: true, opacity: 0.45 }),
+  sand: new THREE.MeshStandardMaterial({ color: 0xd8b878, roughness: 1 }),
+  bark: new THREE.MeshStandardMaterial({ color: 0x7a5232, roughness: 0.95 }),
+  logEnd: new THREE.MeshStandardMaterial({ color: 0xe0b77c, roughness: 0.9 }),
+  berry: new THREE.MeshStandardMaterial({ color: 0xc2185b, roughness: 0.4 }),
+  metal: new THREE.MeshStandardMaterial({ color: 0x9aa3ab, roughness: 0.35, metalness: 0.6 }),
+  radio: new THREE.MeshStandardMaterial({ color: 0x4d5b3a, roughness: 0.7 }),
+  amber: new THREE.MeshStandardMaterial({ color: 0xffb703, roughness: 0.3, emissive: 0xff8800, emissiveIntensity: 0.6 }),
 };
 
 /** Cash value of each sellable item (counter price; gate runs pay the same per item). */
-export const ITEM_VALUE: Record<ItemType, number> = { bread: 2000, parcel: 4500, extinguisher: 20000, medicine: 34000, medkit: 40000, luggage: 125000, meal: 1300, part: 600, fuel: 90, crumb: 2, snack: 5, leaf: 3, wrap: 14, sugar: 10, candy: 40, cash: 0, bag: 15, snackbox: 25, fruit: 0, smoothie: 60, meat: 0, egg: 80, ticket: 50, obsidian: 0, gem: 150, magma: 0, crystal: 450, laundry: 0, towel: 0, grocery: 0, tray: 220, beans: 2, coffee: 20, shopbag: 50 };
+export const ITEM_VALUE: Record<ItemType, number> = { clothes: 0, antfarm: 0, log: 0, berry: 0, mast: 0, radio: 0, bread: 2000, parcel: 4500, extinguisher: 20000, medicine: 34000, medkit: 40000, luggage: 125000, meal: 1300, part: 600, fuel: 90, crumb: 2, snack: 5, leaf: 3, wrap: 14, sugar: 10, candy: 40, cash: 0, bag: 15, snackbox: 25, fruit: 0, smoothie: 60, meat: 0, egg: 80, ticket: 50, obsidian: 0, gem: 150, magma: 0, crystal: 450, laundry: 0, towel: 0, grocery: 0, tray: 220, beans: 2, coffee: 20, shopbag: 50 };
 
 /** Build the 3D mesh for one item. Box faces order: +x, -x, +y(top), -y, +z, -z */
 export function makeItem(type: ItemType): THREE.Mesh {
@@ -297,6 +316,55 @@ export function makeItem(type: ItemType): THREE.Mesh {
     const sleeve = new THREE.Mesh(geo.coffeeSleeve, mat.coffeeSleeve);
     sleeve.position.y = -0.01;
     m.add(lid, sleeve);
+  } else if (type === 'clothes') {
+    m = new THREE.Mesh(geo.clothes, mat.clothes[Math.floor(Math.random() * mat.clothes.length)]);
+  } else if (type === 'antfarm') {
+    // A thin glass case with sand inside and a wooden frame along the bottom and top
+    m = new THREE.Mesh(geo.antfarm, mat.glass);
+    const sand = new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.3, 0.12), mat.sand);
+    sand.position.y = -0.07;
+    const base = new THREE.Mesh(new THREE.BoxGeometry(0.68, 0.06, 0.2), mat.bark);
+    base.position.y = -0.25;
+    const lid = base.clone();
+    lid.position.y = 0.25;
+    m.add(sand, base, lid);
+  } else if (type === 'log') {
+    m = new THREE.Mesh(geo.log, [mat.bark, mat.logEnd, mat.logEnd]);
+    m.rotation.y = Math.random() * 0.3 - 0.15;
+  } else if (type === 'berry') {
+    // A bunch of berries on a leaf
+    m = new THREE.Mesh(geo.leaf, mat.leaf);
+    m.scale.setScalar(0.8);
+    for (let i = 0; i < 6; i++) {
+      const b = new THREE.Mesh(geo.berry, mat.berry);
+      b.position.set(Math.cos(i * 1.05) * 0.1, 0.08 + (i % 2) * 0.06, Math.sin(i * 1.05) * 0.1);
+      m.add(b);
+    }
+  } else if (type === 'mast') {
+    // A radio mast (a metal pole with a little aerial on the end), carried sideways
+    m = new THREE.Mesh(geo.mast, mat.metal);
+    const tip = new THREE.Mesh(new THREE.SphereGeometry(0.07, 8, 6), mat.fuel);
+    tip.position.x = 0.78;
+    m.add(tip);
+    for (const x of [-0.3, 0.2]) {
+      const bar = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.03, 0.4), mat.metal);
+      bar.position.x = x;
+      m.add(bar);
+    }
+  } else if (type === 'radio') {
+    // An army-green box with dials and an amber light (the radio's power module)
+    m = new THREE.Mesh(geo.radio, mat.radio);
+    for (const x of [-0.14, 0.02]) {
+      const dial = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.04, 10), mat.metal);
+      dial.rotation.x = Math.PI / 2;
+      dial.position.set(x, 0.05, 0.24);
+      m.add(dial);
+    }
+    const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.04, 8, 6), mat.amber);
+    lamp.position.set(0.18, 0.08, 0.24);
+    const handle = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.04, 0.06), mat.handle);
+    handle.position.y = 0.25;
+    m.add(lamp, handle);
   } else if (type === 'snackbox') {
     const s = mat.boxSide;
     m = new THREE.Mesh(geo.snackbox, [s, s, mat.boxTop, s, s, s]);

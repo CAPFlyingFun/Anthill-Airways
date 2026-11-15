@@ -15,6 +15,11 @@ import * as THREE from 'three';
 import { spawnHuman, type HumanKind } from '../actors/creatures';
 import type { CreatureModel } from '../actors/models';
 
+/** v0.63: the story's talking heads use these too (a different background, shown only while someone talks). */
+export interface AvatarOpts {
+  bg?: number;
+}
+
 export class Avatar {
   private scene = new THREE.Scene();
   private camera = new THREE.PerspectiveCamera(22, 1, 0.01, 20);
@@ -34,14 +39,24 @@ export class Avatar {
   private measured = 0;
   private clear = new THREE.Color();
 
+  /** Shown? (Hidden = not drawn at all.) */
+  shown = true;
+  private bg: number;
+
   /** Null if that person's model isn't loaded. */
-  static make(kind: HumanKind, slot: HTMLElement) {
+  static make(kind: HumanKind, slot: HTMLElement, opts: AvatarOpts = {}) {
     const m = spawnHuman(kind, 1.7);
-    return m ? new Avatar(m, slot) : null;
+    return m ? new Avatar(m, slot, opts) : null;
   }
 
-  private constructor(model: CreatureModel, private slot: HTMLElement) {
+  /** From a model of your own (made with spawnHuman(kind, 1.7): the camera is set for that height). */
+  static fromModel(model: CreatureModel, slot: HTMLElement, opts: AvatarOpts = {}) {
+    return new Avatar(model, slot, opts);
+  }
+
+  private constructor(model: CreatureModel, private slot: HTMLElement, opts: AvatarOpts) {
     this.model = model;
+    this.bg = opts.bg ?? 0x2f6fdc;
     this.out = document.createElement('canvas');
     this.out.className = 'pc-live';
     slot.appendChild(this.out);
@@ -73,6 +88,19 @@ export class Avatar {
     this.camera.lookAt(0, face - 0.07, 0);
   }
 
+  /** Show / hide it (its little canvas too). */
+  show(on: boolean) {
+    this.shown = on;
+    this.out.style.display = on ? '' : 'none';
+    this.measured = 0; // (measure again: it may have moved while hidden)
+  }
+
+  /** Take it off the page for good. */
+  dispose() {
+    this.shown = false;
+    this.out.remove();
+  }
+
   /** A nod (a level up). */
   nod() {
     this.nodT = 1;
@@ -80,6 +108,7 @@ export class Avatar {
 
   /** Draw the bust into the card's window (after the game's own frame). */
   render(renderer: THREE.WebGLRenderer, dt: number) {
+    if (!this.shown) return;
     // (where the window is: measured now and then, and at once when the screen turns)
     const cw = renderer.domElement.width, ch = renderer.domElement.height;
     if (--this.measured <= 0 || cw !== this.cw || ch !== this.ch) {
@@ -112,7 +141,7 @@ export class Avatar {
     renderer.setScissorTest(true);
     renderer.setScissor(x, y, w, h);
     renderer.setViewport(x, y, w, h);
-    renderer.setClearColor(0x2f6fdc, 1);
+    renderer.setClearColor(this.bg, 1);
     renderer.clear(true, true, false);
     renderer.render(this.scene, this.camera);
     // (copy it into the card now, before the browser shows the frame and the game canvas lets go of it)

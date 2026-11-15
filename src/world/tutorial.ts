@@ -53,6 +53,10 @@ export interface TutorialScript {
   steps: (t: Tutorial) => Step[];
   /** One-time update of older saves (the colony's). */
   migrate?: (save: SaveData) => void;
+  /** 🦖 The story's objectives can't be skipped (no Skip button, no welcome card). */
+  skippable?: boolean;
+  /** Called at the end instead of showing the `finish` card (the story's chapter-end). */
+  onFinish?: () => void;
 }
 
 export class Tutorial {
@@ -222,7 +226,7 @@ export class Tutorial {
     // A brand-new game: the welcome card first
     // (and only when no other card is up: one card at a time)
     const cardUp = !document.getElementById('guide')?.classList.contains('hidden');
-    if (this.save.tutorial === 0 && !this.save.paid['tut-intro'] && !this.asking && !cardUp) this.intro();
+    if (this.save.tutorial === 0 && !this.save.paid['tut-intro'] && !this.asking && !cardUp && this.script.skippable !== false) this.intro();
     if (this.asking || !this.running) {
       this.arrow.visible = false;
       this.edge.classList.add('hidden');
@@ -281,7 +285,8 @@ export class Tutorial {
     const key = text === null ? '' : `${this.save.tutorial}|${text}|${progress === null ? '' : Math.round(progress * 100)}`;
     if (key === this.shown) return;
     this.shown = key;
-    this.hud.setHint(text, text ? () => this.skip() : undefined, text ? { step: this.save.tutorial, total: this.steps.length, progress } : undefined);
+    const skip = text && this.script.skippable !== false ? () => this.skip() : undefined;
+    this.hud.setHint(text, skip, text ? { step: this.save.tutorial, total: this.steps.length, progress } : undefined);
   }
 
   /** The welcome card for a brand-new game. */
@@ -319,6 +324,7 @@ export class Tutorial {
     this.arrow.visible = false;
     this.edge.classList.add('hidden');
     this.setHint(null);
+    if (this.script.onFinish) return this.script.onFinish();
     this.hud.showGuide(this.script.finish.title, this.script.finish.html, [{ label: this.script.finish.button, cls: 'big-btn' }]);
   }
 

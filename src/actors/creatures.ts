@@ -32,7 +32,13 @@ export const PROPS = ['dirt-clod', 'rock-model', 'twig-model'] as const;
  * phone size. Jack + Sarah are the TMB leads; the rest are crew/passengers.
  */
 export const HUMANS = ['h-jack', 'h-sarah', 'h-director', 'h-exec', 'h-balance', 'h-ember', 'h-crew1', 'h-crew2', 'h-crew3', 'h-crew4'] as const;
-export type HumanKind = (typeof HUMANS)[number];
+/**
+ * 🦖 v0.63: the 7 more people Joshua added (release "7-more-models"), only for the story (actors/cast.ts says who's
+ * who), so Anthill Island doesn't download them: the company-suit pair (h-cadet, h-grace), more looks of people
+ * we have (h-jacklab, h-sarah2, h-balance2 pregnant, h-enigma = the executive not pregnant), and h-azure.
+ */
+export const MORE_HUMANS = ['h-cadet', 'h-grace', 'h-jacklab', 'h-sarah2', 'h-balance2', 'h-enigma', 'h-azure'] as const;
+export type HumanKind = (typeof HUMANS)[number] | (typeof MORE_HUMANS)[number];
 /**
  * Act 3 (Dino Island), from the Beyond-Extinction repo's models folder,
  * shrunk to phone size: the Dodo (with its own Walking/Running animations),
@@ -83,6 +89,15 @@ let humansLoading: Promise<void> | null = null;
 export function loadHumans(onProgress: (done: number, total: number) => void = () => {}) {
   humansLoading ??= loadList([...HUMANS], onProgress);
   return humansLoading;
+}
+
+const peopleLoading = new Map<string, Promise<void>>();
+/** 🦖 Just these people (the story loads only its cast). Safe to call more than once. */
+export function loadPeople(names: HumanKind[], onProgress: (done: number, total: number) => void = () => {}) {
+  const todo = names.filter((n) => !templates.has(n) && !peopleLoading.has(n));
+  const p = loadList(todo, onProgress);
+  for (const n of todo) peopleLoading.set(n, p);
+  return Promise.all([p, ...names.map((n) => peopleLoading.get(n))]).then(() => {});
 }
 
 let islandLoading: Promise<void> | null = null;

@@ -69,7 +69,7 @@ export default defineConfig({
           {
             urlPattern: /\/models\/h-[\w-]+\.glb(\?.*)?$/,
             handler: 'CacheFirst',
-            options: { cacheName: 'human-models', expiration: { maxEntries: 20 } },
+            options: { cacheName: 'human-models', expiration: { maxEntries: 40 } }, // (17 people since v0.63)
           },
           {
             // 🔊 Sounds + music (public/audio, made with ElevenLabs): cached the first time

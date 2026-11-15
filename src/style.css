@@ -937,3 +937,73 @@ body.launch-on .up-btn { display: none; } /* (the launch button takes the bottom
 .stat-tile button:disabled { background: #e6dccd; color: #fff; box-shadow: none; }
 .stat-tile button::after { content: ''; position: absolute; inset: -6px; } /* (an easier tap) */
 .queen-section .stat-grid { margin-top: 4px; }
+
+/* ---- 🦖 The story (v0.63): dialogue bubbles, cutscene bars, needs, the character card -------------- */
+#guide { z-index: 20; }
+/* 💬 The dialogue box: a tap anywhere on screen goes on (the layer covers it all while someone talks) */
+.talk { position: absolute; inset: 0; z-index: 12; pointer-events: auto; display: flex; align-items: flex-end; justify-content: center; padding: 0 10px calc(14px + env(safe-area-inset-bottom)); }
+.talk.hidden { display: none; }
+.talk-box {
+  position: relative; display: flex; gap: 10px; align-items: center;
+  width: min(560px, 100%); min-height: 84px; padding: 10px 34px 10px 10px;
+  background: linear-gradient(#fffaf0, #f3e6cc); border: 2px solid var(--navy); border-radius: 16px;
+  box-shadow: 0 4px 0 var(--navy), 0 10px 24px rgba(0, 0, 0, 0.35); color: #2a2017;
+  animation: talkIn 0.18s ease-out;
+}
+@keyframes talkIn { from { transform: translateY(14px); opacity: 0; } to { transform: none; opacity: 1; } }
+.talk-face {
+  position: relative; flex: 0 0 auto; width: 64px; height: 64px; border-radius: 12px; overflow: hidden;
+  border: 2px solid var(--navy); background: #4a6fa5; display: flex; align-items: center; justify-content: center;
+}
+.talk-face.hidden { display: none; }
+.talk-face .pc-live { position: absolute; inset: 0; width: 100%; height: 100%; }
+.talk-emoji { font-size: 36px; }
+.talk-body { flex: 1; min-width: 0; }
+.talk-body b { display: block; font-size: 13px; font-weight: 900; letter-spacing: 0.5px; color: #b5501c; text-transform: uppercase; }
+.talk-body p { margin: 2px 0 0; font-size: 15px; font-weight: 700; line-height: 1.32; min-height: 2.6em; }
+.talk-next { position: absolute; right: 12px; bottom: 8px; font-size: 13px; color: #b5501c; animation: talkNext 0.9s infinite; }
+@keyframes talkNext { 50% { transform: translateX(3px); opacity: 0.5; } }
+.talk-box.note { background: rgba(20, 24, 32, 0.88); color: #f5ecd8; border-color: #000; }
+.talk-box.note p { font-style: italic; font-weight: 600; }
+.talk-box.radio .talk-face { background: #3b4a2a; }
+.talk-box.radio p { font-family: 'Courier New', monospace; color: #2f5a1e; }
+
+/* 🎬 Cutscenes: black bars, a caption in the bottom one, Skip top right */
+.cut { position: absolute; inset: 0; z-index: 10; pointer-events: none; }
+.cut.hidden { display: none; }
+.cut-top, .cut-bottom { position: absolute; left: 0; right: 0; height: 11vh; background: #000; animation: barIn 0.35s ease-out; }
+.cut-top { top: 0; }
+.cut-bottom { bottom: 0; display: flex; align-items: center; justify-content: center; padding: 0 16px; }
+@keyframes barIn { from { height: 0; } }
+.cut-caption { color: #fff; font-weight: 800; font-size: 15px; text-align: center; opacity: 0; transition: opacity 0.4s; text-shadow: 0 1px 2px #000; }
+.cut-caption.on { opacity: 1; }
+.cut-skip {
+  position: absolute; top: calc(11vh + 8px); right: 12px; pointer-events: auto;
+  background: rgba(0, 0, 0, 0.55); color: #fff; border: 1.5px solid rgba(255, 255, 255, 0.6); border-radius: 18px;
+  padding: 6px 12px; font-weight: 900; font-size: 13px;
+}
+body.in-cut #hud .topbar, body.in-cut #hint, body.in-cut .tut-edge { visibility: hidden; }
+
+/* 💧 ❤️ Needs (top right, above the buttons) */
+.needs { display: flex; flex-direction: column; gap: 4px; align-items: flex-end; }
+.needs.hidden, .need.hidden { display: none; }
+.need { display: flex; align-items: center; gap: 4px; }
+.need span { font-size: 14px; filter: drop-shadow(0 1px 0 rgba(0, 0, 0, 0.5)); }
+.need i { display: block; width: 74px; height: 10px; border-radius: 6px; background: #0f2f73; border: 1.5px solid var(--navy); overflow: hidden; }
+.need b { display: block; height: 100%; width: 100%; transition: width 0.3s; }
+.need.water b { background: linear-gradient(#9fe8ff, #2bb0ea); }
+.need.health b { background: linear-gradient(#ff9a9a, #e53935); }
+.need.low i { animation: needLow 0.8s infinite; }
+@keyframes needLow { 50% { box-shadow: 0 0 0 3px rgba(255, 80, 80, 0.8); } }
+
+/* 🧍 The character card */
+.pick-row { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin: 10px 0 2px; }
+.pick { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 13px; text-align: center; max-width: 110px; }
+.pick-ava { position: relative; display: block; width: 92px; height: 92px; border-radius: 14px; overflow: hidden; border: 2px solid var(--navy); background: #2f6fdc; }
+.pick-ava .pc-live { position: absolute; inset: 0; width: 100%; height: 100%; }
+
+/* 📖 A logbook page; 🎉 the chapter-end card */
+.logbook { background: #f6ecd2; border: 1px solid #d8c49a; border-radius: 6px; padding: 6px 12px; font-family: Georgia, 'Times New Roman', serif; color: #3a2c18; transform: rotate(-0.6deg); box-shadow: inset 0 0 18px rgba(150, 110, 40, 0.25); }
+.chapter-end p { margin: 8px 0; }
+.chapter-end .next { background: #fff3d6; border-radius: 10px; padding: 8px 10px; }
+.chapter-end .small { font-size: 13px; opacity: 0.8; }
