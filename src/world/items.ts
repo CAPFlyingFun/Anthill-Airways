@@ -36,7 +36,7 @@ export type ItemType = 'crumb' | 'snack' | 'leaf' | 'wrap' | 'sugar' | 'candy' |
   | 'clothes' | 'antfarm' | 'log' | 'berry' | 'mast' | 'radio';
 
 /** Height of one item when stacked. */
-export const ITEM_H: Record<ItemType, number> = { clothes: 0.24, antfarm: 0.5, log: 0.34, berry: 0.3, mast: 0.3, radio: 0.5, bread: 0.2, parcel: 0.3, extinguisher: 0.5, medicine: 0.3, medkit: 0.3, luggage: 0.46, meal: 0.42, part: 0.3, fuel: 0.44, crumb: 0.3, snack: 0.32, leaf: 0.14, wrap: 0.32, sugar: 0.4, candy: 0.3, cash: 0.11, bag: 0.48, snackbox: 0.36, fruit: 0.4, smoothie: 0.5, meat: 0.32, egg: 0.42, ticket: 0.1, obsidian: 0.36, gem: 0.4, magma: 0.4, crystal: 0.52, laundry: 0.4, towel: 0.2, grocery: 0.42, tray: 0.36, beans: 0.38, coffee: 0.4, shopbag: 0.5 };
+export const ITEM_H: Record<ItemType, number> = { clothes: 0.24, antfarm: 0.5, log: 0.34, berry: 0.3, mast: 1.0, radio: 0.5, bread: 0.2, parcel: 0.3, extinguisher: 0.5, medicine: 0.3, medkit: 0.3, luggage: 0.46, meal: 0.42, part: 0.3, fuel: 0.44, crumb: 0.3, snack: 0.32, leaf: 0.14, wrap: 0.32, sugar: 0.4, candy: 0.3, cash: 0.11, bag: 0.48, snackbox: 0.36, fruit: 0.4, smoothie: 0.5, meat: 0.32, egg: 0.42, ticket: 0.1, obsidian: 0.36, gem: 0.4, magma: 0.4, crystal: 0.52, laundry: 0.4, towel: 0.2, grocery: 0.42, tray: 0.36, beans: 0.38, coffee: 0.4, shopbag: 0.5 };
 
 // Shared geometry + materials: every crumb reuses the same ones (fast).
 const geo = {
@@ -94,7 +94,10 @@ const geo = {
   antfarm: new THREE.BoxGeometry(0.62, 0.46, 0.16),                          // your ant farm (a thin glass case)
   log: new THREE.CylinderGeometry(0.16, 0.17, 0.7, 9).rotateZ(Math.PI / 2), // a log, lying across your arms
   berry: new THREE.SphereGeometry(0.075, 8, 6),                              // one berry of a bunch
-  mast: new THREE.CylinderGeometry(0.05, 0.05, 1.5, 6).rotateZ(Math.PI / 2), // a radio mast, carried sideways
+  mastBase: new THREE.CylinderGeometry(0.2, 0.2, 0.04, 8),
+  mastLeg: new THREE.CylinderGeometry(0.018, 0.022, 1, 5),                  // a radio mast: a lattice section
+  mastBrace: new THREE.CylinderGeometry(0.01, 0.01, 1, 4),
+  mastDish: new THREE.SphereGeometry(0.18, 12, 6, 0, Math.PI * 2, 0, Math.PI / 3),
   radio: new THREE.BoxGeometry(0.62, 0.46, 0.46),                            // the radio's power module (heavy!)
 };
 const mat = {
@@ -157,6 +160,7 @@ const mat = {
   berry: new THREE.MeshStandardMaterial({ color: 0xc2185b, roughness: 0.4 }),
   metal: new THREE.MeshStandardMaterial({ color: 0x9aa3ab, roughness: 0.35, metalness: 0.6 }),
   radio: new THREE.MeshStandardMaterial({ color: 0x4d5b3a, roughness: 0.7 }),
+  dish: new THREE.MeshStandardMaterial({ color: 0xeeeeee, roughness: 0.4, side: THREE.DoubleSide }),
   amber: new THREE.MeshStandardMaterial({ color: 0xffb703, roughness: 0.3, emissive: 0xff8800, emissiveIntensity: 0.6 }),
 };
 
@@ -341,16 +345,34 @@ export function makeItem(type: ItemType): THREE.Mesh {
       m.add(b);
     }
   } else if (type === 'mast') {
-    // A radio mast (a metal pole with a little aerial on the end), carried sideways
-    m = new THREE.Mesh(geo.mast, mat.metal);
-    const tip = new THREE.Mesh(new THREE.SphereGeometry(0.07, 8, 6), mat.fuel);
-    tip.position.x = 0.78;
-    m.add(tip);
-    for (const x of [-0.3, 0.2]) {
-      const bar = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.03, 0.4), mat.metal);
-      bar.position.x = x;
-      m.add(bar);
+    // A radio mast, carried upright: a three-legged lattice section with a little white dish and a red light
+    // (v0.63: the first version, a pole carried sideways, looked like a sword)
+    m = new THREE.Mesh(geo.mastBase, mat.metal); // (its foot plate)
+    const legs: THREE.Vector3[] = [];
+    for (let i = 0; i < 3; i++) {
+      const a = (i / 3) * Math.PI * 2;
+      const leg = new THREE.Mesh(geo.mastLeg, mat.metal);
+      leg.position.set(Math.cos(a) * 0.12, 0.5, Math.sin(a) * 0.12);
+      m.add(leg);
+      legs.push(new THREE.Vector3(Math.cos(a) * 0.12, 0, Math.sin(a) * 0.12));
     }
+    for (let k = 0; k < 4; k++) {
+      for (let i = 0; i < 3; i++) {
+        const p0 = legs[i].clone().setY(k * 0.25);
+        const p1 = legs[(i + 1) % 3].clone().setY((k + 1) * 0.25);
+        const brace = new THREE.Mesh(geo.mastBrace, mat.metal);
+        brace.scale.y = p0.distanceTo(p1);
+        brace.position.copy(p0).add(p1).multiplyScalar(0.5);
+        brace.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), p1.clone().sub(p0).normalize());
+        m.add(brace);
+      }
+    }
+    const dish = new THREE.Mesh(geo.mastDish, mat.dish);
+    dish.rotation.x = -Math.PI / 2 - 0.4;
+    dish.position.set(0, 0.8, 0.12);
+    const tip = new THREE.Mesh(new THREE.SphereGeometry(0.05, 8, 6), mat.fuel);
+    tip.position.y = 1.03;
+    m.add(dish, tip);
   } else if (type === 'radio') {
     // An army-green box with dials and an amber light (the radio's power module)
     m = new THREE.Mesh(geo.radio, mat.radio);

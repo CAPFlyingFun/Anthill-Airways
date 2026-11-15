@@ -812,13 +812,8 @@ export class StoryWorld {
     for (let i = 0; i < 5; i++) broken.add(box(0.3 + i * 0.1, 0.06, 0.4, white, -2 + i * 0.9, 0.08, 4 + (i % 2) * 1.5));
     body.add(broken);
     // The radio mast (on the roof, once you've built one)
-    const mast = new THREE.Group();
-    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.06, 3.2, 6), mat(0x9aa3ab, 0.35, 0.6));
-    pole.position.y = 1.6;
-    const tip2 = new THREE.Mesh(new THREE.SphereGeometry(0.1, 8, 6), mat(0xd62828, 0.5));
-    tip2.position.y = 3.25;
-    mast.add(pole, tip2);
-    for (const y of [1.2, 2.2]) mast.add(box(0.03, 0.03, 0.8, mat(0x9aa3ab, 0.35, 0.6), 0, y, 0));
+    const mast = latticeMast(3.4);
+    this.mastLight = mast.userData.light as THREE.Mesh;
     mast.position.set(0.6, 2.4, 0);
     mast.visible = false;
     body.add(mast);
@@ -873,15 +868,22 @@ export class StoryWorld {
     if (!instant) this.flyers.grow(this.nestObj, 0.5);
   }
 
-  private raiseMast() {
+  private mastLight: THREE.Mesh | null = null;
+  private raiseMast(instant = true) {
     this.plane.mast.visible = true;
+    if (!instant) {
+      this.flyers.grow(this.plane.mast, 0.5);
+      this.hud.floatAt(v3(P.radio.x, 6, P.radio.z + 2), this.camera, '📡 MAST UP!', 'big gold');
+    }
   }
 
   // --------------------------------------------------------------------------
   // ✈️ Rae: standing by the engine; then sitting on a crate (hurt)
   // --------------------------------------------------------------------------
+  private raeSeated = false;
   private raeSit() {
     const m = this.rae;
+    this.raeSeated = true;
     m.root.position.set(P.raeHurt.x, 0, P.raeHurt.z);
     m.root.rotation.y = Math.PI * 0.85; // (facing the camp)
     this.raeCrate.visible = true;
@@ -1094,6 +1096,7 @@ export class StoryWorld {
     const still = new THREE.Vector2();
     me.update(dt, busy ? still : move, this.area === 'home' ? this.blockersHome : this.blockersIsland, this.canWalk);
     this.flyers.update(dt);
+    this.hud.setInventory(me.stack.counts(), me.stack.count, me.carryMax);
     this.tutorial.update(dt, !busy);
     if (this.area === 'home') this.updateHome(dt, busy);
     else this.updateIsland(dt, busy);
@@ -1290,7 +1293,7 @@ export class StoryWorld {
     if (!f.mast && this.radio.count('mast') > 0) {
       return this.run(async () => {
         this.radio.consume(1, 'mast');
-        this.raiseMast();
+        this.raiseMast(false);
         f.mast = 1;
         await this.say(D.MAST);
         this.progress.addXp(30);
@@ -1447,8 +1450,10 @@ export class StoryWorld {
         rex.root.position.lerpVectors(from, to, u);
         faceToward(rex, to.x - from.x, to.z - from.z, Math.max(dt, 0.016), 20);
         animateCreature(rex, dt, 7);
-        faceToward(rae, rex.root.position.x - rae.root.position.x, rex.root.position.z - rae.root.position.z, Math.max(dt, 0.016), 4);
-        animateCreature(rae, dt, 0);
+        if (!this.raeSeated) {
+          faceToward(rae, rex.root.position.x - rae.root.position.x, rex.root.position.z - rae.root.position.z, Math.max(dt, 0.016), 4);
+          animateCreature(rae, dt, 0);
+        }
       },
       cam: (u) => [glide(v3(-10, 9, 10), v3(-6, 8, 13), u), v3(9, 3, 27)],
     });
@@ -1706,7 +1711,8 @@ export class StoryWorld {
   // --------------------------------------------------------------------------
   private raeIdle(dt: number) {
     const r = this.rae;
-    if (r.root.userData.hidden) return;
+    // (once she's hurt and sitting, the walk cycle would straighten her legs back out: v0.63's "standing in the box")
+    if (r.root.userData.hidden || this.raeSeated) return;
     // (looking the engine over: facing the nose, shifting about)
     faceToward(r, -1, 0.2 * Math.sin(this.t * 0.4), dt, 2);
     animateCreature(r, dt, 0);
@@ -1733,6 +1739,8 @@ export class StoryWorld {
         (s.material as THREE.MeshStandardMaterial).opacity = 0.45 * (1 - u);
       });
     }
+    // 📡 the mast's light blinks
+    if (this.mastLight) this.mastLight.visible = Math.sin(this.t * 4) > 0;
     // 🐜 the ants run round their nest
     if (this.nestObj.visible) {
       for (const c of this.nestObj.children) {
@@ -1846,6 +1854,44 @@ export class StoryWorld {
 }
 
 // ============================================================================
+// 📡 A radio mast: a three-legged lattice tower with a little dish and a red light on top. `h` tall.
+// (v0.63: the carried one looked like a sword; this is the one on the plane's roof)
+// ============================================================================
+export function latticeMast(h: number) {
+  const g = new THREE.Group();
+  const metal = mat(0xb8c0c8, 0.35, 0.6);
+  const r = h * 0.06;
+  const legs: THREE.Vector3[] = [];
+  for (let i = 0; i < 3; i++) {
+    const a = (i / 3) * Math.PI * 2;
+    const leg = new THREE.Mesh(new THREE.CylinderGeometry(h * 0.012, h * 0.014, h, 5), metal);
+    leg.position.set(Math.cos(a) * r, h / 2, Math.sin(a) * r);
+    g.add(leg);
+    legs.push(new THREE.Vector3(Math.cos(a) * r, 0, Math.sin(a) * r));
+  }
+  // zig-zag braces between the legs
+  for (let k = 0; k < 6; k++) {
+    for (let i = 0; i < 3; i++) {
+      const p0 = legs[i].clone().setY((k / 6) * h);
+      const p1 = legs[(i + 1) % 3].clone().setY(((k + 1) / 6) * h);
+      const len = p0.distanceTo(p1);
+      const brace = new THREE.Mesh(new THREE.CylinderGeometry(h * 0.006, h * 0.006, len, 4), metal);
+      brace.position.copy(p0).add(p1).multiplyScalar(0.5);
+      brace.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), p1.clone().sub(p0).normalize());
+      g.add(brace);
+    }
+  }
+  const dish = new THREE.Mesh(new THREE.SphereGeometry(h * 0.12, 12, 6, 0, Math.PI * 2, 0, Math.PI / 3), new THREE.MeshStandardMaterial({ color: 0xeeeeee, roughness: 0.4, side: THREE.DoubleSide }));
+  dish.rotation.x = -Math.PI / 2 - 0.4;
+  dish.position.set(0, h * 0.78, h * 0.08);
+  const light = new THREE.Mesh(new THREE.SphereGeometry(h * 0.035, 8, 6), new THREE.MeshBasicMaterial({ color: 0xff2a2a }));
+  light.position.y = h + h * 0.03;
+  g.add(dish, light);
+  g.userData.light = light;
+  return g;
+}
+
+// ============================================================================
 // 🪑 Sitting (a person on a crate `seat` high): thighs forward, shins down, the body lowered onto the seat.
 // Set once; the walk cycle isn't run on a sitting person.
 // ============================================================================
@@ -1856,9 +1902,9 @@ function sitPose(m: CreatureModel, seat: number) {
   for (const limb of b.limbs) {
     if (limb.arm) {
       // (hands on the knees)
-      q.setFromAxisAngle(limb.hip.axis, -0.55);
+      q.setFromAxisAngle(limb.hip.axis, -0.3);
       limb.hip.bone.quaternion.copy(limb.hip.base).multiply(q);
-      if (limb.mid) limb.mid.bone.quaternion.copy(limb.mid.base).multiply(q.setFromAxisAngle(limb.mid.axis, -0.5));
+      if (limb.mid) limb.mid.bone.quaternion.copy(limb.mid.base).multiply(q.setFromAxisAngle(limb.mid.axis, -0.7));
       continue;
     }
     q.setFromAxisAngle(limb.hip.axis, -1.45);
