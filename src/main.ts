@@ -30,7 +30,7 @@ import { IslandWorld } from './world/islandWorld';
 import { VolcanoWorld } from './world/volcanoWorld';
 import { HotelWorld } from './world/hotelWorld';
 import { lod } from './core/lod';
-import { Updater, versionLabel } from './core/updater';
+import { BUILD_ID, Updater, versionLabel } from './core/updater';
 import { HOWTO_HTML, HOWTO_TITLE } from './ui/howto';
 import { showStartupError, watchStartup } from './core/startupError';
 import { UnlockTile } from './world/stations';
@@ -151,6 +151,23 @@ async function start() {
   // It never touches the save. Its code only downloads when it's opened.
   if (new URLSearchParams(location.search).has('devroom')) {
     hud.hideLoading();
+    // THE ROOM UPDATES ITSELF (v0.42.1). The game's updater never runs in here, so a phone kept showing an old room
+    // after a push (Joshua, 2026-11-14: "I don't see Auto Lite"). Ask the site which build is live (never cached); if it
+    // isn't this one, drop the saved copy of the game's files and load again, once for that build.
+    try {
+      const res = await Promise.race([
+        fetch(`${import.meta.env.BASE_URL}version.json?t=${Date.now()}`, { cache: 'no-store' }),
+        new Promise<never>((_, no) => setTimeout(() => no(new Error('slow')), 4000)),
+      ]);
+      const live = (await res.json()) as { build?: string };
+      if (live.build && live.build !== BUILD_ID && sessionStorage.getItem('devroom-updated') !== live.build) {
+        sessionStorage.setItem('devroom-updated', live.build);
+        for (const reg of (await navigator.serviceWorker?.getRegistrations()) ?? []) await reg.unregister();
+        for (const key of await caches.keys()) await caches.delete(key);
+        location.reload();
+        return;
+      }
+    } catch { /* (offline, or no answer in time: open the room as it is) */ }
     return (await import('./devRoom')).startDevRoom();
   }
   document.getElementById('devRoomBtn')!.addEventListener('click', () => {

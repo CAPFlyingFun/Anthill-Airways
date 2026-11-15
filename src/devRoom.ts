@@ -25,6 +25,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { ClothTest, SARAH_TEE } from './devRoomCloth';
+import { VERSION } from './core/updater';
 import { MeshoptSimplifier } from 'meshoptimizer/simplifier';
 // The builder's own posing code (a copy: see src/vendor/ccbs/README.md): how she stands, breathes and walks
 import { HumanRig } from './vendor/ccbs/HumanRigView';
@@ -493,7 +494,7 @@ export async function startDevRoom() {
   });
   const title = document.createElement('div');
   title.className = 'dr-stat';
-  title.textContent = '🧪 DEV Room · character test';
+  title.textContent = `🧪 DEV Room · v${VERSION}`; // (the build it is: so a phone shows whether it has the latest)
   top.appendChild(title);
   const modelRow = row();
   const countRow = row();
