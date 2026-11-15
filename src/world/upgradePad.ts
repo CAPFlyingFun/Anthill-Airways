@@ -54,11 +54,11 @@ const isBin = (o: any) => o && o.mouth instanceof THREE.Vector3 && o.zone instan
 const PILE_NAME: Record<string, string> = {
   crumb: 'CRUMBS', leaf: 'LEAVES', sugar: 'SUGAR', snackbox: 'EXPORTS', fruit: 'FRUIT', meat: 'DINO FOOD', egg: 'NESTS',
   obsidian: 'OBSIDIAN', magma: 'LAVA VENT', crystal: 'VAULT', grocery: 'GROCERIES', laundry: 'LAUNDRY',
-  beans: 'BEAN SACKS', part: 'PARTS', meal: 'KITCHEN',
+  beans: 'BEAN SACKS', part: 'PARTS', meal: 'KITCHEN', bread: 'OVEN', parcel: 'MAIL DEPOT', extinguisher: 'GEAR STORE', medicine: 'MEDICINE', medkit: 'STORES', luggage: 'BAGGAGE',
 };
 const PILE_ICON: Record<string, string> = {
   crumb: '🍞', leaf: '🌿', sugar: '🍬', snackbox: '📦', fruit: '🍓', meat: '🍖', egg: '🥚',
-  obsidian: '🪨', magma: '🌋', crystal: '💎', grocery: '🥕', laundry: '🧺', beans: '🫘', part: '🔩', meal: '🍔',
+  obsidian: '🪨', magma: '🌋', crystal: '💎', grocery: '🥕', laundry: '🧺', beans: '🫘', part: '🔩', meal: '🍔', bread: '🥖', parcel: '📦', extinguisher: '🧯', medicine: '💊', medkit: '🩹', luggage: '🧳',
 };
 /** "☕ Ant Café" -> "ANT CAFÉ" (emoji off). */
 const clean = (s: string) => s.replace(/[^\p{L}\p{N} \-&']/gu, '').replace(/\s+/g, ' ').trim().toUpperCase();
@@ -80,7 +80,7 @@ const SELLER_NAME: Record<string, string> = { snack: 'SNACK SHOP', wrap: 'WRAP M
 /** What a machine's input is called in "needs …". */
 const NEEDS: Record<string, string> = {
   crumb: 'crumbs', leaf: 'leaves', sugar: 'sugar', fruit: 'fruit', obsidian: 'obsidian', laundry: 'laundry',
-  meal: 'meals', part: 'parts', fuel: 'fuel cans', grocery: 'groceries', meat: 'meat', magma: 'magma', gem: 'gems', snackbox: 'snack boxes', beans: 'coffee beans',
+  bread: 'loaves', parcel: 'parcels', extinguisher: 'extinguishers', medicine: 'medicine', medkit: 'medical kits', luggage: 'suitcases', meal: 'meals', part: 'parts', fuel: 'fuel cans', grocery: 'groceries', meat: 'meat', magma: 'magma', gem: 'gems', snackbox: 'snack boxes', beans: 'coffee beans',
 };
 
 interface Status {

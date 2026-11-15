@@ -198,10 +198,13 @@ export class ResourcePile {
       // Act 5: the grocery delivery (crates on a pallet)
       source.add(box(2.6, 0.2, 1.5, mat(0x8a5a2b, 0.9), 0, 0.1, 0));
       // (⛽ the gas station's depot is the same pallet, with drums of fuel on it)
-      const fuel = type === 'fuel', part = type === 'part', meal = type === 'meal';
-      for (const [px, py] of [[-0.65, 0.55], [0.65, 0.55], [0, 1.25]]) source.add(box(1.2, 0.7, 1.2, mat(fuel ? 0x9b2226 : part ? 0x46627a : meal ? 0xe8e2d6 : 0xc89b5e, fuel ? 0.6 : 0.9), px, py, 0));
+      const fuel = type === 'fuel';
+      // (the street businesses' supply piles are this pallet too, each with its own crates and stamp)
+      const PALLET: Record<string, [number, string]> = { fuel: [0x9b2226, '⛽ FUEL DEPOT'], part: [0x46627a, '🔩 PARTS'], meal: [0xe8e2d6, '🍔 KITCHEN'], bread: [0xd9a05b, '🥖 OVEN'], parcel: [0xb98a55, '📮 MAIL DEPOT'], laundry: [0xe6f1f5, '🧺 CLEAN LAUNDRY'], extinguisher: [0xb71c1c, '🧯 GEAR STORE'], medicine: [0xf1fbf2, '💊 MEDICINE'], medkit: [0xffffff, '🏥 STORES'], luggage: [0x2f6fb3, '🧳 BAGGAGE'] };
+      const pal = PALLET[type];
+      for (const [px, py] of [[-0.65, 0.55], [0.65, 0.55], [0, 1.25]]) source.add(box(1.2, 0.7, 1.2, mat(pal ? pal[0] : 0xc89b5e, fuel ? 0.6 : 0.9), px, py, 0));
       const stamp = new TextSprite(0.42, '#ffe7b0');
-      stamp.setText(fuel ? '⛽ FUEL DEPOT' : part ? '🔩 PARTS' : meal ? '🍔 KITCHEN' : '🥬 FRESH DELIVERY');
+      stamp.setText(pal ? pal[1] : '🥬 FRESH DELIVERY');
       stamp.sprite.position.set(0, 2.1, 0.2);
       source.add(stamp.sprite);
     } else if (style === 'beans') {

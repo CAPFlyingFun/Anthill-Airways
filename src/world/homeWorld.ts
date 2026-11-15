@@ -823,10 +823,10 @@ export class HomeWorld {
     lawnTex.wrapS = lawnTex.wrapT = THREE.RepeatWrapping;
     lawnTex.repeat.set(8, 8);
     // (v0.47: twice as long, for the street running on east to the car wash and the garage)
-    lawnTex.repeat.set(16, 8);
-    const lawn = new THREE.Mesh(new THREE.PlaneGeometry(320, 160), new THREE.MeshStandardMaterial({ map: lawnTex, roughness: 1 }));
+    lawnTex.repeat.set(35, 8); // (v0.56: the lawn runs on under the whole street, to the airport)
+    const lawn = new THREE.Mesh(new THREE.PlaneGeometry(700, 160), new THREE.MeshStandardMaterial({ map: lawnTex, roughness: 1 }));
     lawn.rotation.x = -Math.PI / 2;
-    lawn.position.set(60, -0.01, 0);
+    lawn.position.set(190, -0.01, 0);
     lawn.receiveShadow = true;
     s.add(lawn);
     const flat = (w: number, d: number, color: number, x: number, z: number, y = 0) => {
@@ -1437,7 +1437,7 @@ export class HomeWorld {
       kind: d.kind, bays: [x(LOT_AT.bays[0]), x(LOT_AT.bays[1])], curbZ: HOME.curbZ, rack: { x: x(LOT_AT.rack[0]), z: LOT_AT.rack[1] },
       item: d.item, unitValue: d.unitValue, interval: d.interval, wants: d.wants, serve: d.serve,
       truck: d.truck && lot.pile ? { every: d.truck.every, load: d.truck.load, pile: lot.pile } : undefined,
-      icon: d.icon, sign: `${d.icon} ${d.key.toUpperCase()}`, staff2: { title: d.staff.title2, kind: d.staff.kind2 },
+      icon: d.icon, sign: d.sign ?? `${d.icon} ${d.key.toUpperCase()}`, staff2: { title: d.staff.title2, kind: d.staff.kind2 },
       label: `${d.icon} ${d.name.toUpperCase()}`, itemType: d.item ?? d.key,
     });
     service.onServe = (byPlayer) => this.progress.addXp(byPlayer ? CONFIG.xp.sale : CONFIG.xp.autoSale);

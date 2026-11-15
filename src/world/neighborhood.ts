@@ -35,7 +35,7 @@ export const STREET = {
   z: 19.5, width: 9,
   northWalk: 13.6,   // the sidewalk on your side (where the shops' customers come in)
   southWalk: 25.4,   // the sidewalk across the street, along the houses
-  minX: -70, maxX: 175, // (v0.47: on east past the gas station, for the car wash and the garage; v0.55: and the diner)
+  minX: -70, maxX: 450, // (v0.47: on east past the gas station; v0.55: the diner; v0.56: all the way to the airport)
   /** The side street: it runs north from the main street, west of your yard (the corner). */
   side: { x: -25.5, width: 9, eastWalk: -19.6, westWalk: -31.4, minZ: -70 },
 };

@@ -131,9 +131,16 @@ export class Minimap {
   // The whole map (tap the little one)
   // --------------------------------------------------------------------------
   private drawBig(v: MapView) {
-    const b = this.bounds;
-    const bw = b.maxX - b.minX;
+    let b = this.bounds;
     const bh = b.maxZ - b.minZ;
+    // (v0.56: Anthill Island's street is now eight times as long as it is deep, and the whole of it on a phone is
+    // a ribbon too thin to read. A map that long shows the stretch around you instead, 2.4 times as wide as deep.)
+    const win = bh * 2.4;
+    if (b.maxX - b.minX > win) {
+      const lo = Math.min(b.maxX - win, Math.max(b.minX, v.player.x - win / 2));
+      b = { ...b, minX: lo, maxX: lo + win };
+    }
+    const bw = b.maxX - b.minX;
     const maxW = window.innerWidth * 0.92;
     const maxH = window.innerHeight * 0.78;
     const k = Math.min(maxW / bw, maxH / bh);

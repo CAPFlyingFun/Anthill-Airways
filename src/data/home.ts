@@ -100,7 +100,10 @@ export const HOME = {
  */
 export interface StreetLotDef {
   key: string;            // also its unlock ids: ai-<key>, ai-<key>-carrier, ai-<key>-<staff.id>, ai-<key>-banker
-  kind: 'gas' | 'wash' | 'garage' | 'diner';
+  kind: 'gas' | 'wash' | 'garage' | 'diner' | 'bakery' | 'post' | 'bank' | 'laundry' | 'fire' | 'police' | 'pharmacy' | 'hospital' | 'taxi' | 'motel' | 'parking' | 'airport';
+  /** The sign over its bays (else its key in capitals) and its banker's name (else '<Key> Banker'). */
+  sign?: string;
+  bankerName?: string;
   minX: number;           // the lot's west edge along the street
   name: string;
   icon: string;
@@ -114,7 +117,7 @@ export interface StreetLotDef {
   level: number;
   costs: { plot: number; carrier?: number; staff: number; banker: number };
   /** What a car uses up (null: nothing: a wash) and what each one pays; seconds between cars; units a car takes; seconds per unit. */
-  item: 'fuel' | 'part' | 'meal' | null;
+  item: 'fuel' | 'part' | 'meal' | 'bread' | 'parcel' | 'laundry' | 'extinguisher' | 'medicine' | 'medkit' | 'luggage' | null;
   unitValue: number;
   interval: number;
   wants: [number, number];
@@ -172,6 +175,123 @@ export const STREET_LOTS: StreetLotDef[] = [
     staff: { id: 'server', name: 'Drive-Thru Server', title: '🍔 SERVER', kind: 'h-crew4', title2: '🍔 SERVER 2', kind2: 'h-crew2' },
     how: '🍔 Carry meal bags from the kitchen to the rack by the windows → stand there to hand them to the cars. Fast and busy!',
   },
+  // ---------------------------------------------------------------------------------------------------------
+  // WAVES 3 TO 5 (v0.56, built overnight 2026-11-15 at Joshua's ask: "complete all the areas overnight and save it
+  // all to your branch... up to the hospital and airport"). His roadmap, in his order: bakery, post office, bank,
+  // laundromat (wave 3); fire station, police, pharmacy, hospital (wave 4); bus/taxi, motel, airport parking and
+  // the airport (wave 5). Each is a street lot like the four before it, of one of the three sorts there are:
+  // carry-and-serve from a pile that restocks (like the garage), carry-and-serve from a pile a truck fills (like
+  // the gas station), or served by time alone with nothing to carry (like the car wash).
+  // FIRST-PASS NUMBERS, by rule and not yet by play: each plot costs 1.55x the one before, each car's bill is
+  // about 1.5x the one before, the helper tiles are 50% / 75% / 88% of the plot, a plot's level is 2 above the
+  // last one's. To be tuned from Joshua's playthrough.
+  // ---------------------------------------------------------------------------------------------------------
+  {
+    key: 'bakery', kind: 'bakery', minX: 150, name: 'Bakery', icon: '🥖', fill: '#ecd9b0', wall: 0xfff0d2, trim: 0xb5651d,
+    gate: { ants: 8, planks: 19 }, after: 'ai-diner-server', level: 31,
+    costs: { plot: 165000, carrier: 82500, staff: 124000, banker: 145000 },
+    item: 'bread', unitValue: 2000, interval: 7, wants: [2, 4], serve: 1.0,
+    carrier: { name: 'Bread Carrier', title: '🐜 BREAD CARRIER', hat: 0xb5651d },
+    staff: { id: 'baker', name: 'Baker', title: '🥖 BAKER', kind: 'h-exec', title2: '🥖 BAKER 2', kind2: 'h-crew1' },
+    how: '🥖 Carry warm loaves from the oven to the rack by the windows → stand there to hand them to the cars.',
+  },
+  {
+    key: 'post', kind: 'post', minX: 173, name: 'Post Office', icon: '📮', fill: '#c9d6ea', wall: 0xeef3fb, trim: 0x1d4e9e,
+    gate: { ants: 8, planks: 20 }, after: 'ai-bakery-baker', level: 33,
+    costs: { plot: 256000, carrier: 128000, staff: 192000, banker: 225000 },
+    item: 'parcel', unitValue: 4500, interval: 8, wants: [1, 3], serve: 1.5,
+    truck: { every: 40, load: 20 },
+    carrier: { name: 'Parcel Carrier', title: '🐜 PARCEL CARRIER', hat: 0x1d4e9e },
+    staff: { id: 'clerk', name: 'Postal Clerk', title: '📮 CLERK', kind: 'h-crew2', title2: '📮 CLERK 2', kind2: 'h-exec' },
+    how: '📮 The mail truck fills the depot → carry parcels to the rack → stand at the windows while the cars collect them.',
+  },
+  {
+    key: 'bank', kind: 'bank', minX: 196, name: 'Bank', icon: '🏦', fill: '#d3dccb', wall: 0xf2f5ec, trim: 0x2e7d32, bankerName: 'Bank Runner',
+    gate: { ants: 8, planks: 21 }, after: 'ai-post-clerk', level: 35,
+    costs: { plot: 396500, staff: 297500, banker: 349000 },
+    item: null, unitValue: 13500, interval: 8, wants: [1, 1], serve: 5,
+    staff: { id: 'teller', name: 'Bank Teller', title: '🏦 TELLER', kind: 'h-director', title2: '🏦 TELLER 2', kind2: 'h-exec' },
+    how: '🏦 A drive-up bank: cars pull up, you stand at the teller posts while each one is served. Nothing to carry, big bills.',
+  },
+  {
+    key: 'laundry', kind: 'laundry', minX: 219, name: 'Laundromat', icon: '🧺', fill: '#cfe3e6', wall: 0xeefafa, trim: 0x00838f,
+    gate: { ants: 8, planks: 22 }, after: 'ai-bank-teller', level: 37,
+    costs: { plot: 614500, carrier: 307000, staff: 461000, banker: 540500 },
+    item: 'laundry', unitValue: 13500, interval: 9, wants: [1, 2], serve: 4,
+    carrier: { name: 'Laundry Carrier', title: '🐜 LAUNDRY CARRIER', hat: 0x00838f },
+    staff: { id: 'washer', name: 'Laundry Attendant', title: '🧺 ATTENDANT', kind: 'h-crew4', title2: '🧺 ATTENDANT 2', kind2: 'h-crew2' },
+    how: '🧺 Carry clean laundry to the rack by the drop-off posts → stand there while each car is loaded. Slow, well paid.',
+  },
+  {
+    key: 'fire', kind: 'fire', minX: 242, name: 'Fire Station', icon: '🚒', fill: '#e6c6c0', wall: 0xfbeeea, trim: 0xb71c1c,
+    gate: { ants: 8, planks: 23 }, after: 'ai-laundry-washer', level: 39,
+    costs: { plot: 952500, carrier: 476000, staff: 714500, banker: 838000 },
+    item: 'extinguisher', unitValue: 20000, interval: 10, wants: [1, 2], serve: 3,
+    carrier: { name: 'Gear Carrier', title: '🐜 GEAR CARRIER', hat: 0xb71c1c },
+    staff: { id: 'firefighter', name: 'Firefighter', title: '🚒 FIREFIGHTER', kind: 'h-ember', title2: '🚒 FIREFIGHTER 2', kind2: 'h-crew1' },
+    how: '🧯 Cars stop for fire-safety gear: carry extinguishers to the rack by the hydrants → stand there to fit each one.',
+  },
+  {
+    key: 'police', kind: 'police', minX: 265, name: 'Police Station', icon: '🚓', fill: '#c4cbe0', wall: 0xeceff8, trim: 0x1a237e,
+    gate: { ants: 8, planks: 24 }, after: 'ai-fire-firefighter', level: 41,
+    costs: { plot: 1476000, staff: 1107000, banker: 1299000 },
+    item: null, unitValue: 45000, interval: 10, wants: [1, 1], serve: 6,
+    staff: { id: 'officer', name: 'Desk Officer', title: '🚓 OFFICER', kind: 'h-crew1', title2: '🚓 OFFICER 2', kind2: 'h-crew4' },
+    how: '🚓 The permit window: cars pull up, you stand at the booths while each permit is checked and stamped. Nothing to carry.',
+  },
+  {
+    key: 'pharmacy', kind: 'pharmacy', minX: 288, name: 'Pharmacy', icon: '💊', fill: '#cfe8d2', wall: 0xf1fbf2, trim: 0x2e9e4f,
+    gate: { ants: 8, planks: 25 }, after: 'ai-police-officer', level: 43,
+    costs: { plot: 2288000, carrier: 1144000, staff: 1716000, banker: 2013500 },
+    item: 'medicine', unitValue: 34000, interval: 8, wants: [1, 3], serve: 1.5,
+    truck: { every: 44, load: 18 },
+    carrier: { name: 'Medicine Carrier', title: '🐜 MEDICINE CARRIER', hat: 0x2e9e4f },
+    staff: { id: 'pharmacist', name: 'Pharmacist', title: '💊 PHARMACIST', kind: 'h-exec', title2: '💊 PHARMACIST 2', kind2: 'h-crew2' },
+    how: '💊 The supply van fills the depot → carry medicine to the rack → stand at the drive-up windows while the cars collect.',
+  },
+  {
+    key: 'hospital', kind: 'hospital', minX: 311, name: 'Hospital', icon: '🏥', fill: '#e2e6ea', wall: 0xffffff, trim: 0xd32f2f,
+    gate: { ants: 8, planks: 26 }, after: 'ai-pharmacy-pharmacist', level: 45,
+    costs: { plot: 3546500, carrier: 1773500, staff: 2660000, banker: 3121000 },
+    item: 'medkit', unitValue: 40000, interval: 10, wants: [2, 3], serve: 3,
+    carrier: { name: 'Supply Carrier', title: '🐜 SUPPLY CARRIER', hat: 0xd32f2f },
+    staff: { id: 'nurse', name: 'Nurse', title: '🏥 NURSE', kind: 'h-exec', title2: '🏥 NURSE 2', kind2: 'h-crew4' },
+    how: '🏥 The drive-up clinic: carry medical kits from the stores to the rack → stand at the bays while each visitor is seen.',
+  },
+  {
+    key: 'taxi', kind: 'taxi', minX: 334, name: 'Bus & Taxi Stand', icon: '🚕', fill: '#eadf9f', wall: 0xfff8d6, trim: 0xf9a825, sign: '🚕 TAXI & BUS', bankerName: 'Stand Runner',
+    gate: { ants: 8, planks: 27 }, after: 'ai-hospital-nurse', level: 47,
+    costs: { plot: 5497000, staff: 4123000, banker: 4837500 },
+    item: null, unitValue: 150000, interval: 7, wants: [1, 1], serve: 3,
+    staff: { id: 'dispatcher', name: 'Dispatcher', title: '🚕 DISPATCHER', kind: 'h-crew2', title2: '🚕 DISPATCHER 2', kind2: 'h-ember' },
+    how: '🚕 Rides pull up, you stand at the stand while the riders board, and each ride pays its fare. Quick and steady.',
+  },
+  {
+    key: 'motel', kind: 'motel', minX: 357, name: 'Motel', icon: '🏨', fill: '#dcc9e3', wall: 0xf7eefb, trim: 0x6a1b9a,
+    gate: { ants: 8, planks: 28 }, after: 'ai-taxi-dispatcher', level: 49,
+    costs: { plot: 8520500, staff: 6390500, banker: 7498000 },
+    item: null, unitValue: 230000, interval: 12, wants: [1, 1], serve: 10,
+    staff: { id: 'clerk', name: 'Night Clerk', title: '🏨 CLERK', kind: 'h-director', title2: '🏨 CLERK 2', kind2: 'h-crew4' },
+    how: '🏨 Guests pull up to check in: stand at the desk posts while each one gets a key. A long wait, a very big bill.',
+  },
+  {
+    key: 'parking', kind: 'parking', minX: 380, name: 'Airport Parking', icon: '🅿️', fill: '#c8ccd2', wall: 0xeef0f3, trim: 0x1565c0, sign: '🅿️ PARKING',
+    gate: { ants: 8, planks: 29 }, after: 'ai-motel-clerk', level: 51,
+    costs: { plot: 13207000, staff: 9905000, banker: 11622000 },
+    item: null, unitValue: 120000, interval: 5, wants: [1, 1], serve: 2,
+    staff: { id: 'attendant', name: 'Parking Attendant', title: '🅿️ ATTENDANT', kind: 'h-crew1', title2: '🅿️ ATTENDANT 2', kind2: 'h-crew2' },
+    how: '🅿️ The busiest curb in town: cars stop at the barriers, you stand there while each ticket is stamped. Fast!',
+  },
+  {
+    key: 'airport', kind: 'airport', minX: 403, name: 'Airport', icon: '✈️', fill: '#cfe0ee', wall: 0xf3f9ff, trim: 0x0277bd,
+    gate: { ants: 8, planks: 30 }, after: 'ai-parking-attendant', level: 53,
+    costs: { plot: 20470500, carrier: 10235500, staff: 15353000, banker: 18014000 },
+    item: 'luggage', unitValue: 125000, interval: 6, wants: [3, 5], serve: 0.8,
+    truck: { every: 40, load: 30 },
+    carrier: { name: 'Baggage Carrier', title: '🐜 BAGGAGE CARRIER', hat: 0x0277bd },
+    staff: { id: 'agent', name: 'Check-in Agent', title: '✈️ AGENT', kind: 'h-exec', title2: '✈️ AGENT 2', kind2: 'h-director' },
+    how: '✈️ The baggage truck fills the depot → carry suitcases to the rack → stand at the check-in posts while the travellers load up. You made it to the airport!',
+  },
 ];
 
 /** A lot's ground (world). */
@@ -196,7 +316,7 @@ function streetUnlocks(): UnlockDef[] {
       last = `${id}-carrier`;
     }
     out.push({ id: `${id}-${d.staff.id}`, name: d.staff.name, icon: d.icon, cost: d.costs.staff, pos: at(LOT_AT.staffTile), requires: [last], level: ++level });
-    out.push({ id: `${id}-banker`, name: `${d.key[0].toUpperCase()}${d.key.slice(1)} Banker`, icon: '🏦', cost: d.costs.banker, pos: at(LOT_AT.bankerTile), requires: [`${id}-${d.staff.id}`], level: ++level });
+    out.push({ id: `${id}-banker`, name: d.bankerName ?? `${d.key[0].toUpperCase()}${d.key.slice(1)} Banker`, icon: '🏦', cost: d.costs.banker, pos: at(LOT_AT.bankerTile), requires: [`${id}-${d.staff.id}`], level: ++level });
   }
   return out;
 }

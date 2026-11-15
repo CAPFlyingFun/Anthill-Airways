@@ -27,10 +27,13 @@ export type ItemType = 'crumb' | 'snack' | 'leaf' | 'wrap' | 'sugar' | 'candy' |
   // 🏝️ Anthill Island: the Repair Garage's box of parts (v0.47)
   | 'part'
   // 🏝️ Anthill Island: the Drive-Thru Diner's meal bag (v0.55)
-  | 'meal';
+  | 'meal'
+  // 🏝️ Anthill Island, waves 3 to 5 (v0.56): the bakery's loaf, the post office's parcel, the fire station's
+  // extinguisher, the pharmacy's medicine, the hospital's medical kit, the airport's suitcase
+  | 'bread' | 'parcel' | 'extinguisher' | 'medicine' | 'medkit' | 'luggage';
 
 /** Height of one item when stacked. */
-export const ITEM_H: Record<ItemType, number> = { meal: 0.42, part: 0.3, fuel: 0.44, crumb: 0.3, snack: 0.32, leaf: 0.14, wrap: 0.32, sugar: 0.4, candy: 0.3, cash: 0.11, bag: 0.48, snackbox: 0.36, fruit: 0.4, smoothie: 0.5, meat: 0.32, egg: 0.42, ticket: 0.1, obsidian: 0.36, gem: 0.4, magma: 0.4, crystal: 0.52, laundry: 0.4, towel: 0.2, grocery: 0.42, tray: 0.36, beans: 0.38, coffee: 0.4, shopbag: 0.5 };
+export const ITEM_H: Record<ItemType, number> = { bread: 0.2, parcel: 0.3, extinguisher: 0.5, medicine: 0.3, medkit: 0.3, luggage: 0.46, meal: 0.42, part: 0.3, fuel: 0.44, crumb: 0.3, snack: 0.32, leaf: 0.14, wrap: 0.32, sugar: 0.4, candy: 0.3, cash: 0.11, bag: 0.48, snackbox: 0.36, fruit: 0.4, smoothie: 0.5, meat: 0.32, egg: 0.42, ticket: 0.1, obsidian: 0.36, gem: 0.4, magma: 0.4, crystal: 0.52, laundry: 0.4, towel: 0.2, grocery: 0.42, tray: 0.36, beans: 0.38, coffee: 0.4, shopbag: 0.5 };
 
 // Shared geometry + materials: every crumb reuses the same ones (fast).
 const geo = {
@@ -72,6 +75,12 @@ const geo = {
   tray: new THREE.CylinderGeometry(0.28, 0.28, 0.04, 18),                 // a silver tray...
   cloche: new THREE.SphereGeometry(0.2, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2), // ...with a dome lid
   veg: new THREE.SphereGeometry(0.1, 8, 6),
+  bread: new THREE.CapsuleGeometry(0.1, 0.24, 3, 8),                        // a loaf (the Bakery)
+  parcel: new THREE.BoxGeometry(0.4, 0.28, 0.34),                           // a brown parcel (the Post Office)
+  extinguisher: new THREE.CylinderGeometry(0.11, 0.11, 0.4, 10),            // a fire extinguisher (the Fire Station)
+  medicine: new THREE.BoxGeometry(0.34, 0.28, 0.24),                        // a white box with a green cross (the Pharmacy)
+  medkit: new THREE.BoxGeometry(0.4, 0.28, 0.3),                            // a red kit with a white cross (the Hospital)
+  luggage: new THREE.BoxGeometry(0.4, 0.44, 0.2),                           // a suitcase (the Airport)
   meal: new THREE.BoxGeometry(0.3, 0.36, 0.22),                             // a take-away bag (the Drive-Thru Diner)
   part: new THREE.BoxGeometry(0.4, 0.28, 0.4),                              // a box of car parts (the Repair Garage)
   fuel: new THREE.BoxGeometry(0.34, 0.42, 0.2),                             // a red jerry can (the Gas Station)
@@ -110,6 +119,14 @@ const mat = {
   towelStripe: new THREE.MeshStandardMaterial({ color: 0x2ec4b6, roughness: 0.9 }),
   grocery: new THREE.MeshStandardMaterial({ color: 0xc89b5e, roughness: 0.9 }),
   veg: new THREE.MeshStandardMaterial({ color: 0x4caf50, roughness: 0.8 }),
+  bread: new THREE.MeshStandardMaterial({ color: 0xd9a05b, roughness: 0.85 }),
+  parcel: new THREE.MeshStandardMaterial({ color: 0xb98a55, roughness: 0.95 }),
+  tape: new THREE.MeshStandardMaterial({ color: 0xf2e6d0, roughness: 0.8 }),
+  extinguisher: new THREE.MeshStandardMaterial({ color: 0xd32f2f, roughness: 0.5 }),
+  white: new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.7 }),
+  green: new THREE.MeshStandardMaterial({ color: 0x2e9e4f, roughness: 0.7 }),
+  medkit: new THREE.MeshStandardMaterial({ color: 0xd32f2f, roughness: 0.7 }),
+  luggage: new THREE.MeshStandardMaterial({ color: 0x2f6fb3, roughness: 0.7 }),
   meal: new THREE.MeshStandardMaterial({ color: 0xf2e6d0, roughness: 0.95 }),
   mealBand: new THREE.MeshStandardMaterial({ color: 0xc1121f, roughness: 0.7 }),
   part: new THREE.MeshStandardMaterial({ color: 0x5b7c99, roughness: 0.7 }),
@@ -125,7 +142,7 @@ const mat = {
 };
 
 /** Cash value of each sellable item (counter price; gate runs pay the same per item). */
-export const ITEM_VALUE: Record<ItemType, number> = { meal: 1300, part: 600, fuel: 90, crumb: 2, snack: 5, leaf: 3, wrap: 14, sugar: 10, candy: 40, cash: 0, bag: 15, snackbox: 25, fruit: 0, smoothie: 60, meat: 0, egg: 80, ticket: 50, obsidian: 0, gem: 150, magma: 0, crystal: 450, laundry: 0, towel: 0, grocery: 0, tray: 220, beans: 2, coffee: 20, shopbag: 50 };
+export const ITEM_VALUE: Record<ItemType, number> = { bread: 2000, parcel: 4500, extinguisher: 20000, medicine: 34000, medkit: 40000, luggage: 125000, meal: 1300, part: 600, fuel: 90, crumb: 2, snack: 5, leaf: 3, wrap: 14, sugar: 10, candy: 40, cash: 0, bag: 15, snackbox: 25, fruit: 0, smoothie: 60, meat: 0, egg: 80, ticket: 50, obsidian: 0, gem: 150, magma: 0, crystal: 450, laundry: 0, towel: 0, grocery: 0, tray: 220, beans: 2, coffee: 20, shopbag: 50 };
 
 /** Build the 3D mesh for one item. Box faces order: +x, -x, +y(top), -y, +z, -z */
 export function makeItem(type: ItemType): THREE.Mesh {
@@ -189,6 +206,35 @@ export function makeItem(type: ItemType): THREE.Mesh {
       v.position.set(vx, 0.2, vz);
       m.add(v);
     }
+  } else if (type === 'bread') {
+    // A loaf lying on its side
+    m = new THREE.Mesh(geo.bread, mat.bread);
+    m.rotation.z = Math.PI / 2;
+  } else if (type === 'parcel') {
+    // A brown parcel with tape across it
+    m = new THREE.Mesh(geo.parcel, mat.parcel);
+    m.add(new THREE.Mesh(new THREE.BoxGeometry(0.41, 0.29, 0.07), mat.tape));
+  } else if (type === 'extinguisher') {
+    // A red cylinder with a dark handle on top
+    m = new THREE.Mesh(geo.extinguisher, mat.extinguisher);
+    const top = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.08, 0.06), mat.cashSide);
+    top.position.y = 0.24;
+    m.add(top);
+  } else if (type === 'medicine' || type === 'medkit') {
+    // A box with a cross on its lid: white with a green cross (medicine), red with a white one (a medical kit)
+    const kit = type === 'medkit';
+    m = new THREE.Mesh(kit ? geo.medkit : geo.medicine, kit ? mat.medkit : mat.white);
+    for (const [w, d] of [[0.2, 0.07], [0.07, 0.2]]) {
+      const bar = new THREE.Mesh(new THREE.BoxGeometry(w, 0.02, d), kit ? mat.white : mat.green);
+      bar.position.y = 0.15;
+      m.add(bar);
+    }
+  } else if (type === 'luggage') {
+    // A blue suitcase with a handle
+    m = new THREE.Mesh(geo.luggage, mat.luggage);
+    const handle = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.06, 0.04), mat.cashSide);
+    handle.position.y = 0.25;
+    m.add(handle);
   } else if (type === 'meal') {
     // A white take-away bag with a red band round it and its top folded over
     m = new THREE.Mesh(geo.meal, mat.meal);

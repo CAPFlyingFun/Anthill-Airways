@@ -41,7 +41,7 @@ function box(w: number, h: number, d: number, material: THREE.Material, x = 0, y
   return m;
 }
 
-export type CarServiceKind = 'gas' | 'wash' | 'garage' | 'diner';
+export type CarServiceKind = 'gas' | 'wash' | 'garage' | 'diner' | 'bakery' | 'post' | 'bank' | 'laundry' | 'fire' | 'police' | 'pharmacy' | 'hospital' | 'taxi' | 'motel' | 'parking' | 'airport';
 
 export interface CarServiceOpts {
   kind: CarServiceKind;
@@ -82,6 +82,18 @@ const LOOK: Record<CarServiceKind, { main: number; trim: number }> = {
   wash: { main: 0x2a7fd6, trim: 0xe8f4ff },
   garage: { main: 0xf4a000, trim: 0x30343b },
   diner: { main: 0xc1121f, trim: 0xfff3e0 },
+  bakery: { main: 0xb5651d, trim: 0xfff0d2 },
+  post: { main: 0x1d4e9e, trim: 0xeef3fb },
+  bank: { main: 0x2e7d32, trim: 0xf2f5ec },
+  laundry: { main: 0x00838f, trim: 0xeefafa },
+  fire: { main: 0xb71c1c, trim: 0xfbeeea },
+  police: { main: 0x1a237e, trim: 0xeceff8 },
+  pharmacy: { main: 0x2e9e4f, trim: 0xffffff },
+  hospital: { main: 0xd32f2f, trim: 0xffffff },
+  taxi: { main: 0xf9a825, trim: 0x2b2f36 },
+  motel: { main: 0x6a1b9a, trim: 0xf7eefb },
+  parking: { main: 0x1565c0, trim: 0xffd600 },
+  airport: { main: 0x0277bd, trim: 0xf3f9ff },
 };
 
 export class CarService {
@@ -140,6 +152,59 @@ export class CarService {
         // a drive-thru order post: a menu board on a pole (three rows of dishes), a speaker box, a little striped awning
         this.group.add(box(0.14, 1.5, 0.14, steel, lx, 0.9, 0), box(1.2, 0.9, 0.12, dark, lx, 1.95, 0), box(1.3, 0.14, 0.5, main, lx, 2.5, 0.12), box(0.3, 0.36, 0.2, trim, lx + 0.55, 1.05, 0.1));
         for (const [k, c] of [[0.24, 0xffd166], [0, 0xfff3e0], [-0.24, 0x8ecf6a]] as const) this.group.add(box(0.95, 0.14, 0.03, mat(c, 0.7), lx, 1.95 + k, 0.07));
+      } else if (opts.kind !== 'garage') {
+        // (v0.56, waves 3 to 5: each business has its own fitting at each bay, a few boxes and cylinders in its colours)
+        const add = (...o: THREE.Object3D[]) => this.group.add(...o);
+        const cyl = (r: number, h: number, m: THREE.Material, x: number, y: number, z: number, flat = false) => {
+          const c = new THREE.Mesh(new THREE.CylinderGeometry(r, r, h, 14), m);
+          c.position.set(x, y, z);
+          if (flat) c.rotation.x = Math.PI / 2;
+          c.castShadow = true;
+          return c;
+        };
+        const white = mat(0xffffff, 0.6), glass = mat(0xbfe3f5, 0.25, 0.1);
+        switch (opts.kind) {
+          case 'bakery': // a glass case of loaves under a striped awning
+            add(box(1.2, 0.8, 0.5, trim, lx, 0.56, 0), box(1.2, 0.5, 0.5, glass, lx, 1.2, 0), box(1.4, 0.12, 0.8, main, lx, 1.95, 0.1), box(0.1, 0.5, 0.1, steel, lx - 0.6, 1.7, 0), box(0.1, 0.5, 0.1, steel, lx + 0.6, 1.7, 0));
+            for (const k of [-0.3, 0, 0.3]) add(cyl(0.09, 0.3, mat(0xd9a05b, 0.8), lx + k, 1.1, 0.05, true));
+            break;
+          case 'post': // a mailbox with a rounded top, and a parcel on a stand
+            add(box(0.6, 1.0, 0.5, main, lx - 0.3, 0.66, 0), cyl(0.3, 0.5, main, lx - 0.3, 1.16, 0, true), box(0.4, 0.06, 0.04, dark, lx - 0.3, 1.1, 0.27), box(0.5, 0.5, 0.4, steel, lx + 0.5, 0.41, 0), box(0.4, 0.3, 0.34, mat(0xc9a36b, 0.9), lx + 0.5, 0.81, 0));
+            break;
+          case 'bank': // a teller pillar: a screen, a keypad shelf, a tube going up
+            add(box(0.8, 1.7, 0.5, trim, lx, 1.01, 0), box(0.5, 0.36, 0.05, dark, lx, 1.45, 0.27), box(0.6, 0.08, 0.3, main, lx, 1.05, 0.3), cyl(0.09, 1.3, glass, lx + 0.55, 1.6, 0), box(0.84, 0.16, 0.54, main, lx, 1.94, 0));
+            break;
+          case 'laundry': // a washing machine with its round door, and a basket
+            add(box(0.9, 1.0, 0.6, white, lx - 0.15, 0.66, 0), cyl(0.28, 0.06, glass, lx - 0.15, 0.66, 0.31, true), box(0.9, 0.1, 0.6, main, lx - 0.15, 1.21, 0), box(0.44, 0.34, 0.4, mat(0xd9c7a1, 0.9), lx + 0.7, 0.33, 0.1));
+            break;
+          case 'fire': // a hydrant and a hose reel on a post
+            add(cyl(0.2, 0.8, main, lx - 0.35, 0.56, 0), cyl(0.26, 0.12, main, lx - 0.35, 1.0, 0), box(0.5, 0.14, 0.14, main, lx - 0.35, 0.66, 0), box(0.12, 1.4, 0.12, steel, lx + 0.45, 0.86, 0), cyl(0.34, 0.14, mat(0xe0c060, 0.7), lx + 0.45, 1.5, 0.1, true));
+            break;
+          case 'police': // a booth with a window and a blue lamp on top
+            add(box(0.9, 1.9, 0.6, trim, lx, 1.11, 0), box(0.6, 0.5, 0.05, glass, lx, 1.5, 0.31), box(0.94, 0.14, 0.64, main, lx, 2.1, 0), cyl(0.12, 0.2, mat(0x3d7bff, 0.3), lx, 2.27, 0), box(0.94, 0.3, 0.64, main, lx, 0.31, 0));
+            break;
+          case 'pharmacy':
+          case 'hospital': { // a white post with a cross on it (green: the pharmacy; red: the hospital), and a hatch
+            add(box(0.9, 1.2, 0.5, white, lx, 0.76, 0), box(0.6, 0.3, 0.05, glass, lx, 1.0, 0.27), box(0.16, 1.0, 0.16, steel, lx, 1.86, 0));
+            add(box(0.6, 0.18, 0.1, main, lx, 2.3, 0.05), box(0.18, 0.6, 0.1, main, lx, 2.3, 0.05));
+            if (opts.kind === 'hospital') add(box(0.5, 0.4, 0.4, main, lx + 0.8, 0.36, 0.1)); // (a red kit bag beside it)
+            break;
+          }
+          case 'taxi': // a stand sign on a pole, and a bench
+            add(box(0.12, 2.2, 0.12, dark, lx - 0.5, 1.26, 0), box(0.7, 0.4, 0.08, main, lx - 0.5, 2.2, 0), box(1.1, 0.1, 0.4, mat(0x8a5a2b, 0.9), lx + 0.4, 0.6, 0), box(0.1, 0.44, 0.36, steel, lx - 0.05, 0.38, 0), box(0.1, 0.44, 0.36, steel, lx + 0.85, 0.38, 0));
+            break;
+          case 'motel': // a little desk with a bell, and a board of keys
+            add(box(1.2, 1.0, 0.5, main, lx, 0.66, 0), box(1.3, 0.08, 0.6, trim, lx, 1.2, 0), cyl(0.1, 0.1, mat(0xffd166, 0.3, 0.6), lx + 0.35, 1.29, 0.1), box(0.8, 0.6, 0.06, mat(0x8a5a2b, 0.9), lx, 1.95, -0.1), box(0.1, 0.8, 0.1, steel, lx, 1.5, -0.1));
+            for (const k of [-0.24, 0, 0.24]) add(box(0.06, 0.2, 0.03, mat(0xffd166, 0.3, 0.6), lx + k, 1.95, -0.06));
+            break;
+          case 'parking': // a ticket machine and a striped barrier arm
+            add(box(0.5, 1.3, 0.4, main, lx - 0.4, 0.81, 0), box(0.3, 0.2, 0.05, dark, lx - 0.4, 1.2, 0.22), box(0.2, 1.0, 0.2, steel, lx + 0.5, 0.66, 0));
+            for (let k = 0; k < 4; k++) add(box(0.36, 0.1, 0.1, k % 2 ? white : trim, lx + 0.5, 1.2, 0.3 + k * 0.36));
+            break;
+          default: // ✈️ the airport: a check-in desk with a screen, and a luggage cart
+            add(box(1.1, 1.0, 0.5, trim, lx - 0.2, 0.66, 0), box(1.1, 0.14, 0.54, main, lx - 0.2, 1.23, 0), box(0.5, 0.36, 0.05, dark, lx - 0.2, 1.55, 0), box(0.06, 0.2, 0.06, dark, lx - 0.2, 1.36, 0));
+            add(box(0.7, 0.08, 0.5, steel, lx + 0.85, 0.3, 0.1), box(0.06, 0.8, 0.06, steel, lx + 1.18, 0.66, 0.1), box(0.4, 0.34, 0.3, mat(0x8e5a3c, 0.8), lx + 0.8, 0.52, 0.1));
+        }
       } else {
         // a tool cabinet with a red toolbox on top, and a jack beside it
         this.group.add(box(1.1, 1.1, 0.5, main, lx, 0.71, 0), box(0.7, 0.3, 0.4, mat(0xc1121f, 0.6), lx, 1.41, 0), box(0.5, 0.22, 0.3, trim, lx + 0.9, 0.27, 0.15));
