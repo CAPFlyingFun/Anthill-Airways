@@ -57,6 +57,7 @@ export interface HomeSave {
   standSales: number; // snack packs handed over at the backyard's snack stand (v0.28: older saves get 0)
   storeChest?: boolean; // 🛒 the store plot's chest is open (v0.30)
   storeSales?: number;  // bags of groceries sold at the Corner Store (v0.30)
+  gasCars?: number;     // ⛽ cars filled at the Gas Station (v0.45)
   v?: number;        // save format (missing = v0.27: see HOME_RENAMED in data/home.ts)
 }
 

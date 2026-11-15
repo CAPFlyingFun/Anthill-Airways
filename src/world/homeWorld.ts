@@ -44,6 +44,7 @@ import { TUTORIAL_DONE, Tutorial, TutorialScript } from './tutorial';
 import { Neighborhood } from './neighborhood';
 import { Shop, buildShop } from './buildings';
 import { Ride, Traffic } from './traffic';
+import { GasStation } from './gasStation';
 import { pace } from '../core/pace';
 import type { MapArea, MapMarker, MapRect, MapSeg, MapView } from '../ui/minimap';
 
@@ -624,6 +625,10 @@ export class HomeWorld {
   storePad: CashPad | null = null;
   storeLoad = new Zone(45.4, -1.6, 0.6, 0.6); // (the Carrier's spot, as at the café)
   storeChest: Chest | null = null;
+  /** ⛽ The Gas Station (once its plot is yours, v0.45): the fuel depot (filled by the tanker) -> the rack by the pumps -> cars. */
+  depot: ResourcePile | null = null;
+  gas: GasStation | null = null;
+  gasPad: CashPad | null = null;
 
   private home: HomeSave;
   private blockers: Blocker[] = [];
@@ -643,6 +648,10 @@ export class HomeWorld {
   private lot2 = new THREE.Group();     // the store's empty lot
   private plotSign2: TextSprite[] = []; // what the store plot needs, over its gate
   private storeOpen = false;
+  private lot3 = new THREE.Group();     // the gas station's empty lot
+  private plotSign3: TextSprite[] = []; // what the gas station plot needs, over its tile on the sidewalk
+  private gasOpen = false;
+  private gasFence: FenceBag = { objs: [], segs: [] }; // (the fence along the sidewalk: down when the forecourt opens)
   /** Just bought a tile here: the next one on this spot (the farm levels share one) waits until you step off. */
   private stepOff: Zone | null = null;
   /** 🗺️ For the minimap: the fences and trees, as they're built. */
@@ -755,6 +764,8 @@ export class HomeWorld {
     if (plot) plot.need = () => this.plotNeed();
     const plot2 = this.tiles.find((t) => t.def.id === 'ai-store');
     if (plot2) plot2.need = () => this.storeNeed();
+    const plot3 = this.tiles.find((t) => t.def.id === 'ai-gas');
+    if (plot3) plot3.need = () => this.gasNeed();
     // (in the tiles' order, whatever order the save lists them in: a café helper needs its café)
     const order = (id: string) => HOME_UNLOCKS.findIndex((d) => d.id === id);
     for (const id of [...save.unlocked].sort((a, b) => order(a) - order(b))) this.applyUnlock(id, false);
@@ -877,6 +888,25 @@ export class HomeWorld {
       t.sprite.visible = false;
       s.add(t.sprite);
       this.plotSign2.push(t);
+    }
+    // ⛽ The lot after the store (v0.45): fenced off along the sidewalk until it's yours, then an open forecourt
+    const G = HOME.gasPlot;
+    this.fence(G.minX, G.minZ, G.maxX, G.minZ);
+    this.fence(G.maxX, G.minZ, G.maxX, G.maxZ);
+    this.fence(G.minX, G.maxZ, G.maxX, G.maxZ, this.gasFence);
+    this.lot3.add(flat(G.maxX - G.minX, G.maxZ - G.minZ, 0xb39368, (G.minX + G.maxX) / 2, (G.minZ + G.maxZ) / 2, 0.006));
+    const sale3 = new TextSprite(0.8, '#ffd166');
+    sale3.setText('🏷️ LOT FOR SALE');
+    sale3.sprite.position.set(69, 3.2, 0);
+    this.lot3.add(sale3.sprite);
+    this.lot3.add(box(0.15, 2.4, 0.15, mat(0x6b4426), 69, 1.2, 0));
+    s.add(this.lot3);
+    for (let i = 0; i < 3; i++) {
+      const t = new TextSprite(i === 0 ? 0.78 : 0.6, i === 0 ? '#ffd166' : '#ffffff');
+      t.sprite.position.set(60.4, 5.0 - i * 0.78, 13.4); // (over its tile)
+      t.sprite.visible = false;
+      s.add(t.sprite);
+      this.plotSign3.push(t);
     }
     this.lot.add(flat(P.maxX - P.minX, P.maxZ - P.minZ, 0xb39368, (P.minX + P.maxX) / 2, (P.minZ + P.maxZ) / 2, 0.006));
     const sale = new TextSprite(0.8, '#ffd166');
@@ -1006,6 +1036,9 @@ export class HomeWorld {
     if (x > P.minX + 0.6 && x < P.maxX - 0.6 && z > P.minZ + 0.6 && z < P.maxZ - 0.6) return true;
     const inGate = z > HOME.gate.z0 + 0.4 && z < HOME.gate.z1 - 0.4;
     if (x >= Y.maxX - 0.6 && x <= P.minX + 0.6 && inGate) return true; // through the gate
+    // ⛽ The gas station's forecourt: open to the sidewalk all along its front
+    const G = HOME.gasPlot;
+    if (this.gasOpen && x > G.minX + 0.6 && x < G.maxX - 0.6 && z > G.minZ + 0.6 && z <= 12.4) return true;
     if (!this.storeOpen) return false;
     const S = HOME.storePlot;
     if (x > S.minX + 0.6 && x < S.maxX - 0.6 && z > S.minZ + 0.6 && z < S.maxZ - 0.6) return true;
@@ -1020,7 +1053,7 @@ export class HomeWorld {
   private onStreet(x: number, z: number) {
     if (!this.owns('ai-order1')) return false;
     // The main street, sidewalk to sidewalk
-    if (z > 12.4 && z < 26.6 && x > -33 && x < 62) return true;
+    if (z > 12.4 && z < 26.6 && x > -33 && x < 84) return true; // (v0.45: on past the store, to the gas station)
     // The side street and its sidewalks, north from the corner
     if (x > -32.6 && x < -18.4 && z > -46 && z <= 12.4) return true;
     // The ways out to the sidewalk: the gap in your fence, and each shop's front door
@@ -1054,6 +1087,13 @@ export class HomeWorld {
   private storeNeed() {
     if (this.workers.length < HOME.storeGate.ants) return `NEEDS ${HOME.storeGate.ants} ANTS WORKING`;
     if (this.home.planks < HOME.storeGate.planks) return `NEEDS ${HOME.storeGate.planks} PLANKS`;
+    return '';
+  }
+
+  /** What the gas station plot still needs besides level and cash. */
+  private gasNeed() {
+    if (this.workers.length < HOME.gasGate.ants) return `NEEDS ${HOME.gasGate.ants} ANTS WORKING`;
+    if (this.home.planks < HOME.gasGate.planks) return `NEEDS ${HOME.gasGate.planks} PLANKS`;
     return '';
   }
 
@@ -1140,6 +1180,23 @@ export class HomeWorld {
         break;
       case 'ai-store-banker':
         if (this.storePad) this.hireBanker(this.storePad, animate);
+        break;
+      case 'ai-gas':
+        this.openGas(animate);
+        break;
+      case 'ai-gas-carrier': {
+        // 🐜 The Fuel Carrier: the depot's cans -> the rack by the pumps
+        const depot = this.depot;
+        const gas = this.gas;
+        if (depot && gas) this.antWorker('🐜 FUEL CARRIER', 63.5, 1, () => ({ src: depot.stack, srcZone: depot.zone, dst: gas.shelf, dstZone: gas.loadZone }), { color: 0xd62828, flat: true }, animate);
+        break;
+      }
+      case 'ai-gas-attendant':
+        // ⛽ A person at the pumps: fills the cars for you
+        this.gas?.hireStaff(person('h-ember'), animate, '⛽ ATTENDANT');
+        break;
+      case 'ai-gas-banker':
+        if (this.gasPad) this.hireBanker(this.gasPad, animate);
         break;
     }
   }
@@ -1319,6 +1376,54 @@ export class HomeWorld {
     }
   }
 
+  /** ⛽ The Gas Station: the fence along the sidewalk comes down, the forecourt, its kiosk, depot and pumps go up. */
+  private openGas(animate: boolean) {
+    if (this.gasOpen) return;
+    this.gasOpen = true;
+    this.lot3.visible = false;
+    for (const t of this.plotSign3) t.sprite.visible = false;
+    this.dropFence(this.gasFence);
+    const G = HOME.gasPlot;
+    const cfg = HOME.gas;
+    // The forecourt: concrete from the back fence out to the sidewalk
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(G.maxX - G.minX, G.maxZ - G.minZ + 1.4), mat(0xb9bcc0, 0.95));
+    floor.rotation.x = -Math.PI / 2;
+    floor.position.set((G.minX + G.maxX) / 2, 0.007, (G.minZ + G.maxZ + 1.4) / 2);
+    floor.receiveShadow = true;
+    this.scene.add(floor);
+    // 🏬 Its kiosk at the back (you look in from the forecourt: it is not a room you work in)
+    const K = { minX: 70.5, maxX: 79.4, minZ: -10.4, maxZ: -2.5 };
+    const shop = buildShop({ rect: K, wall: 0xf4f1ea, trim: 0xd62828, roof: 0x5a5f66, sign: '⛽ GAS STATION', awning: 0xd62828, doors: [{ side: 'south', from: 73.4, to: 76.6 }] });
+    shop.setCutaway(this.cutaway);
+    this.scene.add(shop.group);
+    this.shops.push(shop);
+    this.fenceSegs.push(...shop.outline);
+    this.blockers.push(K);
+    const inside = new THREE.Group();
+    inside.add(box(5.5, 1.0, 0.8, mat(0x8d99ae, 0.8), 75, 0.5, -8.6), box(1.0, 1.5, 3.0, mat(0xe9c46a, 0.8), 71.6, 0.75, -6.4), box(1.0, 1.5, 3.0, mat(0x2a9d8f, 0.8), 78.3, 0.75, -6.4));
+    this.scene.add(inside);
+    // ⛽ The depot (the tanker fills it), the cash pad, and the pumps at the curb
+    this.depot = new ResourcePile(this.scene, 62, -4.5, this.flyers, 'fuel', 'pantry');
+    this.piles.push(this.depot);
+    const pad = new CashPad(this.scene, 72.5, 4.2);
+    this.gasPad = pad;
+    this.cashPads.push(pad);
+    const gas = new GasStation(this.scene, this.traffic, this.flyers, pad, {
+      pumps: cfg.pumps, pumpZ: cfg.pumpZ, rack: cfg.rack, interval: cfg.interval, wants: cfg.wants, serve: cfg.serve,
+      truckEvery: cfg.truckEvery, truckLoad: cfg.truckLoad, depot: this.depot, label: '⛽ GAS STATION', itemType: 'fuel',
+    });
+    gas.onServe = (byPlayer) => this.progress.addXp(byPlayer ? CONFIG.xp.sale : CONFIG.xp.autoSale);
+    gas.onCar = () => { this.home.gasCars = (this.home.gasCars ?? 0) + 1; };
+    gas.valueMult = () => this.progress.cashMult;
+    this.gas = gas;
+    gas.setCutaway(this.cutaway);
+    this.blockers.push(...gas.blockers);
+    if (animate) {
+      for (const o of [floor, shop.group, inside, this.depot.group, pad.group, gas.group]) this.flyers.grow(o);
+      this.hud.banner('⛽ The Gas Station is yours!', '🚚 The tanker fills the depot → carry the cans to the rack by the pumps → stand at the pumps to fill the cars.', 5000);
+    }
+  }
+
   private unlock(tile: UnlockTile) {
     const id = tile.def.id;
     this.save.unlocked.push(id);
@@ -1326,6 +1431,7 @@ export class HomeWorld {
     tile.mesh.visible = false;
     if (id === 'ai-cafe') this.home.planks -= HOME.plot.planks; // (the planks get used)
     if (id === 'ai-store') this.home.planks -= HOME.storeGate.planks;
+    if (id === 'ai-gas') this.home.planks -= HOME.gasGate.planks;
     this.applyUnlock(id, true);
     this.progress.addXp(CONFIG.xp.tile.home);
     this.sfx.unlocked();
@@ -1488,6 +1594,7 @@ export class HomeWorld {
     if (cut !== this.cutaway) {
       this.cutaway = cut;
       for (const shop of this.shops) shop.setCutaway(cut);
+      this.gas?.setCutaway(cut);
     }
     this.packing?.update(dt);
     for (const w of this.workers) w.update(dt, this.flyers);
@@ -1500,6 +1607,8 @@ export class HomeWorld {
     this.storeChest?.update(dt);
     if (this.storeChest?.gone) this.storeChest = null;
     this.store?.update(dt, !!this.store && this.store.staffZone.contains(p), this.sfx);
+    this.depot?.update(dt);
+    this.gas?.update(dt, !!this.gas && this.gas.staffZone.contains(p), this.sfx);
     this.updateCrate(dt);
 
     const iv = CONFIG.player.pickupInterval / prog.workMult;
@@ -1564,6 +1673,13 @@ export class HomeWorld {
     }
     const store = this.store;
     if (store?.shelf) drop(store.staffZone, store.staffZone, store.shelf, 'shopbag', -1);
+    // 5c) ⛽ The gas station: cans from the depot onto the rack by the pumps (and you pump while you stand there)
+    const depot = this.depot;
+    const gas = this.gas;
+    if (depot && gas) {
+      take(depot.zone, depot.zone, depot.stack, 'fuel', -1);
+      drop(gas.staffZone, gas.staffZone, gas.shelf, 'fuel', -1);
+    }
     // 6) Cash pads -> wallet
     for (const pad of this.cashPads) {
       this.every(pad.zone, dt, pad.zone.contains(p), 0.035, () => {
@@ -1635,7 +1751,7 @@ export class HomeWorld {
 
     this.hud.setInventory(me.stack.counts(), me.stack.count, me.carryMax);
     // Where you are (+ your planks, once you have some)
-    const place = p.z > 12 || p.x < HOME.yard.minX ? '🏘️ Your Street' : p.x > HOME.cafePlot.maxX + 0.5 ? '🛒 Corner Store' : p.x > HOME.yard.maxX ? '☕ Corner Café' : '🏡 Your Backyard';
+    const place = this.gasOpen && p.x > HOME.gasPlot.minX && p.x < HOME.gasPlot.maxX && p.z < 15.2 ? '⛽ Gas Station' : p.z > 12 || p.x < HOME.yard.minX ? '🏘️ Your Street' : p.x > HOME.cafePlot.maxX + 0.5 ? '🛒 Corner Store' : p.x > HOME.yard.maxX ? '☕ Corner Café' : '🏡 Your Backyard';
     const name = this.home.planks > 0 ? `${place} · 🪵 ${this.home.planks}` : place;
     if (name !== this.zoneName) {
       this.zoneName = name;
@@ -1648,11 +1764,26 @@ export class HomeWorld {
 
   /** Over the gate: what the café plot needs, ticked off as you get there. */
   private updatePlotSign(dt: number) {
-    if (this.cafeOpen && this.storeOpen) return;
+    if (this.cafeOpen && this.storeOpen && this.gasOpen) return;
     this.plotSignT -= dt;
     if (this.plotSignT > 0) return;
     this.plotSignT = 0.5;
     const ok = (b: boolean) => (b ? '✅' : '⬜');
+    // ⛽ The gas station plot's sign, over its tile on the sidewalk (once the store has its first helper)
+    if (!this.gasOpen) {
+      const show3 = this.owns('ai-store-gatherer');
+      for (const t of this.plotSign3) t.sprite.visible = show3;
+      if (show3) {
+        const def3 = HOME_UNLOCKS.find((d) => d.id === 'ai-gas')!;
+        const G3 = HOME.gasGate;
+        const ants3 = Math.min(this.workers.length, G3.ants);
+        const planks3 = Math.min(this.home.planks, G3.planks);
+        this.plotSign3[0].setText('⛽ GAS STATION PLOT');
+        this.plotSign3[1].setText(`${ok(this.save.level >= (def3.level ?? 0))} Lv ${def3.level} · ${ok(ants3 >= G3.ants)} 🐜 ${ants3}/${G3.ants} ants`);
+        this.plotSign3[2].setText(`${ok(planks3 >= G3.planks)} 🪵 ${planks3}/${G3.planks} planks · 💵 $${def3.cost}`);
+      }
+    }
+    if (this.cafeOpen && this.storeOpen) return;
     if (this.cafeOpen) {
       // 🛒 The store plot's sign, over its tile by the café's east gate
       const show2 = this.owns('ai-cafe-gatherer');
@@ -1682,7 +1813,7 @@ export class HomeWorld {
   // 🗺️ The minimap
   // --------------------------------------------------------------------------
   /** The whole map (the big view fits it): your house to the street, the yard and the café plot. */
-  static readonly MAP_BOUNDS: MapRect = { minX: -34, maxX: 59, minZ: -22, maxZ: 38 };
+  static readonly MAP_BOUNDS: MapRect = { minX: -34, maxX: 82, minZ: -22, maxZ: 38 };
 
   /** What the minimap draws right now. */
   mapView(): MapView {
@@ -1697,6 +1828,9 @@ export class HomeWorld {
       this.storeOpen
         ? { rect: HOME.storePlot, fill: '#dfe9d2', label: 'Corner Store' }
         : { rect: HOME.storePlot, fill: '#b39368', edge: 'rgba(255, 220, 140, 0.9)', dashed: true, label: 'Lot for sale' },
+      this.gasOpen
+        ? { rect: HOME.gasPlot, fill: '#c9ccd1', label: 'Gas Station' }
+        : { rect: HOME.gasPlot, fill: '#b39368', edge: 'rgba(255, 220, 140, 0.9)', dashed: true, label: 'Lot for sale' },
       { rect: { minX: -15, maxX: 5, minZ: -21, maxZ: -13 }, fill: '#f1e3c8', edge: '#8d5b4c', label: 'Your house' },
       { rect: { minX: -12, maxX: 2, minZ: -13.1, maxZ: -10.9 }, fill: '#a0703f' }, // deck
     ];
@@ -1736,6 +1870,14 @@ export class HomeWorld {
       if (!this.home.storeChest) markers.push({ x: 49, z: 8.5, icon: '🎁', label: 'Chest' });
     } else {
       markers.push({ x: 47, z: 0, icon: '🏷️', label: 'For sale' });
+    }
+    const gas = this.gas;
+    if (gas) {
+      markers.push({ x: gas.group.position.x, z: gas.group.position.z, icon: '⛽', label: 'Pumps', alert: gas.waiting >= 1 && gas.shelf.count === 0 });
+      if (this.gasPad) markers.push({ x: this.gasPad.zone.x, z: this.gasPad.zone.z, icon: '💵', label: 'Cash' });
+      if (this.depot) markers.push({ x: this.depot.zone.x, z: this.depot.zone.z, icon: '🛢️', label: 'Fuel depot' });
+    } else {
+      markers.push({ x: 69, z: 0, icon: '🏷️', label: 'For sale' });
     }
     const p = this.player.pos;
     const target = this.tutorial.target;

@@ -37,6 +37,8 @@ export interface Ride {
   readonly curb: THREE.Vector3;
   /** Drive away `seconds` from now (0 = now). Until this is called a parked ride stays parked. (Called early, it still parks first.) */
   leaveIn(seconds: number): void;
+  /** It has pulled out and its place at the curb is free for the next one (it is 'gone' only at the far end of the street). */
+  readonly away: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -305,6 +307,7 @@ class RideImpl implements Ride {
   timer = -1;            // seconds until it leaves (-1 = nobody has asked it to leave)
   slotX = 0;             // the middle of its parking space, along the curb
   hasSlot = false;
+  away = false;
   constructor(readonly side: 'north' | 'south', readonly kind: VehicleKind, readonly wantX: number, readonly onParked: ((ride: Ride) => void) | undefined) {}
   leaveIn(seconds: number) {
     this.timer = Math.max(0, seconds);
@@ -483,6 +486,7 @@ export class Traffic {
   private freeSpace(ride: RideImpl) {
     const i = this.parked.indexOf(ride);
     if (i >= 0) this.parked.splice(i, 1);
+    if (ride.state === 'leaving' || ride.state === 'gone') ride.away = true;
   }
 
   /** Put a vehicle at the start of a route, if there is room there. */

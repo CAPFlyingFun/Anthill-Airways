@@ -82,6 +82,23 @@ export const HOME = {
     serve: 0.7,     // seconds per bag sold
   },
   storeChest: { cash: 600, xp: 80 },
+  /**
+   * ⛽ The Gas Station's plot (v0.45), east of the store: an open forecourt on the street (you walk to it along
+   * the sidewalk; cars pull up to its pumps at the curb). Its gate: helpers working (the yard's two, the café's
+   * two, the store's two) + planks.
+   */
+  gasPlot: { minX: 58, maxX: 80, minZ: -11, maxZ: 11 },
+  gasGate: { ants: 6, planks: 10 },
+  gas: {
+    pumps: [62.5, 70.5] as [number, number], // where the two pumps stand along the curb
+    pumpZ: 13.9,       // on the sidewalk, at the curb
+    rack: { x: 66.5, z: 11.6 },
+    interval: 9,       // seconds between cars
+    wants: [6, 10] as [number, number], // cans a car takes ($90 each: about $720 a car, a car a minute at each pump)
+    serve: 0.5,        // seconds per can pumped
+    truckEvery: 36,    // seconds between the tanker's deliveries (sooner if the depot is nearly dry)
+    truckLoad: 18,     // cans per delivery
+  },
 };
 
 /**
@@ -114,6 +131,12 @@ export const HOME_UNLOCKS: UnlockDef[] = [
   { id: 'ai-store-carrier', name: 'Store Carrier', icon: '🐜', cost: 2000, pos: [53.6, -4.4], requires: ['ai-store-gatherer'], level: 14 },
   { id: 'ai-store-cashier', name: 'Store Cashier', icon: '🛒', cost: 2500, pos: [41.4, 5.6], requires: ['ai-store-carrier'], level: 15 },
   { id: 'ai-store-banker', name: 'Store Banker', icon: '🏦', cost: 3500, pos: [42.3, -2.8], requires: ['ai-store-cashier'], level: 16 },
+  // ⛽ The Gas Station (v0.45): its plot (the tile is on the sidewalk in front of the lot), a Fuel Carrier ant
+  // (the depot -> the rack by the pumps), an Attendant (a person: pumps for you) and a Banker
+  { id: 'ai-gas', name: 'Gas Station Plot', icon: '⛽', cost: 9000, pos: [60.4, 13.4], requires: ['ai-store-gatherer'], level: 17 },
+  { id: 'ai-gas-carrier', name: 'Fuel Carrier', icon: '🐜', cost: 5000, pos: [62.0, 2.5], requires: ['ai-gas'], level: 18 },
+  { id: 'ai-gas-attendant', name: 'Pump Attendant', icon: '⛽', cost: 7000, pos: [74.6, 12.6], requires: ['ai-gas-carrier'], level: 19 },
+  { id: 'ai-gas-banker', name: 'Gas Banker', icon: '🏦', cost: 9000, pos: [70.0, 6.6], requires: ['ai-gas-attendant'], level: 20 },
 ];
 
 /** Old unlock ids -> new ones (see above). */

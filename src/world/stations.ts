@@ -197,9 +197,11 @@ export class ResourcePile {
     } else if (style === 'pantry') {
       // Act 5: the grocery delivery (crates on a pallet)
       source.add(box(2.6, 0.2, 1.5, mat(0x8a5a2b, 0.9), 0, 0.1, 0));
-      for (const [px, py] of [[-0.65, 0.55], [0.65, 0.55], [0, 1.25]]) source.add(box(1.2, 0.7, 1.2, mat(0xc89b5e, 0.9), px, py, 0));
+      // (⛽ the gas station's depot is the same pallet, with drums of fuel on it)
+      const fuel = type === 'fuel';
+      for (const [px, py] of [[-0.65, 0.55], [0.65, 0.55], [0, 1.25]]) source.add(box(1.2, 0.7, 1.2, mat(fuel ? 0x9b2226 : 0xc89b5e, fuel ? 0.6 : 0.9), px, py, 0));
       const stamp = new TextSprite(0.42, '#ffe7b0');
-      stamp.setText('🥬 FRESH DELIVERY');
+      stamp.setText(fuel ? '⛽ FUEL DEPOT' : '🥬 FRESH DELIVERY');
       stamp.sprite.position.set(0, 2.1, 0.2);
       source.add(stamp.sprite);
     } else if (style === 'beans') {

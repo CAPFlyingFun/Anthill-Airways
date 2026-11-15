@@ -80,7 +80,7 @@ const SELLER_NAME: Record<string, string> = { snack: 'SNACK SHOP', wrap: 'WRAP M
 /** What a machine's input is called in "needs …". */
 const NEEDS: Record<string, string> = {
   crumb: 'crumbs', leaf: 'leaves', sugar: 'sugar', fruit: 'fruit', obsidian: 'obsidian', laundry: 'laundry',
-  grocery: 'groceries', meat: 'meat', magma: 'magma', gem: 'gems', snackbox: 'snack boxes', beans: 'coffee beans',
+  fuel: 'fuel cans', grocery: 'groceries', meat: 'meat', magma: 'magma', gem: 'gems', snackbox: 'snack boxes', beans: 'coffee beans',
 };
 
 interface Status {
