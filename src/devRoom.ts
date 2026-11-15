@@ -624,7 +624,7 @@ export async function startDevRoom() {
   el.addEventListener('wheel', (e) => { view.dist = THREE.MathUtils.clamp(view.dist * (1 + Math.sign(e.deltaY) * 0.1), 4, 60); }, { passive: true });
   const people: Person[] = [];
   // (the defaults are the settings Joshua settled on, 2026-11-14: 40 walking, auto detail, baked, smart, pieces skipped)
-  const state = { model: MODELS[0], count: 40, looks: 'random' as 'random' | 'saved' | 'off', seed: 0, shadows: true, detail: 3, shapes: 'baked' as 'live' | 'baked' | 'off', underwear: false, auto: true, fps: true, smart: true, cull: true, fade: true, cloth: 'off' as 'off' | 'live' | 'freeze' | 'near', perChar: 0, motion: 'walk' as 'walk' | 'idle' | 'off', plain: false, sharp: true, loading: '', error: '', info: null as Loaded | null };
+  const state = { model: MODELS[0], count: 40, looks: 'random' as 'random' | 'saved' | 'off', seed: 0, shadows: true, detail: 3, shapes: 'baked' as 'live' | 'baked' | 'off', underwear: false, auto: true, fps: true, smart: true, cull: true, fade: true, target: 30 as 30 | 45 | 60, cloth: 'off' as 'off' | 'live' | 'freeze' | 'near', perChar: 0, motion: 'walk' as 'walk' | 'idle' | 'off', plain: false, sharp: true, loading: '', error: '', info: null as Loaded | null };
   const resize = () => {
     renderer.setPixelRatio(state.sharp ? Math.min(window.devicePixelRatio, 2) : 1);
     renderer.setSize(host.clientWidth, host.clientHeight, false);
@@ -1101,49 +1101,47 @@ export async function startDevRoom() {
   const frustum = new THREE.Frustum(), cullMatrix = new THREE.Matrix4(), cullBall = new THREE.Sphere(new THREE.Vector3(), 2.4), cullAt = new THREE.Vector3();
   let inView = 0;
   let drawn = 0;
-  /** FADE: where nobody is drawn any more, right now (FADE.end, or nearer while SMART FPS is holding the number drawn down). */
-  let fadeEnd = FADE.end;
+  /** Where nobody is drawn any more, right now: SMART FPS's draw range, or the fade's own end. */
+  let fadeEnd: number = FADE.end;
   const seen: Person[] = [];
   // --------------------------------------------------------------------------
-  // 🎚️ SMART FPS (v0.48; Joshua, 2026-11-14, from his stress tests: "a smart system that automatically adjusts
-  // the %... reasonably 80 on screen and if FPS drops below 30... it starts moving closer 3% to 2% and 2% to 1, and
-  // if still not enough, everything to 1%, and if still laggy (really older phones), will lower the number of
-  // people drawn in the screen until FPS is good, while only doing the closest").
+  // 🎚️ SMART FPS (v0.52; Joshua, 2026-11-14: "it only draws in a 3D 20m radius around the camera, and if FPS is
+  // better... it will slowly (maybe in 1m increments - per second) increase the draw range, but if the FPS drops...
+  // will freeze the extra range, and if it keeps dropping, then it will start lowering the range 1m every 0.5s",
+  // and then "the minimum +/-10% of 30FPS... could add target FPS as well").
   //
-  // A ladder of steps, climbed one at a time while the frame rate is under SMART.low and come back down, slowly,
-  // once it has been over SMART.high for a while:
-  //   0  as the Auto table says, the nearest SMART.most drawn (his tested limit for everybody in view)
-  //   1  everybody one level lighter than her distance asks (3% -> 2%, 2% -> 1%)
-  //   2  everybody at the lightest level
-  //   3+ fewer people drawn, ten fewer a step, always the nearest
-  // A step back up that is undone straight away (the phone could not hold it) doubles how long it waits before
-  // trying that again, so it settles instead of see-sawing.
+  // One dial, the DRAW RANGE: how far out people are drawn, measured from the camera or from the player's spot,
+  // whichever is nearer to her (the room has no player: its middle, where the camera looks, stands in). The last
+  // SMART.edge of the range is the fade, so nobody pops. Twice a second the frame rate is looked at:
+  //   10% or more over the target (or as fast as this screen goes)  -> the range grows 1 m a second
+  //   within 10% of the target                                       -> it holds
+  //   10% or more under                                              -> it shrinks 1 m every half second
+  //   a third or more under                                          -> twice as fast
+  // (v0.48 to v0.51 was a ladder instead: everybody a level lighter, then everybody at the lightest, then ten
+  // fewer drawn a step. Joshua: "Let's leave the % alone". It is in the git history at b507cda.)
   // --------------------------------------------------------------------------
-  const SMART = { low: 30, high: 48, every: 1.5, most: 80, fewer: 10, least: 10, patience: 4 };
-  const smart = { step: 0, shift: 0, most: SMART.most, t: 0, frames: 0, ms: 0, good: 0, need: SMART.patience, rose: 0 };
-  const smartSet = (step: number) => {
-    const top = 2 + Math.ceil((SMART.most - SMART.least) / SMART.fewer);
-    smart.step = Math.min(top, Math.max(0, step));
-    smart.shift = smart.step >= 2 ? TABLE.length : smart.step; // (2: past the table's end, so everybody is at its lightest)
-    smart.most = Math.max(SMART.least, SMART.most - Math.max(0, smart.step - 2) * SMART.fewer);
-  };
-  /** One frame (`ms` = the real time since the last one): every SMART.every seconds, look at the rate and move a step. */
+  const SMART = { start: 20 * METRE, least: 5 * METRE, most: 60 * METRE, edge: 3 * METRE, every: 0.5, grow: 1 * METRE, shrink: 2 * METRE, band: 0.1 };
+  const smart = { range: SMART.start, vel: 0, t: 0, frames: 0, ms: 0, cap: 0, rate: 0, reach: 0 };
+  const smartReset = () => { smart.range = SMART.start; smart.vel = 0; smart.t = 0; smart.frames = 0; smart.ms = 0; };
+  /** One frame (`ms` = the real time since the last one): the range moves; every SMART.every seconds its direction is chosen. */
   const smartTick = (ms: number) => {
-    if (!state.fps) { if (smart.step) smartSet(0); return; }
-    if (state.loading || ms > 1000) return;
+    if (!state.fps) { smart.vel = 0; return; }
+    if (document.hidden || ms > 3000) { smart.t = 0; smart.frames = 0; smart.ms = 0; return; } // (back from the background: not a frame time)
+    // (no growing past the furthest person there is to draw: an empty range would let a crowd in all at once)
+    const room = Math.min(SMART.most, smart.reach + SMART.edge);
+    smart.range = THREE.MathUtils.clamp(smart.range + (smart.vel > 0 && smart.range >= room ? 0 : smart.vel) * (ms / 1000), SMART.least, SMART.most);
     smart.frames++; smart.ms += ms; smart.t += ms / 1000;
     if (smart.t < SMART.every) return;
     const rate = (smart.frames * 1000) / smart.ms;
     smart.t = 0; smart.frames = 0; smart.ms = 0;
-    smart.rose += SMART.every;
-    if (rate < SMART.low) {
-      // (too slow. If it had only just come back up a step, that step is one this phone can't hold: wait twice as long next time)
-      if (smart.rose < SMART.every * 4) smart.need = Math.min(64, smart.need * 2);
-      smart.good = 0;
-      smartSet(smart.step + 1);
-    } else if (rate > SMART.high && smart.step > 0) {
-      if (++smart.good >= smart.need) { smart.good = 0; smart.rose = 0; smartSet(smart.step - 1); }
-    } else smart.good = 0;
+    smart.rate = rate;
+    // (the fastest this screen has gone: a phone in Low Power Mode never passes 30, a 60 Hz screen never passes 60,
+    // so "10% over the target" could never come. Running flat out at the screen's own limit counts as over.)
+    smart.cap = Math.max(smart.cap, Math.min(rate, 125));
+    const target = state.target;
+    if (rate < target * (1 - SMART.band)) smart.vel = rate < target * 0.67 ? -SMART.shrink * 2 : -SMART.shrink;
+    else if (rate >= target * (1 + SMART.band) || rate >= smart.cap * 0.95) smart.vel = SMART.grow;
+    else smart.vel = 0;
   };
   let building = 0;
   let lastSrc: Loaded | null = null;
@@ -1245,7 +1243,7 @@ export async function startDevRoom() {
   const stressSettings = () => [
     state.auto ? (TABLE === AUTO ? 'Auto' : TABLE === AUTO_LITE ? 'Auto lite' : 'Auto live') : `${state.detail}%`,
     `shapes ${state.auto && TABLE === AUTO_LIVE ? 'live' : state.shapes}`, `shadows ${state.shadows ? 'on' : 'off'}`, `motion ${state.motion}`,
-    `out of view ${state.cull ? 'not drawn' : 'drawn'}`, `smart FPS ${state.fps ? 'on' : 'off'}`, `far away ${state.fade ? (stress.mode === 'view' ? 'drawn (no fade in this test)' : 'fades out 15-18 m') : 'drawn'}`, state.cloth === 'off' ? '' : `cloth ${state.cloth}`, `sharpness ${state.sharp ? '2x' : '1x'}`,
+    `out of view ${state.cull ? 'not drawn' : 'drawn'}`, stress.mode === 'view' ? 'everyone drawn (no smart FPS or fade in this test)' : `smart FPS ${state.fps ? `on, target ${state.target}` : 'off'} · far away ${state.fade ? 'fades out' : 'cut off'}`, state.cloth === 'off' ? '' : `cloth ${state.cloth}`, `sharpness ${state.sharp ? '2x' : '1x'}`,
   ].filter(Boolean).join(' · ');
   const stressEnd = (why: string) => {
     if (!stress.on) return;
@@ -1297,7 +1295,7 @@ export async function startDevRoom() {
     stress.results.push({ n, fps, seen });
     const shownNow = people.filter((q) => q.root.visible).length;
     const who = (stress.mode === 'room' ? `${n} (${inView} in view${shownNow < inView ? `, ${shownNow} drawn` : ''})` : shownNow < n ? `${n} (${shownNow} drawn)` : `${n}`);
-    const note = state.fps && smart.step ? ` · smart ${smart.step}` : '';
+    const note = state.fps && stress.mode !== 'view' ? ` · range ${(smart.range / METRE).toFixed(0)} m` : '';
     stress.t = 0; stress.frames = 0; stress.ms = 0;
     if (fps < STRESS.stopBelow) {
       stressEnd(`${who} = <${STRESS.stopBelow} fps 🛑`);
@@ -1381,7 +1379,8 @@ export async function startDevRoom() {
   const clothBtn = button(optRow, '', () => { state.cloth = state.cloth === 'off' ? 'live' : state.cloth === 'live' ? 'freeze' : state.cloth === 'freeze' ? 'near' : 'off'; sync(); void rebuild(); });
   const cullBtn = button(optRow, '', () => { state.cull = !state.cull; sync(); });
   const fadeBtn = button(optRow, '', () => { state.fade = !state.fade; sync(); void rebuild(); });
-  const fpsBtn = button(optRow, '', () => { state.fps = !state.fps; smartSet(0); smart.need = SMART.patience; sync(); });
+  const fpsBtn = button(optRow, '', () => { state.fps = !state.fps; smartReset(); sync(); });
+  const targetBtn = button(optRow, '', () => { state.target = state.target === 30 ? 45 : state.target === 45 ? 60 : 30; sync(); });
   const sharpBtn = button(optRow, '', () => { state.sharp = !state.sharp; sync(); resize(); });
   const sync = () => {
     modelBtns.forEach((b, i) => b.classList.toggle('on', MODELS[i] === state.model));
@@ -1415,10 +1414,12 @@ export async function startDevRoom() {
     stressCopyBtn.style.display = stress.lines.length ? '' : 'none';
     cullBtn.textContent = `Out of view: ${state.cull ? 'not drawn' : 'drawn'}`;
     cullBtn.classList.toggle('on', state.cull);
-    fadeBtn.textContent = `Far away: ${state.fade ? 'fades out 15-18 m' : 'drawn'}`;
+    fadeBtn.textContent = `Far away: ${state.fade ? 'fades out' : 'no fade'}`;
     fadeBtn.classList.toggle('on', state.fade);
     fpsBtn.textContent = `Smart FPS: ${state.fps ? 'on' : 'off'}`;
     fpsBtn.classList.toggle('on', state.fps);
+    targetBtn.textContent = `Target: ${state.target} FPS`;
+    targetBtn.classList.toggle('on', state.fps);
   };
   sync();
   void rebuild();
@@ -1448,8 +1449,7 @@ export async function startDevRoom() {
         while (band > 0 && d < TABLE[band - 1].within * 0.95) band--;
         while (band < TABLE.length - 1 && d > TABLE[band].within * 1.05) band++;
         p.band = band;
-        // (SMART FPS: when the frame rate is low everybody is drawn a level or two lighter than her distance asks)
-        const level = Math.min(TABLE.length - 1, band + smart.shift);
+        const level = band;
         if (level !== p.level) {
           p.level = level;
           for (const l of p.lods) {
@@ -1533,22 +1533,25 @@ export async function startDevRoom() {
     }
     seen.length = 0;
     // (FADE: off for the ALL IN VIEW stress test, which is there to count how many can be drawn at once)
-    const fading = state.fade && !(stress.on && stress.mode === 'view');
-    // (the stretch she fades over: half the way, 9 m of 18; narrower the more SMART FPS has pulled the end in, so
-    // the few still drawn then are drawn whole)
-    const fadeBand = fadeEnd * (1 - FADE.start / FADE.end) * (fadeEnd / FADE.end);
+    const whole = stress.on && stress.mode === 'view';
+    const fading = state.fade && !whole, ranging = state.fps && !whole;
+    // (where nobody is drawn any more: SMART FPS's draw range, or without it the fade's own 18 m; and the stretch
+    // before it that she fades over. Smart FPS without the fade is a hard edge.)
+    fadeEnd = ranging ? smart.range : fading ? FADE.end : Infinity;
+    const fadeBand = !fading ? 0 : ranging ? SMART.edge : FADE.end - FADE.start;
+    let reach = 0;
     inView = 0;
     for (const p of people) {
       let show = !state.cull || frustum.intersectsSphere(cullBall.set(cullAt.set(p.root.position.x, 1.4, p.root.position.z), cullBall.radius));
       if (show) inView++;
       let f = 1;
-      if (fading) {
-        // (how much of her is drawn: all of her up to where the fade starts, none where it ends)
+      if (fading || ranging) {
         // (v0.51, Joshua: "if I zoom out too far, they all disappear... make it distance away from the player's
         // character and the camera, that way there is always people shown even zoomed way out". The room has no
         // player, so the spot the camera looks at, its middle, stands in for one: she is as far as the nearer of the two.)
         p.far = Math.min(p.dist ?? 0, Math.hypot(p.root.position.x, p.root.position.z));
-        f = THREE.MathUtils.clamp((fadeEnd - p.far) / fadeBand, 0, 1);
+        if (show && p.far > reach) reach = p.far;
+        f = fadeBand > 0 ? THREE.MathUtils.clamp((fadeEnd - p.far) / fadeBand, 0, 1) : p.far < fadeEnd ? 1 : 0;
         if (f <= 0) show = false;
       }
       p.fade.value = f;
@@ -1556,23 +1559,7 @@ export async function startDevRoom() {
       if (show) seen.push(p);
     }
     drawn = seen.length;
-    if (fading) {
-      // (SMART FPS: of those in view only the nearest `smart.most` are drawn. With the fade that is done by
-      // distance: the fade's end is pulled in to where one too many stands, a little each frame, so nobody pops)
-      let want = FADE.end;
-      if (state.fps && seen.length > smart.most) {
-        seen.sort((a, b) => (a.far ?? 0) - (b.far ?? 0));
-        want = Math.max(FADE.least, seen[smart.most].far ?? FADE.end);
-      } else if (state.fps && seen.length >= smart.most - 2) want = fadeEnd; // (just right: hold it there)
-      fadeEnd = Math.min(FADE.end, fadeEnd + (want - fadeEnd) * Math.min(1, dt * (want < fadeEnd ? 3 : 0.6)));
-    } else {
-      fadeEnd = FADE.end;
-      if (state.fps && seen.length > smart.most) {
-        seen.sort((a, b) => (a.dist ?? 0) - (b.dist ?? 0));
-        for (let i = smart.most; i < seen.length; i++) seen[i].root.visible = false;
-        drawn = smart.most;
-      }
-    }
+    smart.reach = reach;
     // (someone not drawn is taken out of the scene: 400 people are some 40,000 bones, and three.js works out where
     // every bone in the scene is each frame, drawn or not. That was most of the cost of a big crowd out of view.)
     for (const p of people) {
@@ -1624,8 +1611,9 @@ export async function startDevRoom() {
       const lines = [
         `slowest frame ${worstShown.toFixed(0)} ms`,
         `${people.length} x ${state.model.label}${state.cull ? ` · ${inView} in view` : ''}${drawn < inView ? ` · ${drawn} drawn` : ''}`,
-        state.fps ? `smart FPS: ${smart.step === 0 ? 'full detail' : smart.step === 1 ? 'one level lighter' : smart.step === 2 ? 'all at the lightest' : `all at the lightest · at most ${smart.most} drawn`}` : '',
-        state.fade ? (stress.on && stress.mode === 'view' ? 'fade: off for this test' : `fade: from ${((fadeEnd - fadeEnd * (1 - FADE.start / FADE.end) * (fadeEnd / FADE.end)) / METRE).toFixed(1)} m · gone at ${(fadeEnd / METRE).toFixed(1)} m`) : '',
+        stress.on && stress.mode === 'view' ? 'smart FPS and fade: off for this test'
+          : state.fps ? `smart FPS: drawing to ${(smart.range / METRE).toFixed(0)} m${state.fade ? ' (fading the last 3)' : ''} · ${smart.vel > 0 ? (smart.range >= Math.min(SMART.most, smart.reach + SMART.edge) ? 'everyone in reach' : 'growing') : smart.vel < 0 ? 'shrinking' : 'holding'} · target ${state.target}`
+          : state.fade ? 'fade: from 15 m · gone at 18 m' : '',
         `${(r.triangles / 1e6).toFixed(2)}M triangles drawn · ${r.calls} draw calls`,
         state.auto && people.some((q) => q.lods.length)
           ? `auto${TABLE === AUTO ? '' : TABLE === AUTO_LITE ? ' lite' : ' live'}: ${TABLE.map((a, k) => [`${a.detail}%${a.live ? ' live' : ''}`, people.filter((q) => q.level === k).length] as const).filter(([, c]) => c > 0).map(([d, c]) => `${c} at ${d}`).join(' · ')}`
