@@ -53,7 +53,7 @@ const HEIGHT = 2.8; // people are this tall in the game
  * The model FILE is never changed: when it has loaded, a lighter triangle list is worked out here for
  * the same points (so her skeleton, her shapes and her outfit all still fit), and swapped in.
  */
-const DETAILS = [100, 50, 25, 10, 5, 3]; // (3% of the builder body is about 9k triangles: the "under 10k" gameplay target)
+const DETAILS = [100, 50, 25, 10, 5, 3, 2, 1]; // (3% of the builder body is about 9k triangles: the "under 10k" gameplay target)
 const NO_MORPHS = {};
 /**
  * AUTO DETAIL (v0.35; Joshua: "closer to the camera the higher %, and further away less"). The distance is
@@ -71,9 +71,21 @@ const AUTO = [
   { within: 15 * METRE, detail: 5 },   // 12-15 m
   { within: Infinity, detail: 3 },     // 15 m and beyond
 ];
+/**
+ * AUTO LITE (v0.39; Joshua, after 40 people at 3% held 25-30 FPS on his phone with every shape live:
+ * "0-3m = 3% + Live On / 4-8m = 2% + Live Off / >=9m = 1% + Live Off"). Everyone is light; only the few people
+ * right by the camera have all 43 of their body shapes blended live, and the rest are baked as in AUTO.
+ */
+const AUTO_LITE: { within: number; detail: number; live?: boolean }[] = [
+  { within: 4 * METRE, detail: 3, live: true }, // 0-3 m (up to 4)
+  { within: 9 * METRE, detail: 2 },             // 4-8 m (up to 9)
+  { within: Infinity, detail: 1 },              // 9 m and beyond
+];
+/** The table in use: AUTO or AUTO_LITE (the 'Auto lite' button). */
+let TABLE: { within: number; detail: number; live?: boolean }[] = AUTO;
 /** A person this far down the table (5% or lighter) lets go of her heaviest bodies again, to save memory. */
 const AUTO_DROP_FROM = 3;
-interface GeoKeep { index0: THREE.BufferAttribute | null; morph0: THREE.BufferGeometry['morphAttributes']; lods: Map<string, THREE.BufferAttribute>; auto?: THREE.BufferAttribute[]; flat?: Float32Array | null }
+interface GeoKeep { index0: THREE.BufferAttribute | null; morph0: THREE.BufferGeometry['morphAttributes']; lods: Map<string, THREE.BufferAttribute>; auto?: THREE.BufferAttribute[]; flat?: Float32Array | null; liveGeo?: THREE.BufferGeometry }
 
 /**
  * JOSHUA'S FIRST THREE LOOKS, saved in the builder on 2026-11-14 (its export, traddomium-characters.json:
@@ -384,7 +396,12 @@ function paintedMaterial(base: THREE.Material, box: THREE.Box3, look: Look, fine
 }
 
 /** One of a person's meshes under AUTO detail: its baked body per level (made when first needed), its two materials. */
-interface PersonLod { mesh: THREE.Mesh; geos: (THREE.BufferGeometry | null)[]; make: (level: number) => THREE.BufferGeometry; fine?: THREE.Material | THREE.Material[]; plain?: THREE.Material | THREE.Material[] }
+interface MorphSet { dict: Record<string, number>; influences: number[] }
+interface PersonLod {
+  mesh: THREE.Mesh; geos: (THREE.BufferGeometry | null)[]; make: (level: number) => THREE.BufferGeometry; fine?: THREE.Material | THREE.Material[]; plain?: THREE.Material | THREE.Material[];
+  /** AUTO LITE: her shape weights for a baked level (her four motion shapes) and for a live one (all 43), and her motion springs' handle on them. */
+  bakedSet?: MorphSet; liveSet?: MorphSet; soft?: { influences: number[]; at: number[] };
+}
 
 interface Person {
   root: THREE.Group;
@@ -678,7 +695,10 @@ export async function startDevRoom() {
         };
         if (index && state.detail < 100) index = lodFor(state.detail);
         // (AUTO: the three levels a person switches between by her distance, ready for the baking)
-        keep.auto = index0 && state.auto ? AUTO.map((a) => lodFor(a.detail)) : undefined;
+        keep.auto = index0 && state.auto ? TABLE.map((a) => lodFor(a.detail)) : undefined;
+        // (AUTO LITE's live body is one for everybody near the camera; a new one for each change of settings)
+        keep.liveGeo?.dispose();
+        keep.liveGeo = undefined;
         const morphs = state.shapes === 'live' ? keep.morph0 : NO_MORPHS;
         if (g.index === index && g.morphAttributes === morphs) return;
         g.dispose(); // (so nothing of the old setting stays on the graphics chip: her shapes alone are a big texture)
@@ -847,14 +867,37 @@ export async function startDevRoom() {
             // (...each one baked the first time she needs it, not all seven up front: her full-detail body is
             // several megabytes, and most people never come that close)
             const geos: (THREE.BufferGeometry | null)[] = levels.map(() => null);
-            const make = (k: number) => bakeGeometry(source, weights, live, levels[k], AUTO[k].detail, soften);
+            const keep = source.userData.devRoom as GeoKeep;
+            // (a LIVE level: the model's own points and all its shapes, with that level's lighter triangle list.
+            // One body shared by everyone that close, since its shapes are one big picture on the graphics chip;
+            // each person's own sizes are her mesh's weights)
+            const liveBody = (k: number) => {
+              if (!keep.liveGeo) {
+                const lg = new THREE.BufferGeometry();
+                for (const [name, a] of Object.entries(source.attributes)) lg.setAttribute(name, a);
+                lg.setIndex(levels[k]);
+                lg.morphAttributes = keep.morph0;
+                lg.morphTargetsRelative = source.morphTargetsRelative;
+                lg.boundingBox = source.boundingBox; lg.boundingSphere = source.boundingSphere;
+                lg.userData.devRoomShared = true;
+                keep.liveGeo = lg;
+              }
+              return keep.liveGeo;
+            };
+            const make = (k: number) => (TABLE[k].live && dict ? liveBody(k) : bakeGeometry(source, weights, live, levels[k], TABLE[k].detail, soften));
             auto = { mesh: mesh as THREE.Mesh, geos, make };
+            if (dict && TABLE.some((a) => a.live)) {
+              const influences = new Array<number>(Object.keys(dict).length).fill(0);
+              for (const [name, v] of Object.entries(shape)) if (dict[name] !== undefined) influences[dict[name]] = v;
+              auto.liveSet = { dict, influences };
+            }
             lods.push(auto);
             mesh.geometry = geos[geos.length - 1] = make(geos.length - 1);
           } else {
             mesh.geometry = bakeGeometry(source, weights, live, undefined, undefined, soften);
           }
           if (live.length) mesh.updateMorphTargets(); // (only her motion shapes now, by name)
+          if (auto && mesh.morphTargetDictionary && mesh.morphTargetInfluences) auto.bakedSet = { dict: mesh.morphTargetDictionary, influences: mesh.morphTargetInfluences };
         }
         if (state.plain) {
           // (the cheapest material there is, one flat colour: is it her skin and outfit that cost?)
@@ -885,7 +928,7 @@ export async function startDevRoom() {
     scene.add(root);
     const ring = Math.floor(i / 6);
     const radius = 4 + ring * 3.2;
-    const person: Person = { root, lods, level: AUTO.length - 1, angle: (i % 6) * (Math.PI / 3) + ring * 0.5, radius, speed: ((2.0 - ring * 0.15) / radius) * (ring % 2 ? -1 : 1), phase: r() * 6 };
+    const person: Person = { root, lods, level: TABLE.length - 1, angle: (i % 6) * (Math.PI / 3) + ring * 0.5, radius, speed: ((2.0 - ring * 0.15) / radius) * (ring % 2 ? -1 : 1), phase: r() * 6 };
     if (def.builder && state.motion !== 'off') {
       try {
         const body = inner.children[0];
@@ -914,7 +957,10 @@ export async function startDevRoom() {
           const mesh = o as THREE.Mesh;
           const d = mesh.morphTargetDictionary;
           if (!mesh.isMesh || !mesh.visible || !d || !mesh.morphTargetInfluences) return;
-          soft.push({ influences: mesh.morphTargetInfluences, at: MOTION_TARGETS.map((name) => d[name] ?? -1) });
+          const entry = { influences: mesh.morphTargetInfluences, at: MOTION_TARGETS.map((name) => d[name] ?? -1) };
+          soft.push(entry);
+          const lod = lods.find((l) => l.mesh === mesh);
+          if (lod) lod.soft = entry; // (so a change of level can point her springs at that level's weights)
         });
         person.live = {
           rig, measure, carry: look.bump / 100, perUnit: inBind / Math.max(1e-6, inRoom), walked: r() * 10, out: [], out2: [],
@@ -955,7 +1001,7 @@ export async function startDevRoom() {
         mesh.skeleton?.dispose();
       });
       for (const l of p.lods) {
-        for (const geo of l.geos) geo?.dispose(); // (her other detail levels)
+        for (const geo of l.geos) if (!geo?.userData.devRoomShared) geo?.dispose(); // (her other detail levels; the shared live body isn't hers)
         for (const set of [l.fine, l.plain]) for (const m of set ? (Array.isArray(set) ? set : [set]) : []) m.dispose();
       }
       p.live?.rig.dispose();
@@ -983,7 +1029,15 @@ export async function startDevRoom() {
   const modelBtns = MODELS.map((def) => button(modelRow, def.label, () => { state.model = def; sync(); void rebuild(); }));
   const countBtns = COUNTS.map((n) => button(countRow, String(n), () => { state.count = n; sync(); void rebuild(); }));
   const detailBtns = DETAILS.map((d) => button(detailRow, `${d}%`, () => { state.detail = d; state.auto = false; sync(); void rebuild(); }));
-  const autoBtn = button(detailRow, 'Auto', () => { state.auto = !state.auto; if (state.auto) { state.detail = 10; state.shapes = 'baked'; } sync(); void rebuild(); });
+  const setAuto = (table: typeof TABLE) => {
+    const on = !(state.auto && TABLE === table);
+    state.auto = on;
+    TABLE = on ? table : AUTO;
+    if (on) { state.detail = table === AUTO ? 10 : 3; state.shapes = 'baked'; }
+    sync(); void rebuild();
+  };
+  const autoBtn = button(detailRow, 'Auto', () => setAuto(AUTO));
+  const liteBtn = button(detailRow, 'Auto lite', () => setAuto(AUTO_LITE));
   const morphBtn = button(optRow, '', () => { state.looks = state.looks === 'random' ? 'saved' : state.looks === 'saved' ? 'off' : 'random'; sync(); void rebuild(); });
   const shuffleBtn = button(optRow, '🎲 Shuffle', () => { state.seed++; state.looks = 'random'; sync(); void rebuild(); });
   const shadowBtn = button(optRow, '', () => { state.shadows = !state.shadows; sync(); });
@@ -1003,7 +1057,8 @@ export async function startDevRoom() {
     shadowBtn.classList.toggle('on', state.shadows);
     sun.castShadow = state.shadows;
     detailBtns.forEach((b, i) => b.classList.toggle('on', !state.auto && DETAILS[i] === state.detail));
-    autoBtn.classList.toggle('on', state.auto);
+    autoBtn.classList.toggle('on', state.auto && TABLE === AUTO);
+    liteBtn.classList.toggle('on', state.auto && TABLE === AUTO_LITE);
     shapeBtn.textContent = `Body shapes: ${state.shapes}`;
     shapeBtn.classList.toggle('on', state.shapes !== 'off');
     motionBtn.textContent = `Motion: ${state.motion}`;
@@ -1040,16 +1095,23 @@ export async function startDevRoom() {
         // its edge, so someone walking along an edge doesn't flicker between two)
         const d = Math.hypot(camera.position.x - p.root.position.x, camera.position.y - 1.4, camera.position.z - p.root.position.z); // (to her middle)
         let level = p.level;
-        while (level > 0 && d < AUTO[level - 1].within * 0.95) level--;
-        while (level < AUTO.length - 1 && d > AUTO[level].within * 1.05) level++;
+        while (level > 0 && d < TABLE[level - 1].within * 0.95) level--;
+        while (level < TABLE.length - 1 && d > TABLE[level].within * 1.05) level++;
         if (level !== p.level) {
           p.level = level;
           for (const l of p.lods) {
             l.mesh.geometry = l.geos[level] ??= l.make(level);
             // (her skin's fine bump picture only on the heavier levels: see paintedMaterial)
-            const mat = AUTO[level].detail >= 25 ? l.fine : l.plain;
+            const mat = TABLE[level].detail >= 25 ? l.fine : l.plain;
             if (mat) l.mesh.material = mat;
-            if (level >= AUTO_DROP_FROM) for (let k = 0; k < 2; k++) { l.geos[k]?.dispose(); l.geos[k] = null; }
+            if (l.liveSet) {
+              // (AUTO LITE: all her shapes when she is drawn live, her four motion shapes when she is baked)
+              const set = TABLE[level].live ? l.liveSet : l.bakedSet;
+              l.mesh.morphTargetDictionary = set?.dict;
+              l.mesh.morphTargetInfluences = set?.influences;
+              if (l.soft) { l.soft.influences = set?.influences ?? []; l.soft.at = MOTION_TARGETS.map((name) => set?.dict[name] ?? -1); }
+            }
+            if (TABLE === AUTO && level >= AUTO_DROP_FROM) for (let k = 0; k < 2; k++) { l.geos[k]?.dispose(); l.geos[k] = null; }
           }
         }
       }
@@ -1110,7 +1172,7 @@ export async function startDevRoom() {
         `${people.length} x ${state.model.label}`,
         `${(r.triangles / 1e6).toFixed(2)}M triangles drawn · ${r.calls} draw calls`,
         state.auto && people.some((q) => q.lods.length)
-          ? `auto: ${AUTO.map((a, k) => [a.detail, people.filter((q) => q.level === k).length]).filter(([, c]) => c > 0).map(([d, c]) => `${c} at ${d}%`).join(' · ')}`
+          ? `auto${TABLE === AUTO ? '' : ' lite'}: ${TABLE.map((a, k) => [`${a.detail}%${a.live ? ' live' : ''}`, people.filter((q) => q.level === k).length] as const).filter(([, c]) => c > 0).map(([d, c]) => `${c} at ${d}`).join(' · ')}`
           : state.perChar ? `each character: ${(state.perChar / 1000).toFixed(1)}k triangles as drawn` : '',
         info ? `the file: ${(info.tris / 1000).toFixed(0)}k triangles · ${info.mb.toFixed(1)} MB · loaded in ${(info.ms / 1000).toFixed(1)} s` : '',
         `screen ${renderer.domElement.width} x ${renderer.domElement.height}`,
