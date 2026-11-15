@@ -98,7 +98,9 @@ skipped** (the underwear pieces under the painted outfit, about half the body's 
 posing code (a copy in `src/vendor/ccbs/`, see its README): she breathes and sways standing, and walks with her
 weight, on her bones, so it works the same with baked shapes. v0.33: Detail **5%** and **3%** (about 11.8k and 7.1k triangles a character with
 hidden pieces skipped), **Smart detail** (her head keeps three times her body's share of triangles, same total), counts of
-30 and 40, and an "each character: N triangles as drawn" line. Baked bodies keep four motion shapes live (the belly's sag,
+30 and 40, and an "each character: N triangles as drawn" line. v0.34: Smart detail is an **importance map**: her face and hands count 3x, her bust 3x, her belly 2x and her navel 6x
+(found from her own body shapes: the points the navel, breastGrow and belly shapes move), fading smoothly so there are
+no seams; the lightening also respects the skin picture's layout, and light baked bodies get corrected lighting directions. Baked bodies keep four motion shapes live (the belly's sag,
 drop and swing, the bust's drop), driven by the builder's spring rules; the other 39 are baked in. Nothing in the room touches the save. Code: `src/devRoom.ts`. Remove when the
 character decision is made.
 

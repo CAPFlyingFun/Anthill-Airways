@@ -131,8 +131,11 @@ function rng(seed: number) {
  * body, distance from her middle). One compiled program for everyone; each
  * clone has its own two colours.
  */
-function paintedMaterial(base: THREE.Material, box: THREE.Box3, look: Look) {
+function paintedMaterial(base: THREE.Material, box: THREE.Box3, look: Look, fine = true) {
   const m = base.clone();
+  // (her skin's bump detail is drawn from a second picture, the normal map. On a much lighter body the
+  // picture no longer lines up with the big triangles, and it shows as dark blotches on her face: off below 25%)
+  if (!fine) (m as THREE.MeshStandardMaterial).normalMap = null;
   const uniforms = {
     uTop: { value: new THREE.Color(look.top) },
     uLegs: { value: new THREE.Color(look.legs) },
@@ -170,7 +173,7 @@ function paintedMaterial(base: THREE.Material, box: THREE.Box3, look: Look) {
       .replace('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\nnormal = normalize(mix(normal, nonPerturbedNormal, drCloth));')
       .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(roughnessFactor, 0.85, drCloth);');
   };
-  m.customProgramCacheKey = () => 'devroom-painted';
+  m.customProgramCacheKey = () => (fine ? 'devroom-painted' : 'devroom-painted-plain');
   m.userData.devRoomOwn = true;
   return m;
 }
@@ -386,22 +389,62 @@ export async function startDevRoom() {
             const target = Math.max(3, Math.floor((index.count * state.detail) / 100 / 3) * 3);
             let lighter: Uint32Array;
             if (smart) {
-              // Split her triangles at the neck (86% of her height), and lighten each part by itself; the
-              // edge between them is kept as it is ('LockBorder'), so the two parts still meet
-              const neckY = src.box.min.y + (src.box.max.y - src.box.min.y) * 0.86;
-              const head: number[] = [], body: number[] = [];
-              for (let t = 0; t < all.length; t += 3) {
-                const y = (points[all[t] * 3 + 1] + points[all[t + 1] * 3 + 1] + points[all[t + 2] * 3 + 1]) / 3;
-                const part = y > neckY ? head : body;
-                part.push(all[t], all[t + 1], all[t + 2]);
+              // WHICH PARTS OF HER KEEP THEIR TRIANGLES (v0.34; Joshua: "keep certain parts masked as is, but
+              // other parts can be consolidated", "protect the hands"). Every point of her gets an IMPORTANCE:
+              // 1 on a back or a thigh, more on her face, her hands, her bust, her belly, most on her navel.
+              // Her own body shapes say where those are: the points the navel shapes move ARE her navel, the
+              // points 'breastGrow' moves are her bust, the points 'belly' moves are her belly (and each
+              // fades out smoothly, as the shape does). Her head and hands are found by where they are.
+              //
+              // The lightening then works on a copy of her in which every point is pushed out from her middle
+              // by its importance: an important part looks bigger to it, so a mistake there counts for more
+              // and it keeps more of its triangles. Importance changes smoothly, so there are no seams between
+              // parts. Only the choice of triangles comes from the copy: her real points are never moved.
+              const dict = (mesh as THREE.Mesh).morphTargetDictionary ?? {};
+              const morphs = (keep.morph0.position ?? []) as THREE.BufferAttribute[];
+              const n = pos.count;
+              const B = src.box;
+              const H = B.max.y - B.min.y;
+              const cx = (B.min.x + B.max.x) / 2, cy = (B.min.y + B.max.y) / 2, cz = (B.min.z + B.max.z) / 2;
+              const ease = (k: number) => { const u = Math.min(1, Math.max(0, k)); return u * u * (3 - 2 * u); };
+              const weight = new Float32Array(n).fill(1);
+              for (let v = 0; v < n; v++) {
+                const xr = Math.abs(points[v * 3] - cx) / H, yr = (points[v * 3 + 1] - B.min.y) / H;
+                const head = ease((yr - 0.84) / 0.04);                                             // above her neck
+                const hand = ease((xr - 0.125) / 0.015) * ease((0.57 - yr) / 0.02) * ease((yr - 0.38) / 0.02); // out at her sides, below her wrists
+                weight[v] = 1 + 2 * Math.max(head, hand);
               }
-              const headTarget = Math.min(head.length, Math.floor((head.length * Math.min(1, (state.detail / 100) * 3)) / 3) * 3);
-              const bodyTarget = Math.max(3, Math.floor((target - headTarget) / 3) * 3);
-              const [h2] = MeshoptSimplifier.simplify(new Uint32Array(head), points, 3, Math.max(3, headTarget), 1, ['LockBorder']);
-              const [b2] = MeshoptSimplifier.simplify(new Uint32Array(body), points, 3, bodyTarget, 1, ['LockBorder']);
-              lighter = new Uint32Array(h2.length + b2.length);
-              lighter.set(h2, 0);
-              lighter.set(b2, h2.length);
+              const mark = (names: string[], extra: number, full: number) => {
+                for (const name of names) {
+                  const m = morphs[dict[name]];
+                  if (!m) continue;
+                  let most = 0;
+                  const moved = new Float32Array(n);
+                  for (let v = 0; v < n; v++) { moved[v] = Math.hypot(m.getX(v), m.getY(v), m.getZ(v)); if (moved[v] > most) most = moved[v]; }
+                  if (!(most > 0)) continue;
+                  // (full importance where the shape moves a point at least `full` of its most, fading to none)
+                  for (let v = 0; v < n; v++) weight[v] = Math.max(weight[v], 1 + extra * ease(moved[v] / most / full));
+                }
+              };
+              mark(['belly'], 1, 0.5);
+              mark(['breastGrow'], 2, 0.3);
+              mark(['navelIn', 'navelOut', 'navelFlat'], 5, 0.3);
+              const pushed = new Float32Array(n * 3);
+              for (let v = 0; v < n; v++) {
+                pushed[v * 3] = cx + (points[v * 3] - cx) * weight[v];
+                pushed[v * 3 + 1] = cy + (points[v * 3 + 1] - cy) * weight[v];
+                pushed[v * 3 + 2] = cz + (points[v * 3 + 2] - cz) * weight[v];
+              }
+              // (and it is told where each point sits on her skin's picture, so it doesn't drag the picture
+              // sideways when it merges points: without this her face came out blotchy at 3%)
+              const uv = g.attributes.uv as THREE.BufferAttribute | undefined;
+              if (uv) {
+                const where = new Float32Array(n * 2);
+                for (let v = 0; v < n; v++) { where[v * 2] = uv.getX(v); where[v * 2 + 1] = uv.getY(v); }
+                [lighter] = MeshoptSimplifier.simplifyWithAttributes(all, pushed, 3, where, 2, [H * 1.5, H * 1.5], null, target, 1);
+              } else {
+                [lighter] = MeshoptSimplifier.simplify(all, pushed, 3, target, 1);
+              }
             } else {
               [lighter] = MeshoptSimplifier.simplify(all, points, 3, target, 1);
             }
@@ -488,6 +531,41 @@ export async function startDevRoom() {
         return a;
       });
     }
+    // ON A MUCH LIGHTER BODY, NEW SURFACE DIRECTIONS (v0.34). Each point remembers which way the fine skin
+    // faced there, and lighting uses that. Once most points are gone, a point from under her jaw can end up
+    // holding a triangle on her chin, and her chin is lit as if it faced the ground (dark, greenish blotches).
+    // So the directions are worked out again from the triangles she has now: each triangle's own facing, added
+    // up at its three points (points in the same place share one sum, so the skin picture's seams don't show).
+    const P = out.attributes.position as THREE.BufferAttribute | undefined;
+    if (state.detail < 25 && P && out.attributes.normal) {
+      const sum = new Map<string, [number, number, number]>();
+      const key = (i: number) => `${Math.round(P.getX(i) * 4096)},${Math.round(P.getY(i) * 4096)},${Math.round(P.getZ(i) * 4096)}`;
+      const keys: string[] = [];
+      for (let i = 0; i < n; i++) { keys.push(key(i)); if (!sum.has(keys[i])) sum.set(keys[i], [0, 0, 0]); }
+      const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3();
+      for (let t = 0; t < tri.length; t += 3) {
+        a.fromBufferAttribute(P, tri[t]); b.fromBufferAttribute(P, tri[t + 1]); c.fromBufferAttribute(P, tri[t + 2]);
+        b.sub(a); c.sub(a); b.cross(c); // (its length is twice the triangle's area: big triangles count for more)
+        for (let k = 0; k < 3; k++) { const acc = sum.get(keys[tri[t + k]])!; acc[0] += b.x; acc[1] += b.y; acc[2] += b.z; }
+      }
+      let top = -Infinity, bottom = Infinity;
+      for (let i = 0; i < n; i++) { const y = P.getY(i); if (y > top) top = y; if (y < bottom) bottom = y; }
+      const faceY = bottom + (top - bottom) * 0.86; // (her neck; only her skin reaches both her feet and her crown)
+      const N = new Float32Array(n * 3);
+      for (let i = 0; i < n; i++) {
+        const acc = sum.get(keys[i])!;
+        const len = Math.hypot(acc[0], acc[1], acc[2]) || 1;
+        N[i * 3] = acc[0] / len; N[i * 3 + 1] = acc[1] / len; N[i * 3 + 2] = acc[2] / len;
+        // (...but only where the remembered direction is badly off, more than about 45 degrees: everywhere else
+        // the fine skin's own direction is kept, because it hides the big flat triangles far better)
+        const old = out.attributes.normal as THREE.BufferAttribute;
+        const ox = old.getX(i), oy = old.getY(i), oz = old.getZ(i);
+        const ol = Math.hypot(ox, oy, oz) || 1;
+        // (stricter on her face, about 20 degrees: a wrong tint shows there first)
+        if ((ox * N[i * 3] + oy * N[i * 3 + 1] + oz * N[i * 3 + 2]) / ol > (P.getY(i) > faceY ? 0.94 : 0.7)) { N[i * 3] = ox / ol; N[i * 3 + 1] = oy / ol; N[i * 3 + 2] = oz / ol; }
+      }
+      out.setAttribute('normal', new THREE.BufferAttribute(N, 3));
+    }
     out.morphTargetsRelative = true;
     out.setIndex(new THREE.BufferAttribute(tri, 1));
     out.userData.devRoomOwn = true;
@@ -537,8 +615,8 @@ export async function startDevRoom() {
         if (body) {
           if (!state.plain) {
             mesh.material = Array.isArray(mesh.material)
-              ? mesh.material.map((m) => paintedMaterial(m, src.box, look))
-              : paintedMaterial(mesh.material, src.box, look);
+              ? mesh.material.map((m) => paintedMaterial(m, src.box, look, state.detail >= 25))
+              : paintedMaterial(mesh.material, src.box, look, state.detail >= 25);
           }
           if (state.shapes === 'live' && dict && mesh.morphTargetInfluences) {
             mesh.morphTargetInfluences.fill(0);
