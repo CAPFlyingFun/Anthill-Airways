@@ -82,24 +82,111 @@ export const HOME = {
     serve: 0.7,     // seconds per bag sold
   },
   storeChest: { cash: 600, xp: 80 },
-  /**
-   * ⛽ The Gas Station's plot (v0.45), east of the store: an open forecourt on the street (you walk to it along
-   * the sidewalk; cars pull up to its pumps at the curb). Its gate: helpers working (the yard's two, the café's
-   * two, the store's two) + planks.
-   */
-  gasPlot: { minX: 58, maxX: 80, minZ: -11, maxZ: 11 },
-  gasGate: { ants: 6, planks: 10 },
-  gas: {
-    pumps: [62.5, 70.5] as [number, number], // where the two pumps stand along the curb
-    pumpZ: 13.9,       // on the sidewalk, at the curb
-    rack: { x: 66.5, z: 11.6 },
-    interval: 9,       // seconds between cars
-    wants: [6, 10] as [number, number], // cans a car takes ($90 each: about $720 a car, a car a minute at each pump)
-    serve: 0.5,        // seconds per can pumped
-    truckEvery: 36,    // seconds between the tanker's deliveries (sooner if the depot is nearly dry)
-    truckLoad: 18,     // cans per delivery
-  },
+  /** The street businesses' lots (STREET_LOTS, below): each this wide and this deep, a 1-unit gap between them. */
+  lotWidth: 22,
+  lotZ: { minZ: -11, maxZ: 11 },
+  /** Where the bays stand: on the sidewalk, at the curb. */
+  curbZ: 13.9,
 };
+
+/**
+ * 🚗 THE STREET BUSINESSES (v0.47): the lots along the street east of the Corner Store, on the way to the airport.
+ * Each is an open forecourt you walk onto from the sidewalk, with two bays at the curb that cars pull up to
+ * (world/carService.ts), a kiosk at the back, a cash pad, and (where goods are used up) a supply pile and a rack.
+ *
+ * Everything about one is here: where it is, what its gate asks for, what it costs, what its cars buy.
+ * PRICES: from the car wash on, 20% dearer than the trend the yard, café, store and gas station set (Joshua,
+ * 2026-11-14: "increase the prices of everything by 20% after the gas station"). A FIRST PASS: to be tuned from play.
+ */
+export interface StreetLotDef {
+  key: string;            // also its unlock ids: ai-<key>, ai-<key>-carrier, ai-<key>-<staff.id>, ai-<key>-banker
+  kind: 'gas' | 'wash' | 'garage';
+  minX: number;           // the lot's west edge along the street
+  name: string;
+  icon: string;
+  /** The forecourt's colour on the ground and the map; the kiosk's and the bays' colours. */
+  fill: string;
+  wall: number;
+  trim: number;
+  /** Its gate: helpers working + planks, the tile that must be owned before its own tile shows, the level its tile asks. */
+  gate: { ants: number; planks: number };
+  after: string;
+  level: number;
+  costs: { plot: number; carrier?: number; staff: number; banker: number };
+  /** What a car uses up (null: nothing: a wash) and what each one pays; seconds between cars; units a car takes; seconds per unit. */
+  item: 'fuel' | 'part' | null;
+  unitValue: number;
+  interval: number;
+  wants: [number, number];
+  serve: number;
+  /** A delivery truck fills the supply pile (else it restocks by itself). */
+  truck?: { every: number; load: number };
+  /** The carrier ant (only where goods are used up), the person who serves, and the second one. */
+  carrier?: { name: string; title: string; hat: number };
+  staff: { id: string; name: string; title: string; kind: HumanKind; title2: string; kind2: HumanKind };
+  /** What the banner says when it opens. */
+  how: string;
+}
+
+export const STREET_LOTS: StreetLotDef[] = [
+  {
+    key: 'gas', kind: 'gas', minX: 58, name: 'Gas Station', icon: '⛽', fill: '#c9ccd1', wall: 0xf4f1ea, trim: 0xd62828,
+    gate: { ants: 6, planks: 10 }, after: 'ai-store-gatherer', level: 17,
+    costs: { plot: 9000, carrier: 5000, staff: 7000, banker: 9000 },
+    // (about $720 a car, a car a minute at each pump)
+    item: 'fuel', unitValue: 90, interval: 9, wants: [6, 10], serve: 0.5,
+    truck: { every: 36, load: 18 },
+    carrier: { name: 'Fuel Carrier', title: '🐜 FUEL CARRIER', hat: 0xd62828 },
+    staff: { id: 'attendant', name: 'Pump Attendant', title: '⛽ ATTENDANT', kind: 'h-ember', title2: '⛽ ATTENDANT 2', kind2: 'h-crew1' },
+    how: '🚚 The tanker fills the depot → carry the cans to the rack by the pumps → stand at the pumps to fill the cars.',
+  },
+  {
+    key: 'wash', kind: 'wash', minX: 81, name: 'Car Wash', icon: '🚿', fill: '#bcd7ea', wall: 0xe8f4ff, trim: 0x2a7fd6,
+    gate: { ants: 7, planks: 12 }, after: 'ai-gas-carrier', level: 21,
+    costs: { plot: 21500, staff: 14500, banker: 18000 },
+    // (nothing to carry: $450 a wash, 7 seconds each: about $600 a minute at each bay, hands off once the Washer is hired)
+    item: null, unitValue: 450, interval: 9, wants: [1, 1], serve: 7,
+    staff: { id: 'washer', name: 'Car Washer', title: '🚿 WASHER', kind: 'h-crew2', title2: '🚿 WASHER 2', kind2: 'h-crew4' },
+    how: '🚗 Cars pull up at the curb → stand at the bays while they are washed → they pay when it is done. Nothing to carry!',
+  },
+  {
+    key: 'garage', kind: 'garage', minX: 104, name: 'Repair Garage', icon: '🔧', fill: '#d6cdbd', wall: 0xf1ead9, trim: 0xf4a000,
+    gate: { ants: 7, planks: 15 }, after: 'ai-wash-washer', level: 24,
+    costs: { plot: 48000, carrier: 24000, staff: 36000, banker: 42000 },
+    // (big, slow jobs: 3 or 4 parts at $600 each, 4 seconds a part: about $2,100 a car, a car a minute at each lift)
+    item: 'part', unitValue: 600, interval: 12, wants: [3, 4], serve: 4,
+    carrier: { name: 'Parts Carrier', title: '🐜 PARTS CARRIER', hat: 0xf4a000 },
+    staff: { id: 'mechanic', name: 'Mechanic', title: '🔧 MECHANIC', kind: 'h-crew1', title2: '🔧 MECHANIC 2', kind2: 'h-ember' },
+    how: '🔩 Carry boxes of parts to the rack by the lifts → stand there while each part is fitted. A slow job, a big bill.',
+  },
+];
+
+/** A lot's ground (world). */
+export const lotRect = (d: StreetLotDef) => ({ minX: d.minX, maxX: d.minX + HOME.lotWidth, minZ: HOME.lotZ.minZ, maxZ: HOME.lotZ.maxZ });
+/** Where things stand on a lot, from its west edge: its tiles, bays, rack, pile, cash pad and kiosk. */
+export const LOT_AT = {
+  plotTile: [2.4, 13.4], carrierTile: [4, 2.5], staffTile: [16.6, 12.6], bankerTile: [12, 6.6],
+  bays: [4.5, 12.5], rack: [8.5, 11.6], pile: [4, -4.5], pad: [14.5, 4.2], ant: [5.5, 1], sale: [11, 0],
+  kiosk: { minX: 12.5, maxX: 21.4, minZ: -10.4, maxZ: -2.5 },
+} as const;
+
+/** The lots' walk-on tiles: the plot, the carrier ant (if it has one), its person, its banker. */
+function streetUnlocks(): UnlockDef[] {
+  const out: UnlockDef[] = [];
+  for (const d of STREET_LOTS) {
+    const at = (p: readonly number[]): [number, number] => [d.minX + p[0], p[1]];
+    const id = `ai-${d.key}`;
+    out.push({ id, name: `${d.name} Plot`, icon: d.icon, cost: d.costs.plot, pos: at(LOT_AT.plotTile), requires: [d.after], level: d.level });
+    let last = id, level = d.level;
+    if (d.carrier && d.costs.carrier) {
+      out.push({ id: `${id}-carrier`, name: d.carrier.name, icon: '🐜', cost: d.costs.carrier, pos: at(LOT_AT.carrierTile), requires: [last], level: ++level });
+      last = `${id}-carrier`;
+    }
+    out.push({ id: `${id}-${d.staff.id}`, name: d.staff.name, icon: d.icon, cost: d.costs.staff, pos: at(LOT_AT.staffTile), requires: [last], level: ++level });
+    out.push({ id: `${id}-banker`, name: `${d.key[0].toUpperCase()}${d.key.slice(1)} Banker`, icon: '🏦', cost: d.costs.banker, pos: at(LOT_AT.bankerTile), requires: [`${id}-${d.staff.id}`], level: ++level });
+  }
+  return out;
+}
 
 /**
  * Walk-on tiles, in the order you meet them. You hire a helper where it works: the
@@ -131,12 +218,8 @@ export const HOME_UNLOCKS: UnlockDef[] = [
   { id: 'ai-store-carrier', name: 'Store Carrier', icon: '🐜', cost: 2000, pos: [53.6, -4.4], requires: ['ai-store-gatherer'], level: 14 },
   { id: 'ai-store-cashier', name: 'Store Cashier', icon: '🛒', cost: 2500, pos: [41.4, 5.6], requires: ['ai-store-carrier'], level: 15 },
   { id: 'ai-store-banker', name: 'Store Banker', icon: '🏦', cost: 3500, pos: [42.3, -2.8], requires: ['ai-store-cashier'], level: 16 },
-  // ⛽ The Gas Station (v0.45): its plot (the tile is on the sidewalk in front of the lot), a Fuel Carrier ant
-  // (the depot -> the rack by the pumps), an Attendant (a person: pumps for you) and a Banker
-  { id: 'ai-gas', name: 'Gas Station Plot', icon: '⛽', cost: 9000, pos: [60.4, 13.4], requires: ['ai-store-gatherer'], level: 17 },
-  { id: 'ai-gas-carrier', name: 'Fuel Carrier', icon: '🐜', cost: 5000, pos: [62.0, 2.5], requires: ['ai-gas'], level: 18 },
-  { id: 'ai-gas-attendant', name: 'Pump Attendant', icon: '⛽', cost: 7000, pos: [74.6, 12.6], requires: ['ai-gas-carrier'], level: 19 },
-  { id: 'ai-gas-banker', name: 'Gas Banker', icon: '🏦', cost: 9000, pos: [70.0, 6.6], requires: ['ai-gas-attendant'], level: 20 },
+  // 🚗 The street businesses (the gas station, the car wash, the garage...): made from STREET_LOTS, below
+  ...streetUnlocks(),
 ];
 
 /** Old unlock ids -> new ones (see above). */

@@ -35,7 +35,7 @@ export const STREET = {
   z: 19.5, width: 9,
   northWalk: 13.6,   // the sidewalk on your side (where the shops' customers come in)
   southWalk: 25.4,   // the sidewalk across the street, along the houses
-  minX: -70, maxX: 90,
+  minX: -70, maxX: 150, // (v0.47: on east past the gas station, for the car wash and the garage)
   /** The side street: it runs north from the main street, west of your yard (the corner). */
   side: { x: -25.5, width: 9, eastWalk: -19.6, westWalk: -31.4, minZ: -70 },
 };
@@ -209,7 +209,7 @@ export class Neighborhood {
       this.houses.push({ door: b.door, gate: b.gate, rect: { minX: spec.x - hw, maxX: spec.x + hw, minZ: spec.z - hd, maxZ: spec.z + hd }, wall: spec.wall, row });
     };
     const look = (i: number) => ({ wall: WALLS[i % WALLS.length], roof: ROOFS[i % ROOFS.length], door: DOORS[i % DOORS.length] });
-    for (let x = -62; x <= 82; x += 16) {
+    for (let x = -62; x <= STREET.maxX - 8; x += 16) {
       const big = k % 3 === 1;
       add({ x, z: 33 + (big ? 0.5 : 0), face: 0, w: big ? 11 : 9, d: big ? 8 : 7, h: big ? 4.8 : 4.2, doorX: k % 2 ? 1.2 : -1.2, walk: big ? 2.5 : 3, ...look(k) }, 'south');
       k++;
@@ -220,7 +220,7 @@ export class Neighborhood {
       k++;
     }
     // ...and trees along the streets
-    for (const [tx, tz] of [[-54, 28], [-22, 28.5], [10, 28.5], [42, 28.5], [74, 28], [-34, -13], [-34, -31], [-34, 9]] as [number, number][]) {
+    for (const [tx, tz] of [[-54, 28], [-22, 28.5], [10, 28.5], [42, 28.5], [74, 28], [106, 28.5], [138, 28], [-34, -13], [-34, -31], [-34, 9]] as [number, number][]) {
       const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.3, 2.6, 8), new THREE.MeshStandardMaterial({ color: 0x7a4b2a, roughness: 0.9 }));
       trunk.position.set(tx, 1.3, tz);
       const crown = new THREE.Mesh(new THREE.SphereGeometry(1.7, 12, 9), new THREE.MeshStandardMaterial({ color: 0x4f9a35, roughness: 0.85 }));

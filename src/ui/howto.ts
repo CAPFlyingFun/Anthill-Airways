@@ -174,6 +174,8 @@ export const HOME_HOWTO_HTML = `
     <li>The café hires its own four: a gatherer (Lv 8), a carrier (Lv 9), a cashier (Lv 10) and a banker ant (Lv 11).</li>
     <li>🛒 Past the café, the <b>Corner Store</b> plot (Lv 12, 4 ants working, 6 planks, $2,500; its tile is by the café's east gate): carry 🥬 grocery crates to the <b>packing table</b>'s IN tray, then the 🛍️ bags from its OUT tray to the checkout's SELL spot ($50 a bag).</li>
     <li>⛽ Past the store, on the street, the <b>Gas Station</b> plot (Lv 17, 6 ants working, 10 planks, $9,000; its tile is on the sidewalk in front of the lot): a 🚚 tanker fills the fuel depot, you carry the cans to the rack by the pumps, and while you stand at the pumps the cars that pull up are filled and pay. Then hire a Fuel Carrier, a Pump Attendant and a Banker there.</li>
+    <li>🚿 After it, the <b>Car Wash</b> (Lv 21, 7 ants, 12 planks, $21,500): nothing to carry. Cars pull up, you stand at the bays while they are washed, and they pay when it's done. Then a Car Washer and a Banker.</li>
+    <li>🔧 Then the <b>Repair Garage</b> (Lv 24, 7 ants, 15 planks, $48,000): carry 🔩 boxes of parts to the rack by the lifts and stand there while each part is fitted: slow jobs, big bills. Then a Parts Carrier, a Mechanic and a Banker.</li>
     <li>The store hires its own four too: a gatherer (Lv 13), a carrier (Lv 14), a cashier (Lv 15) and a banker ant (Lv 16).</li>
     <li>🎁 Every new plot hides a chest.</li>
   </ul>

@@ -58,6 +58,7 @@ export interface HomeSave {
   storeChest?: boolean; // 🛒 the store plot's chest is open (v0.30)
   storeSales?: number;  // bags of groceries sold at the Corner Store (v0.30)
   gasCars?: number;     // ⛽ cars filled at the Gas Station (v0.45)
+  cars?: Record<string, number>; // 🚗 cars served at each street business, by its key (v0.47)
   v?: number;        // save format (missing = v0.27: see HOME_RENAMED in data/home.ts)
 }
 
