@@ -124,8 +124,8 @@ const AUTO_LIVE: { within: number; detail: number; live?: boolean }[] = AUTO_LIT
 // view: "Set these settings as default": Auto lite, body shapes LIVE, shadows on, cloth tee off, out of view not drawn.
 // With the shapes live everybody is drawn at 3% with all her shapes: Auto lite's lighter levels are baked bodies.)
 // (v0.42.1: the room opens on AUTO LITE. Joshua, 2026-11-14, on his phone with 40 walking: "These settings work best")
-// (v0.50: the room opens on AUTO LITE again, as Joshua's new scale has the shapes live for the nearest only.)
-let TABLE: { within: number; detail: number; live?: boolean }[] = AUTO_LITE;
+// (v0.50: still AUTO LIVE. Joshua: "It should be Auto Live not Lite".)
+let TABLE: { within: number; detail: number; live?: boolean }[] = AUTO_LIVE;
 /** A person this far down the table (5% or lighter) lets go of her heaviest bodies again, to save memory. */
 const AUTO_DROP_FROM = 3;
 /** Cloth tees: how many are dressed at a time on their way to being frozen, and the most simulated for good. GAME TUNING. */
