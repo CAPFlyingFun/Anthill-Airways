@@ -84,6 +84,9 @@ const AUTO_LITE: { within: number; detail: number; live?: boolean }[] = [
   { within: Infinity, detail: 1 },              // 7 m and beyond
 ];
 /** The table in use: AUTO or AUTO_LITE (the 'Auto lite' button). */
+// (v0.43.1, the room's defaults, as Joshua tested them on his phone at 54-56 FPS with 40 walking and about 16 in
+// view: "Set these settings as default": Auto lite, body shapes LIVE, shadows on, cloth tee off, out of view not drawn.
+// With the shapes live everybody is drawn at 3% with all her shapes: Auto lite's lighter levels are baked bodies.)
 // (v0.42.1: the room opens on AUTO LITE. Joshua, 2026-11-14, on his phone with 40 walking: "These settings work best")
 let TABLE: { within: number; detail: number; live?: boolean }[] = AUTO_LITE;
 /** A person this far down the table (5% or lighter) lets go of her heaviest bodies again, to save memory. */
@@ -561,7 +564,7 @@ export async function startDevRoom() {
   el.addEventListener('wheel', (e) => { view.dist = THREE.MathUtils.clamp(view.dist * (1 + Math.sign(e.deltaY) * 0.1), 4, 60); }, { passive: true });
   const people: Person[] = [];
   // (the defaults are the settings Joshua settled on, 2026-11-14: 40 walking, auto detail, baked, smart, pieces skipped)
-  const state = { model: MODELS[0], count: 40, looks: 'random' as 'random' | 'saved' | 'off', seed: 0, shadows: true, detail: 3, shapes: 'baked' as 'live' | 'baked' | 'off', underwear: false, auto: true, smart: true, cull: true, cloth: 'off' as 'off' | 'live' | 'freeze' | 'near', perChar: 0, motion: 'walk' as 'walk' | 'idle' | 'off', plain: false, sharp: true, loading: '', error: '', info: null as Loaded | null };
+  const state = { model: MODELS[0], count: 40, looks: 'random' as 'random' | 'saved' | 'off', seed: 0, shadows: true, detail: 3, shapes: 'live' as 'live' | 'baked' | 'off', underwear: false, auto: true, smart: true, cull: true, cloth: 'off' as 'off' | 'live' | 'freeze' | 'near', perChar: 0, motion: 'walk' as 'walk' | 'idle' | 'off', plain: false, sharp: true, loading: '', error: '', info: null as Loaded | null };
   const resize = () => {
     renderer.setPixelRatio(state.sharp ? Math.min(window.devicePixelRatio, 2) : 1);
     renderer.setSize(host.clientWidth, host.clientHeight, false);

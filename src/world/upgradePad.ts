@@ -23,7 +23,7 @@ import { SaveData } from '../core/save';
 import { Sfx } from '../core/audio';
 import { Progress } from '../core/progress';
 import { bump } from '../core/totals';
-import { COLONY_ZONE_BASE, HAS_MILESTONES, MILESTONES, UP_BASE, UP_KINDS, UP_MAX, UpKind, up, upCost } from '../core/upgrades';
+import { COLONY_ZONE_BASE, HAS_MILESTONES, MILESTONES, UP_BASE, UP_GROWTH, UP_GROWTH_IN, UP_KINDS, UP_MAX, UpKind, up, upCost } from '../core/upgrades';
 import type { Hud, UpPanelModel, UpRowModel } from '../ui/hud';
 import { Flyers } from './items';
 import { TextSprite } from './labels';
@@ -136,8 +136,9 @@ export class Upgrade {
   /** Highest level (most: 10). */
   max = UP_MAX;
   /** Price of the next level. */
-  costOf = (lv: number) => upCost(this.base, lv);
-  constructor(public id: string, public kind: UpKind, public label: string, public base: number) {}
+  costOf = (lv: number) => upCost(this.base, lv, this.growth);
+  /** `growth`: how much dearer each level is than the last (its world's: core/upgrades.ts). */
+  constructor(public id: string, public kind: UpKind, public label: string, public base: number, public growth = UP_GROWTH) {}
 }
 
 interface Target {
@@ -382,7 +383,7 @@ export class Upgrades {
       );
       if (line) {
         line.up.max = 11;
-        line.up.costOf = (lv) => (lv === 0 ? base * 4 : upCost(base * 1.5, lv - 1));
+        line.up.costOf = (lv) => (lv === 0 ? base * 4 : upCost(base * 1.5, lv - 1, line.up.growth));
       }
       const targets = [sell, line].filter((t): t is Target => !!t);
       if (targets.length) make(label, leadEmoji(raw) || '🛒', targets);
@@ -396,7 +397,7 @@ export class Upgrades {
   ): Target | null {
     const id = fixedId ?? this.id(name);
     if (this.targets.some((t) => t.up.id === id)) return null;
-    const t: Target = { up: new Upgrade(id, kind, label, base ?? this.baseAt(near)), apply, visible };
+    const t: Target = { up: new Upgrade(id, kind, label, base ?? this.baseAt(near), UP_GROWTH_IN[this.world] ?? UP_GROWTH), apply, visible };
     this.targets.push(t);
     apply(this.level(id));
     return t;

@@ -25,9 +25,17 @@ export const UP_KINDS: Record<UpKind, { icon: string; name: string }> = {
   trash: { icon: '🗑️', name: 'Trash money (every bin)' },
 };
 
-/** Price of the NEXT level: `base` x 1.85 per level already bought. */
-export function upCost(base: number, level: number) {
-  return Math.round(base * Math.pow(1.85, level));
+/** How much dearer each level is than the one before it, in most worlds. */
+export const UP_GROWTH = 1.85;
+/**
+ * ...and in the worlds that have their own. 🏝️ Anthill Island: 40% more again per level (v0.43.1; Joshua, with
+ * everything maxed and nearly $1M in hand: "increase the cost of upgrading by 40% per level"), so x2.59 a level:
+ * a Lv 10 that was about $10k is about $210k, and maxing one upgrade about $340k where it was $22k. GAME TUNING.
+ */
+export const UP_GROWTH_IN: Record<string, number> = { home: UP_GROWTH * 1.4 };
+/** Price of the NEXT level: `base` x `growth` per level already bought. */
+export function upCost(base: number, level: number, growth = UP_GROWTH) {
+  return Math.round(base * Math.pow(growth, level));
 }
 
 /** ⭐ Milestone levels: each one adds a bigger jump on top of the usual step. */
