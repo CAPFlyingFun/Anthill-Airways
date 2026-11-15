@@ -41,7 +41,7 @@ function box(w: number, h: number, d: number, material: THREE.Material, x = 0, y
   return m;
 }
 
-export type CarServiceKind = 'gas' | 'wash' | 'garage';
+export type CarServiceKind = 'gas' | 'wash' | 'garage' | 'diner';
 
 export interface CarServiceOpts {
   kind: CarServiceKind;
@@ -81,6 +81,7 @@ const LOOK: Record<CarServiceKind, { main: number; trim: number }> = {
   gas: { main: 0xd62828, trim: 0xf4f1ea },
   wash: { main: 0x2a7fd6, trim: 0xe8f4ff },
   garage: { main: 0xf4a000, trim: 0x30343b },
+  diner: { main: 0xc1121f, trim: 0xfff3e0 },
 };
 
 export class CarService {
@@ -135,6 +136,10 @@ export class CarService {
           this.group.add(brush);
         }
         this.group.add(box(0.36, 0.36, 0.36, trim, lx, 0.34, 0.2));
+      } else if (opts.kind === 'diner') {
+        // a drive-thru order post: a menu board on a pole (three rows of dishes), a speaker box, a little striped awning
+        this.group.add(box(0.14, 1.5, 0.14, steel, lx, 0.9, 0), box(1.2, 0.9, 0.12, dark, lx, 1.95, 0), box(1.3, 0.14, 0.5, main, lx, 2.5, 0.12), box(0.3, 0.36, 0.2, trim, lx + 0.55, 1.05, 0.1));
+        for (const [k, c] of [[0.24, 0xffd166], [0, 0xfff3e0], [-0.24, 0x8ecf6a]] as const) this.group.add(box(0.95, 0.14, 0.03, mat(c, 0.7), lx, 1.95 + k, 0.07));
       } else {
         // a tool cabinet with a red toolbox on top, and a jack beside it
         this.group.add(box(1.1, 1.1, 0.5, main, lx, 0.71, 0), box(0.7, 0.3, 0.4, mat(0xc1121f, 0.6), lx, 1.41, 0), box(0.5, 0.22, 0.3, trim, lx + 0.9, 0.27, 0.15));

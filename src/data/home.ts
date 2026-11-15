@@ -100,7 +100,7 @@ export const HOME = {
  */
 export interface StreetLotDef {
   key: string;            // also its unlock ids: ai-<key>, ai-<key>-carrier, ai-<key>-<staff.id>, ai-<key>-banker
-  kind: 'gas' | 'wash' | 'garage';
+  kind: 'gas' | 'wash' | 'garage' | 'diner';
   minX: number;           // the lot's west edge along the street
   name: string;
   icon: string;
@@ -114,7 +114,7 @@ export interface StreetLotDef {
   level: number;
   costs: { plot: number; carrier?: number; staff: number; banker: number };
   /** What a car uses up (null: nothing: a wash) and what each one pays; seconds between cars; units a car takes; seconds per unit. */
-  item: 'fuel' | 'part' | null;
+  item: 'fuel' | 'part' | 'meal' | null;
   unitValue: number;
   interval: number;
   wants: [number, number];
@@ -158,6 +158,19 @@ export const STREET_LOTS: StreetLotDef[] = [
     carrier: { name: 'Parts Carrier', title: '🐜 PARTS CARRIER', hat: 0xf4a000 },
     staff: { id: 'mechanic', name: 'Mechanic', title: '🔧 MECHANIC', kind: 'h-crew1', title2: '🔧 MECHANIC 2', kind2: 'h-ember' },
     how: '🔩 Carry boxes of parts to the rack by the lifts → stand there while each part is fitted. A slow job, a big bill.',
+  },
+  {
+    // 🍔 THE DRIVE-THRU DINER (v0.55; the fourth street business on Joshua's roadmap, 2026-11-14: "1 Gas station,
+    // 2 Car wash, 3 Repair garage, 4 Diner/drive-thru"). The busy one: cars come quicker than anywhere else and
+    // each takes 2 to 4 meals, handed over fast, so it is the rack that runs dry: the Meal Carrier matters most here.
+    key: 'diner', kind: 'diner', minX: 127, name: 'Drive-Thru Diner', icon: '🍔', fill: '#e9c9a6', wall: 0xfff3e0, trim: 0xc1121f,
+    gate: { ants: 8, planks: 18 }, after: 'ai-garage-mechanic', level: 28,
+    costs: { plot: 105000, carrier: 52000, staff: 78000, banker: 92000 },
+    // (2 to 4 meals at $1,300, 1.2 seconds a meal: about $3,900 a car, a car every 40 seconds or so at each window)
+    item: 'meal', unitValue: 1300, interval: 7, wants: [2, 4], serve: 1.2,
+    carrier: { name: 'Meal Carrier', title: '🐜 MEAL CARRIER', hat: 0xc1121f },
+    staff: { id: 'server', name: 'Drive-Thru Server', title: '🍔 SERVER', kind: 'h-crew4', title2: '🍔 SERVER 2', kind2: 'h-crew2' },
+    how: '🍔 Carry meal bags from the kitchen to the rack by the windows → stand there to hand them to the cars. Fast and busy!',
   },
 ];
 

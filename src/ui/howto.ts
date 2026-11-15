@@ -176,6 +176,7 @@ export const HOME_HOWTO_HTML = `
     <li>⛽ Past the store, on the street, the <b>Gas Station</b> plot (Lv 17, 6 ants working, 10 planks, $9,000; its tile is on the sidewalk in front of the lot): a 🚚 tanker fills the fuel depot, you carry the cans to the rack by the pumps, and while you stand at the pumps the cars that pull up are filled and pay. Then hire a Fuel Carrier, a Pump Attendant and a Banker there.</li>
     <li>🚿 After it, the <b>Car Wash</b> (Lv 21, 7 ants, 12 planks, $21,500): nothing to carry. Cars pull up, you stand at the bays while they are washed, and they pay when it's done. Then a Car Washer and a Banker.</li>
     <li>🔧 Then the <b>Repair Garage</b> (Lv 24, 7 ants, 15 planks, $48,000): carry 🔩 boxes of parts to the rack by the lifts and stand there while each part is fitted: slow jobs, big bills. Then a Parts Carrier, a Mechanic and a Banker.</li>
+    <li>🍔 Then the <b>Drive-Thru Diner</b> (Lv 28, 8 ants, 18 planks, $105,000): the busy one. Carry 🍔 meal bags from the kitchen to the rack by the two order windows and stand there to hand them over: each car takes 2 to 4 at $1,300. Then a Meal Carrier, a Server and a Banker.</li>
     <li>The store hires its own four too: a gatherer (Lv 13), a carrier (Lv 14), a cashier (Lv 15) and a banker ant (Lv 16).</li>
     <li>🎁 Every new plot hides a chest.</li>
   </ul>
