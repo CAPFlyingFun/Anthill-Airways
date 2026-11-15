@@ -1562,6 +1562,15 @@ export class HomeWorld {
   // --------------------------------------------------------------------------
   // Money
   // --------------------------------------------------------------------------
+  /** 🪵 Planks from income (v0.60): `n` may be a part-plank; whole ones are added as they fill up. */
+  addPlanks(n: number) {
+    if (!(n > 0)) return;
+    const bits = (this.home.plankBits ?? 0) + n;
+    const whole = Math.floor(bits);
+    this.home.plankBits = bits - whole;
+    if (whole > 0) this.home.planks += whole;
+  }
+
   addCash(amount: number) {
     this.save.cash += amount;
     this.hud.setCash(this.save.cash);

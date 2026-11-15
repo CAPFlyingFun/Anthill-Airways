@@ -445,10 +445,12 @@ export class Hud {
 
   // ---- Idle income --------------------------------------------------------
   /** "+$1.2k/min" under the cash pill (hidden until there's a rate). */
-  setRate(perMin: number) {
+  setRate(perMin: number, planksPerMin = 0) {
     const el = $('rate');
     el.classList.toggle('hidden', perMin < 1);
-    el.textContent = `+$${short(perMin)}/min`;
+    // (🏝️ Anthill Island, v0.60: and the planks that income brings in)
+    const pl = planksPerMin >= 0.05 ? ` · +${planksPerMin >= 10 ? Math.round(planksPerMin) : planksPerMin.toFixed(1)} 🪵/min` : '';
+    el.textContent = `+$${short(perMin)}/min${pl}`;
   }
 
   /**
@@ -456,7 +458,7 @@ export class Hud {
    * 🏝️ Anthill Island has no gate runs: `opts.run = false` leaves the bonus-run button
    * out, and `opts.who` says who kept working ("Your ants").
    */
-  showWelcome(awaySecs: number, countedSecs: number, share: number, amount: number, opts: { run?: boolean; who?: string } = {}): Promise<'run' | 'collect'> {
+  showWelcome(awaySecs: number, countedSecs: number, share: number, amount: number, opts: { run?: boolean; who?: string; planks?: number } = {}): Promise<'run' | 'collect'> {
     const t = (secs: number) => {
       const h = Math.floor(secs / 3600);
       const m = Math.floor((secs % 3600) / 60);
@@ -465,7 +467,7 @@ export class Hud {
     // e.g. "You were away 9h 12m · 4h counted at 50%" (the cap + share are upgradable)
     const capped = countedSecs < awaySecs - 59;
     $('wbAway').textContent = `You were away ${t(awaySecs)}${capped ? ` · ${t(countedSecs)} counted` : ''} at ${Math.round(share * 100)}%`;
-    $('wbAmount').textContent = `$${Math.round(amount).toLocaleString()}`;
+    $('wbAmount').textContent = `$${Math.round(amount).toLocaleString()}${opts.planks && opts.planks >= 1 ? ` + 🪵 ${Math.floor(opts.planks).toLocaleString()}` : ''}`;
     $('wbSub').textContent = `${opts.who ?? 'Your colony & airport'} kept working:`;
     const runs = opts.run !== false;
     $('wbRun').classList.toggle('hidden', !runs);
@@ -620,18 +622,20 @@ export class Hud {
   private queen: QueenProgress | null = null;
 
   /** Hook up the level pill and the stats screen (yours + the Queen's). */
-  initStats(progress: Progress, queen: QueenProgress) {
+  initStats(progress: Progress, queen: QueenProgress, hide: string[] = []) {
     this.progress = progress;
     this.queen = queen;
     const qRows = $('queenRows');
     for (const def of QUEEN_STATS) {
       const row = document.createElement('div');
-      row.className = 'stat-row';
-      row.innerHTML = `<div class="ic">${def.icon}</div>
-        <div class="txt"><div class="nm">${def.name}</div><div class="ds" id="qds-${def.id}"></div></div>
-        <div class="lv" id="qlv-${def.id}">0</div>
+      row.className = 'stat-tile';
+      row.innerHTML = `<div class="st-top"><span class="ic">${def.icon}</span><span class="lv" id="qlv-${def.id}">0</span></div>
+        <div class="nm">${def.name}</div>
+        <div class="ds" id="qds-${def.id}"></div>
+        <div class="per">${def.per}</div>
         <button id="qadd-${def.id}" aria-label="Give the Queen a point in ${def.name}">+</button>`;
       qRows.appendChild(row);
+      row.addEventListener('click', (e) => { if (!(e.target as HTMLElement).closest('button')) row.classList.toggle('open'); });
       row.querySelector('button')!.addEventListener('click', () => {
         if (queen.spend(def.id)) this.renderStats();
       });
@@ -663,14 +667,20 @@ export class Hud {
     });
     // Build one row per stat; the "+" button spends a point.
     const rows = $('statRows');
+    // (v0.60: a grid of small tiles, two to a row: Joshua, "quite large... maybe in a grid style to consolidate
+    // space". A tile shows what the stat does now; tap it for what each point adds. Stats that do nothing in this
+    // game, `hide`, aren't shown.)
     for (const def of STATS) {
       const row = document.createElement('div');
-      row.className = 'stat-row';
-      row.innerHTML = `<div class="ic">${def.icon}</div>
-        <div class="txt"><div class="nm">${def.name}</div><div class="ds" id="ds-${def.id}"></div></div>
-        <div class="lv" id="lv-${def.id}">0</div>
+      row.className = 'stat-tile';
+      if (hide.includes(def.id)) row.classList.add('hidden');
+      row.innerHTML = `<div class="st-top"><span class="ic">${def.icon}</span><span class="lv" id="lv-${def.id}">0</span></div>
+        <div class="nm">${def.name}</div>
+        <div class="ds" id="ds-${def.id}"></div>
+        <div class="per">${def.per}</div>
         <button id="add-${def.id}" aria-label="Add a point to ${def.name}">+</button>`;
       rows.appendChild(row);
+      row.addEventListener('click', (e) => { if (!(e.target as HTMLElement).closest('button')) row.classList.toggle('open'); });
       row.querySelector('button')!.addEventListener('click', () => {
         if (progress.spend(def.id)) this.renderStats();
       });
@@ -708,7 +718,7 @@ export class Hud {
       // Maxed: a green MAX badge and no + button
       $(`lv-${def.id}`).innerHTML = max ? `${p.stat(def.id)}<span class="maxed">MAX</span>` : String(p.stat(def.id));
       ($(`add-${def.id}`) as HTMLElement).style.visibility = max ? 'hidden' : '';
-      $(`ds-${def.id}`).textContent = `${def.per} · now ${p.describe(def.id)}`;
+      $(`ds-${def.id}`).textContent = p.describe(def.id);
       ($(`add-${def.id}`) as HTMLButtonElement).disabled = s.points <= 0 || max;
     }
     // The Queen's section
@@ -731,7 +741,7 @@ export class Hud {
       // Maxed: a green MAX badge and no + button
       $(`qlv-${def.id}`).innerHTML = max ? `${q.stat(def.id)}<span class="maxed">MAX</span>` : String(q.stat(def.id));
       ($(`qadd-${def.id}`) as HTMLElement).style.visibility = max ? 'hidden' : '';
-      $(`qds-${def.id}`).textContent = `${def.per} · now ${q.describe(def.id)}`;
+      $(`qds-${def.id}`).textContent = q.describe(def.id);
       ($(`qadd-${def.id}`) as HTMLButtonElement).disabled = !qs.active || qs.points <= 0 || max;
     }
   }

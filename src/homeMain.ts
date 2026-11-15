@@ -7,6 +7,7 @@
 // sounds, input, the save, Settings) and hands over here instead of building
 // the classic worlds. Everything else lives in world/homeWorld.ts.
 // ============================================================================
+import { PLANKS_PER_DOLLAR } from './data/home';
 import * as THREE from 'three';
 import type { Hud } from './ui/hud';
 import type { Sfx } from './core/audio';
@@ -47,7 +48,8 @@ export async function startHome({ app, renderer, save, hud, sfx, input, progress
   // 2) The HUD: no world switching, route board or shrine in this game (yet)
   hud.setNext(null);
   document.getElementById('modeBtn')?.classList.add('hidden');
-  hud.initStats(progress, queenProgress);
+  // (Luck is for the gate runs and Toughness for the volcano: neither is in this game)
+  hud.initStats(progress, queenProgress, ['luck', 'tough']);
   hud.initShrine(progress, () => false);
   progress.onChange = () => hud.renderLevel();
   progress.onLevelUp = (level) => {
@@ -134,9 +136,11 @@ export async function startHome({ app, renderer, save, hud, sfx, input, progress
   let winEarned = 0;
   let winT = 0;
   let autoTotal = 0;
-  hud.setRate(save.rate * 60);
+  hud.setRate(save.rate * 60, save.rate * 60 * PLANKS_PER_DOLLAR);
   const trackIncome = (dt: number) => {
     bump('played', dt);
+    // 🪵 planks trickle in with your income, a bit every frame (PLANKS_PER_DOLLAR)
+    home.addPlanks(save.rate * dt * PLANKS_PER_DOLLAR);
     const gained = save.cash - prevCash;
     if (gained > 0) bump('earned', gained);
     prevCash = save.cash;
@@ -147,7 +151,7 @@ export async function startHome({ app, renderer, save, hud, sfx, input, progress
     if (winT >= 10) {
       save.rate = save.rate * 0.85 + (winEarned / winT) * 0.15;
       if (save.rate < 0.02) save.rate = 0;
-      hud.setRate(save.rate * 60);
+      hud.setRate(save.rate * 60, save.rate * 60 * PLANKS_PER_DOLLAR);
       winEarned = 0;
       winT = 0;
     }
@@ -170,10 +174,12 @@ export async function startHome({ app, renderer, save, hud, sfx, input, progress
     const amount = Math.floor(save.rate * counted * share);
     if (amount < 1) return; // (no banker ant yet: nothing earns while you're away)
     welcomeOpen = true;
-    await hud.showWelcome(secs, counted, share, amount, { run: false, who: 'Your ants' });
+    const planks = amount * PLANKS_PER_DOLLAR;
+    await hud.showWelcome(secs, counted, share, amount, { run: false, who: 'Your ants', planks });
     welcomeOpen = false;
     sfx.welcome();
     home.addCash(amount);
+    home.addPlanks(planks);
     prevCash = save.cash; // (not counted as idle income or as "earned while playing")
     writeSave(save);
     if (pendingAway) {

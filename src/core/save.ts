@@ -52,6 +52,7 @@ export interface HomeSave {
   orders: number;    // neighbors' orders filled (they line up at the snack stand; the line isn't saved)
   crate: { trips: number; got: Record<string, number>; away: number }; // goods in the crate; away = seconds until it's back
   planks: number;    // 🪵 building materials (from the crate), for new plots
+  plankBits?: number; // 🪵 the part-plank your income has brought in so far (v0.60: income brings planks)
   chest: boolean;    // the café plot's chest is open
   cafeSales: number; // sales at the café (snack packs until v0.28, coffee since)
   standSales: number; // snack packs handed over at the backyard's snack stand (v0.28: older saves get 0)

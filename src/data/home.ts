@@ -131,6 +131,13 @@ export interface StreetLotDef {
   how: string;
 }
 
+/**
+ * 🪵 PLANKS FROM INCOME (v0.60; Joshua, 2026-11-15: "you gain 0.01% planks per minute based on money amount per
+ * minute, so if you're making 100k per minute, you will gain 10 planks a minute... divide that amount by 60 so it
+ * can slowly climb"). Planks a second = income a second x this. Offline too, at the same share as the cash.
+ */
+export const PLANKS_PER_DOLLAR = 0.0001;
+
 export const STREET_LOTS: StreetLotDef[] = [
   {
     key: 'gas', kind: 'gas', minX: 58, name: 'Gas Station', icon: '⛽', fill: '#c9ccd1', wall: 0xf4f1ea, trim: 0xd62828,
