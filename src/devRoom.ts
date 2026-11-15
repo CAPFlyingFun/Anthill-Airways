@@ -73,7 +73,7 @@ const AUTO = [
 ];
 /** A person this far down the table (5% or lighter) lets go of her heaviest bodies again, to save memory. */
 const AUTO_DROP_FROM = 3;
-interface GeoKeep { index0: THREE.BufferAttribute | null; morph0: THREE.BufferGeometry['morphAttributes']; lods: Map<string, THREE.BufferAttribute>; auto?: THREE.BufferAttribute[] }
+interface GeoKeep { index0: THREE.BufferAttribute | null; morph0: THREE.BufferGeometry['morphAttributes']; lods: Map<string, THREE.BufferAttribute>; auto?: THREE.BufferAttribute[]; flat?: Float32Array | null }
 
 /**
  * JOSHUA'S FIRST THREE LOOKS, saved in the builder on 2026-11-14 (its export, traddomium-characters.json:
@@ -86,6 +86,9 @@ interface GeoKeep { index0: THREE.BufferAttribute | null; morph0: THREE.BufferGe
 interface Look {
   name: string;
   bump: number;        // belly size, %
+  navel?: number;      // the builder's NAVEL control, her body's own: -100 (deepest innie) to +100 (fullest outie)
+  bustDetail?: number; // how much of her bust's fine detail shows through her tee, 0 (none) to 1 (all, as her skin has it)
+  legLength?: number;  // leggings' length down her leg (the builder's legEnd): 0.25 = shorts, 0.78 = capris, 1 = to the ankle
   bust?: number;       // the builder's breast SIZE control, -100 (half the volume) to +100 (twice); 0 = as her belly gives
   heightCm: number;    // from the standard body (about 168 cm)
   top: number;         // tee colour
@@ -94,9 +97,9 @@ interface Look {
   longSleeves: boolean; // teeLong or teeShort
 }
 const LOOKS: Look[] = [
-  { name: 'Char1', bump: 23, heightCm: 3.5, top: 0x4e642e, legs: 0x37383e, capri: false, longSleeves: false },  // jersey: olive tee, charcoal leggings
-  { name: 'Char2', bump: 21, heightCm: -7, top: 0x9c9ca3, legs: 0x1631bc, capri: false, longSleeves: false },   // ribbed: grey tee, blue leggings
-  { name: 'Char3', bump: 5, heightCm: -6.5, top: 0xeec415, legs: 0x0b7e3a, capri: true, longSleeves: true },    // sweater: yellow long tee, green capris
+  { name: 'Char1', bump: 23, heightCm: 3.5, top: 0x4e642e, legs: 0x37383e, capri: false, longSleeves: false, navel: 47, bustDetail: 0.45 },  // jersey: olive tee, charcoal leggings
+  { name: 'Char2', bump: 21, heightCm: -7, top: 0x9c9ca3, legs: 0x1631bc, capri: false, longSleeves: false, navel: 47, bustDetail: 0.45 },   // ribbed: grey tee, blue leggings
+  { name: 'Char3', bump: 5, heightCm: -6.5, top: 0xeec415, legs: 0x0b7e3a, capri: true, longSleeves: true, navel: 47, bustDetail: 0.45, legLength: 0.78 },    // sweater: yellow long tee, green capris (navel 47 and detail 0.45 are this look's own, used for all three)
 ];
 /** The standard body with the stand-in outfit ("Looks: off"). */
 const PLAIN: Look = { name: 'Base', bump: 0, heightCm: 0, top: 0xd8473f, legs: 0x33343f, capri: false, longSleeves: false };
@@ -141,6 +144,149 @@ function bustWeights(bumpPercent: number, sizePercent = 0): Record<string, numbe
   return { breastGrow: Math.min(1, units), 'shape:breastGrowMore': Math.max(0, units - 1) };
 }
 
+const hooks: { tweak: ((look: Look, i: number) => Look) | null } = { tweak: null };
+
+/** The bust's size against her own 0% bust, as a length (the cube root of its volume): the builder's bustScale. */
+function bustLinear(bumpPercent: number, sizePercent = 0) {
+  const p = Math.min(200, Math.max(0, bumpPercent));
+  const base = p <= 100 ? 1 + (0.3 * p) / 100 : 1.3 + (0.25 * (p - 100)) / 100;
+  const size = Math.min(100, Math.max(-100, sizePercent));
+  return Math.cbrt(base + ((size >= 0 ? 2.0 : 0.5) - base) * (Math.abs(size) / 100));
+}
+
+/**
+ * The builder's NAVEL control (its navelFlatFor): the weight of her 'navelFlat' shape. Her outie is modelled
+ * into the file; 'navelFlat' settles it into an ordinary navel (fully on up to a 75% belly, eased off by 100%).
+ * The control slides her from there: -100 the deepest innie, +100 the fullest outie.
+ */
+function navelFlatFor(bumpPercent: number, navelPercent: number) {
+  const p = Math.min(200, Math.max(0, bumpPercent));
+  const t = Math.min(1, Math.max(0, (p - 75) / 25));
+  const auto = t * t * (3 - 2 * t); // how far out her pregnancy alone puts it
+  const n = Math.min(100, Math.max(-100, navelPercent)) / 100;
+  const outie = n < 0 ? auto + n * (auto + 0.6) : auto + n * (1 + 0.3 - auto);
+  return 1 - outie;
+}
+
+/**
+ * HER BUST UNDER A TEE (v0.38). Her clothes here are paint on her skin, so every bit of her skin's relief shows
+ * through them. The builder has a BREAST DETAIL setting for how much a fabric lets through; this is the DEV
+ * Room's stand-in for it: worked out once per model, how far each point at the tip of each breast would move
+ * (and its surface direction turn) if that small raised patch were laid level with the curve round it, as
+ * cloth lying across it would. A character then takes (1 - her detail) of it when she is baked.
+ *
+ * The tip is found without any markings on the model: among the points her 'breastGrow' shape moves, the one
+ * furthest forward on each side, then (three times) the one standing furthest out along the way the surface
+ * round it faces. Measured on Sarah v2: the raised patch is about 2.5 cm across the surface from its tip and
+ * stands 6 mm proud of the curve of the breast.
+ *
+ * The curve it is laid level with is the breast's own: a curved sheet (heights as a quadratic of position)
+ * fitted to the ring of skin just outside the patch. So she keeps her shape; only the patch goes.
+ */
+function bustSmoothing(g: THREE.BufferGeometry, keep: GeoKeep, dict: Record<string, number>, box: THREE.Box3): Float32Array | null {
+  const pos = g.attributes.position as THREE.BufferAttribute, nor = g.attributes.normal as THREE.BufferAttribute | undefined;
+  const grow = (keep.morph0.position as THREE.BufferAttribute[] | undefined)?.[dict.breastGrow];
+  const index = keep.index0;
+  if (!nor || !grow || !index) return null;
+  const n = pos.count;
+  const H = box.max.y - box.min.y, cx = (box.min.x + box.max.x) / 2;
+  const R = 0.017 * H, FULL = 0.0135 * H, RING = 0.025 * H; // the patch; where it is wholly levelled; the ring fitted to
+  const P = new Float32Array(n * 3);
+  for (let v = 0; v < n; v++) { P[v * 3] = pos.getX(v); P[v * 3 + 1] = pos.getY(v); P[v * 3 + 2] = pos.getZ(v); }
+  let most = 0;
+  for (let v = 0; v < n; v++) most = Math.max(most, Math.hypot(grow.getX(v), grow.getY(v), grow.getZ(v)));
+  const S = P.slice();                      // her points with the two patches levelled
+  const amount = new Float32Array(n);       // how much of the levelling each point took, 0 to 1
+  const face = new THREE.Vector3(), u = new THREE.Vector3(), w = new THREE.Vector3(), T = new THREE.Vector3(), d = new THREE.Vector3();
+  for (const side of [0, 1]) {
+    let tip = -1;
+    for (let v = 0; v < n; v++) {
+      if ((P[v * 3] > cx ? 0 : 1) !== side || Math.hypot(grow.getX(v), grow.getY(v), grow.getZ(v)) < most * 0.3) continue;
+      if (tip < 0 || P[v * 3 + 2] > P[tip * 3 + 2]) tip = v;
+    }
+    if (tip < 0) return null;
+    let near: number[] = [];
+    for (let pass = 0; pass < 3; pass++) {
+      T.set(P[tip * 3], P[tip * 3 + 1], P[tip * 3 + 2]);
+      near = [];
+      face.set(0, 0, 0);
+      for (let v = 0; v < n; v++) {
+        if (Math.hypot(P[v * 3] - T.x, P[v * 3 + 1] - T.y, P[v * 3 + 2] - T.z) > 0.03 * H) continue;
+        near.push(v);
+        face.add(d.set(nor.getX(v), nor.getY(v), nor.getZ(v)).normalize());
+      }
+      face.normalize();
+      let best = -Infinity;
+      for (const v of near) { const out = P[v * 3] * face.x + P[v * 3 + 1] * face.y + P[v * 3 + 2] * face.z; if (out > best) { best = out; tip = v; } }
+    }
+    T.set(P[tip * 3], P[tip * 3 + 1], P[tip * 3 + 2]);
+    u.set(0, 1, 0).cross(face).normalize();
+    w.copy(face).cross(u);
+    // Each nearby point as (across, up, height) from the tip; the sheet fitted to the ring by least squares
+    const A = Array.from({ length: 6 }, () => new Float64Array(7));
+    const local = near.map((v) => { d.set(P[v * 3], P[v * 3 + 1], P[v * 3 + 2]).sub(T); return [d.dot(u), d.dot(w), d.dot(face)]; });
+    local.forEach(([x, y, h]) => {
+      const r = Math.hypot(x, y);
+      if (r < R || r > RING) return;
+      const row = [1, x / H, y / H, (x * x) / (H * H), (x * y) / (H * H), (y * y) / (H * H)];
+      for (let i = 0; i < 6; i++) { for (let j = 0; j < 6; j++) A[i][j] += row[i] * row[j]; A[i][6] += row[i] * (h / H); }
+    });
+    for (let i = 0; i < 6; i++) {
+      let piv = i;
+      for (let k = i + 1; k < 6; k++) if (Math.abs(A[k][i]) > Math.abs(A[piv][i])) piv = k;
+      [A[i], A[piv]] = [A[piv], A[i]];
+      if (Math.abs(A[i][i]) < 1e-12) return null;
+      for (let k = 0; k < 6; k++) {
+        if (k === i) continue;
+        const f = A[k][i] / A[i][i];
+        for (let j = i; j < 7; j++) A[k][j] -= f * A[i][j];
+      }
+    }
+    const c = A.map((row, i) => row[6] / row[i]);
+    near.forEach((v, k) => {
+      const [x, y, h] = local[k];
+      const r = Math.hypot(x, y);
+      if (r >= R) return;
+      const t = Math.min(1, (R - r) / (R - FULL));
+      const a = t * t * (3 - 2 * t);
+      const sheet = (c[0] + (c[1] * x) / H + (c[2] * y) / H + (c[3] * x * x) / (H * H) + (c[4] * x * y) / (H * H) + (c[5] * y * y) / (H * H)) * H;
+      const lift = (sheet - h) * a;
+      amount[v] = a;
+      S[v * 3] += face.x * lift; S[v * 3 + 1] += face.y * lift; S[v * 3 + 2] += face.z * lift;
+    });
+  }
+  // The levelled patches' own surface directions, from their triangles (points in the same place share one)
+  const place = new Map<string, THREE.Vector3>();
+  const key = (v: number) => `${Math.round(P[v * 3] * 1e5)},${Math.round(P[v * 3 + 1] * 1e5)},${Math.round(P[v * 3 + 2] * 1e5)}`;
+  const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3();
+  const ix = index.array;
+  for (let t = 0; t < ix.length; t += 3) {
+    const i0 = ix[t], i1 = ix[t + 1], i2 = ix[t + 2];
+    if (!amount[i0] && !amount[i1] && !amount[i2]) continue;
+    a.set(S[i0 * 3], S[i0 * 3 + 1], S[i0 * 3 + 2]); b.set(S[i1 * 3], S[i1 * 3 + 1], S[i1 * 3 + 2]); c.set(S[i2 * 3], S[i2 * 3 + 1], S[i2 * 3 + 2]);
+    b.sub(a); c.sub(a); b.cross(c);
+    for (const v of [i0, i1, i2]) {
+      if (!amount[v]) continue;
+      const k = key(v);
+      let acc = place.get(k);
+      if (!acc) place.set(k, (acc = new THREE.Vector3()));
+      acc.add(b);
+    }
+  }
+  // What each patch point moves by, and its direction turns by: [dx, dy, dz, dnx, dny, dnz] per point
+  const flat = new Float32Array(n * 6);
+  for (let v = 0; v < n; v++) {
+    if (!amount[v]) continue;
+    flat[v * 6] = S[v * 3] - P[v * 3]; flat[v * 6 + 1] = S[v * 3 + 1] - P[v * 3 + 1]; flat[v * 6 + 2] = S[v * 3 + 2] - P[v * 3 + 2];
+    const dir = place.get(key(v));
+    if (!dir || dir.lengthSq() === 0) continue;
+    const len = dir.length(), ol = Math.hypot(nor.getX(v), nor.getY(v), nor.getZ(v)) || 1;
+    const turn = Math.min(1, amount[v] * 4); // (eased in at the rim, where her own smooth directions are the better ones)
+    flat[v * 6 + 3] = (dir.x / len - nor.getX(v) / ol) * turn * ol; flat[v * 6 + 4] = (dir.y / len - nor.getY(v) / ol) * turn * ol; flat[v * 6 + 5] = (dir.z / len - nor.getZ(v) / ol) * turn * ol;
+  }
+  return flat;
+}
+
 /**
  * A RANDOM LOOK (v0.37; Joshua, 2026-11-14: "randomize the belly size from 0-50%, the breast size (-100 to +100),
  * and the shirt and leggings colors"). The same person number gets the same look every time; SHUFFLE deals
@@ -163,7 +309,12 @@ function randomLook(i: number, seed: number): Look {
     bust: Math.round(-100 + r() * 200),
     heightCm: Math.round((-9 + r() * 18) * 2) / 2,
     top, legs,
-    capri: r() < 0.35,
+    capri: false,
+    // (v0.38; Joshua: "leggings leg length from 0.25 (shorts) to 1.00, breast details through clothing between
+    // 0-30%, navel 35-45%: not through clothing but actual depth")
+    legLength: Math.round((0.25 + r() * 0.75) * 100) / 100,
+    bustDetail: Math.round(r() * 30) / 100,
+    navel: Math.round(35 + r() * 10),
     longSleeves: r() < 0.4,
   };
 }
@@ -194,7 +345,7 @@ function paintedMaterial(base: THREE.Material, box: THREE.Box3, look: Look, fine
     uTop: { value: new THREE.Color(look.top) },
     uLegs: { value: new THREE.Color(look.legs) },
     uShoe: { value: new THREE.Color(SNEAKERS) },
-    uLegEnd: { value: look.capri ? 0.17 : 0.04 },      // where the leggings end (height up her body)
+    uLegEnd: { value: look.legLength !== undefined ? 0.57 - Math.min(1, Math.max(0.1, look.legLength)) * 0.53 : look.capri ? 0.17 : 0.04 },      // where the leggings end (height up her body)
     uSleeveEnd: { value: look.longSleeves ? 0.56 : 0.71 }, // where the sleeves end
     uY0: { value: box.min.y },
     uH: { value: box.max.y - box.min.y },
@@ -435,6 +586,11 @@ export async function startDevRoom() {
         if (!mesh.isMesh) return;
         const g = mesh.geometry;
         const keep: GeoKeep = (g.userData.devRoom ??= { index0: g.index, morph0: g.morphAttributes, lods: new Map() });
+        // (her skin only, once: what smoothing the tips of her bust under a tee would move: bustSmoothing)
+        if (keep.flat === undefined) {
+          const isSkin = src.box.max.y > src.box.min.y && (mesh.material as THREE.Material).name === 'Material_0';
+          keep.flat = isSkin ? bustSmoothing(g, keep, (mesh as THREE.Mesh).morphTargetDictionary ?? {}, src.box) : null;
+        }
         let index = keep.index0;
         const index0 = keep.index0;
         const lodFor = (detail: number) => {
@@ -537,7 +693,7 @@ export async function startDevRoom() {
    * every point of her on every frame. Baked, her final shape is worked out ONCE, here, into a plain body of
    * her own (only the points her detail level still draws), and nothing is blended while she walks.
    */
-  const bakeGeometry = (g: THREE.BufferGeometry, weights: [number, number][], live: [string, number][], index: THREE.BufferAttribute = g.index!, detail = state.detail) => {
+  const bakeGeometry = (g: THREE.BufferGeometry, weights: [number, number][], live: [string, number][], index: THREE.BufferAttribute = g.index!, detail = state.detail, soften = 0) => {
     const keep = g.userData.devRoom as GeoKeep;
     const src = g.attributes;
     // Only the points this detail level uses, renumbered
@@ -567,6 +723,11 @@ export async function startDevRoom() {
               if (g.morphTargetsRelative) { x += m.getX(o) * w; y += m.getY(o) * w; z += m.getZ(o) * w; }
               else { x += (m.getX(o) - a.getX(o)) * w; y += (m.getY(o) - a.getY(o)) * w; z += (m.getZ(o) - a.getZ(o)) * w; }
             }
+          }
+          // (her bust's tips smoothed over, as far as her tee hides them: `soften` of bustSmoothing's patch)
+          if (soften && keep.flat) {
+            const f = name === 'position' ? 0 : 3;
+            x += keep.flat[o * 6 + f] * soften; y += keep.flat[o * 6 + f + 1] * soften; z += keep.flat[o * 6 + f + 2] * soften;
           }
           arr[k * 3] = x; arr[k * 3 + 1] = y; arr[k * 3 + 2] = z;
         }
@@ -646,12 +807,16 @@ export async function startDevRoom() {
     const root = new THREE.Group();
     const inner = new THREE.Group();
     // Which look she wears: Joshua's three in turn, or the plain standard body
-    const look = !def.builder || state.looks === 'off' ? PLAIN : state.looks === 'random' ? randomLook(i, state.seed) : LOOKS[i % LOOKS.length];
+    const picked = !def.builder || state.looks === 'off' ? PLAIN : state.looks === 'random' ? randomLook(i, state.seed) : LOOKS[i % LOOKS.length];
+    // (a test's own changes to a look, for side-by-side comparisons: window.devRoom.tweak = (look, i) => ({ ...look, navel: -100 }))
+    const look = def.builder && hooks.tweak ? hooks.tweak(picked, i) : picked;
     const tall = 1 + look.heightCm / STANDARD_CM;
     inner.scale.setScalar(src.scale * tall);
     inner.position.y = -src.minY * src.scale * tall;
     // Her shape, with the builder's own morphs and rules: her belly at her look's size, her bust with it
-    const shape: Record<string, number> = { ...bellyWeights(look.bump / 100), ...bustWeights(look.bump, look.bust ?? 0) };
+    const shape: Record<string, number> = { ...bellyWeights(look.bump / 100), ...bustWeights(look.bump, look.bust ?? 0), navelFlat: navelFlatFor(look.bump, look.navel ?? 0) };
+    // (how much of the smoothing over her bust's tips she takes: all of it at 0 detail; the patch grows with her bust)
+    const soften = (1 - Math.min(1, Math.max(0, look.bustDetail ?? 1))) * bustLinear(look.bump, look.bust ?? 0);
     const lods: PersonLod[] = [];
     for (const part of src.parts) {
       const copy = cloneSkinned(part); // (shares the geometry and textures; her skeleton is her own)
@@ -682,12 +847,12 @@ export async function startDevRoom() {
             // (...each one baked the first time she needs it, not all seven up front: her full-detail body is
             // several megabytes, and most people never come that close)
             const geos: (THREE.BufferGeometry | null)[] = levels.map(() => null);
-            const make = (k: number) => bakeGeometry(source, weights, live, levels[k], AUTO[k].detail);
+            const make = (k: number) => bakeGeometry(source, weights, live, levels[k], AUTO[k].detail, soften);
             auto = { mesh: mesh as THREE.Mesh, geos, make };
             lods.push(auto);
             mesh.geometry = geos[geos.length - 1] = make(geos.length - 1);
           } else {
-            mesh.geometry = bakeGeometry(source, weights, live);
+            mesh.geometry = bakeGeometry(source, weights, live, undefined, undefined, soften);
           }
           if (live.length) mesh.updateMorphTargets(); // (only her motion shapes now, by name)
         }
@@ -960,5 +1125,5 @@ export async function startDevRoom() {
   renderer.info.autoReset = false;
 
   // (for the headless tests)
-  (window as unknown as { devRoom: unknown }).devRoom = { state, people, renderer, looks: LOOKS, randomLook, get fps() { return fps; } };
+  (window as unknown as { devRoom: unknown }).devRoom = Object.assign(hooks, { state, people, renderer, looks: LOOKS, randomLook, get fps() { return fps; } });
 }

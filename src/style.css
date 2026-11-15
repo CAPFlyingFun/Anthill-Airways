@@ -254,6 +254,9 @@ html, body {
 #launchBtn { width: max-content; max-width: calc(100vw - 150px); }
 #launchBtn small { display: block; margin-top: 2px; font-size: 13px; font-weight: 800; opacity: 0.92; white-space: nowrap; }
 body.launch-on .up-btn { display: none; } /* (the launch button takes the bottom of the screen) */
+/* (a button marked `hidden` in index.html stays hidden: `display: block` below would otherwise show it.
+   That is how the DEV Room button was still showing in Settings after v0.29.6) */
+.menu-btn[hidden] { display: none; }
 .menu-btn {
   display: block;
   width: 100%;
