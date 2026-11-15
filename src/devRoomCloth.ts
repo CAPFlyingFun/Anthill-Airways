@@ -88,6 +88,7 @@ export class ClothTest {
   phase: 'dressing' | 'live' | 'frozen' = 'dressing';
   private room: { cloth: GarmentCloth; tailored: Tailored } | null;
   private raise = 0;
+  private released = false;
   private capsules: Capsules | undefined;
   private readonly simRoot = new THREE.Group();
   private readonly simInner = new THREE.Group();
@@ -229,7 +230,7 @@ export class ClothTest {
     this.options.inner.updateWorldMatrix(true, false);
     this.holder.matrix.multiplyMatrices(this.options.inner.matrixWorld, this.inverse.copy(this.simInner.matrixWorld).invert());
     this.holder.matrixWorldNeedsUpdate = true;
-    if (this.options.freeze && this.t >= DRESS.done + FREEZE_AFTER_DRESSED) this.freeze();
+    if ((this.options.freeze || this.released) && this.t >= DRESS.done + FREEZE_AFTER_DRESSED) this.freeze();
   }
 
   /** Her copy's arms out to her sides by `angle` (radians) on top of her pose: the builder's dressing move (RoomGarment.applyPose). */
@@ -326,6 +327,9 @@ export class ClothTest {
     // (its attributes are the model's own, shared: only this geometry's own bookkeeping goes)
     this.simGeo.dispose();
   }
+
+  /** Stop simulating as soon as it is dressed (she has walked away from the camera): frozen as it then hangs. */
+  release(): void { this.released = true; }
 
   /** What it costs this frame while simulated (milliseconds: her skin, the cloth, the drawing) and its size. */
   cost(): { ms: number; points: number; triangles: number } {

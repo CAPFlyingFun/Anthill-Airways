@@ -79,8 +79,8 @@ const AUTO = [
  */
 const AUTO_LITE: { within: number; detail: number; live?: boolean }[] = [
   { within: 4 * METRE, detail: 3, live: true }, // 0-3 m (up to 4)
-  { within: 9 * METRE, detail: 2 },             // 4-8 m (up to 9)
-  { within: Infinity, detail: 1 },              // 9 m and beyond
+  { within: 7 * METRE, detail: 2 },             // 4-6 m (up to 7; v0.42, Joshua: "4-6m = 2% / +7m = 1%")
+  { within: Infinity, detail: 1 },              // 7 m and beyond
 ];
 /** The table in use: AUTO or AUTO_LITE (the 'Auto lite' button). */
 let TABLE: { within: number; detail: number; live?: boolean }[] = AUTO;
@@ -88,6 +88,8 @@ let TABLE: { within: number; detail: number; live?: boolean }[] = AUTO;
 const AUTO_DROP_FROM = 3;
 /** Cloth tees: how many are dressed at a time on their way to being frozen, and the most simulated for good. GAME TUNING. */
 const CLOTH_DRESSING_AT_ONCE = 2, CLOTH_SIMULATED_AT_MOST = 6;
+/** 'Cloth tee: near the camera': within this of the camera a tee is simulated (Auto lite's own live range: up to 4 m). */
+const CLOTH_NEAR = 4 * METRE;
 interface GeoKeep { index0: THREE.BufferAttribute | null; morph0: THREE.BufferGeometry['morphAttributes']; lods: Map<string, THREE.BufferAttribute>; auto?: THREE.BufferAttribute[]; flat?: Float32Array | null; liveGeo?: THREE.BufferGeometry }
 
 /**
@@ -421,7 +423,11 @@ interface Person {
   lods: PersonLod[];
   /** The builder's cloth tee on her (the 'Cloth tee' option), and how to put it on her when her turn comes. */
   cloth?: ClothTest;
-  clothMake?: () => ClothTest;
+  clothMake?: (freeze: boolean) => ClothTest;
+  /** How far she is from the camera (to her middle), as of this frame. */
+  dist?: number;
+  /** Her tee is being simulated because she is near the camera ('Cloth tee: near the camera'). */
+  clothNear?: boolean;
   level: number;
   /** The builder body's own moving skeleton (v0.29.5): her bones posed each frame by the builder's code. */
   live?: {
@@ -545,7 +551,7 @@ export async function startDevRoom() {
   el.addEventListener('wheel', (e) => { view.dist = THREE.MathUtils.clamp(view.dist * (1 + Math.sign(e.deltaY) * 0.1), 4, 60); }, { passive: true });
   const people: Person[] = [];
   // (the defaults are the settings Joshua settled on, 2026-11-14: 40 walking, auto detail, baked, smart, pieces skipped)
-  const state = { model: MODELS[0], count: 40, looks: 'random' as 'random' | 'saved' | 'off', seed: 0, shadows: true, detail: 10, shapes: 'baked' as 'live' | 'baked' | 'off', underwear: false, auto: true, smart: true, cloth: 'off' as 'off' | 'live' | 'freeze', perChar: 0, motion: 'walk' as 'walk' | 'idle' | 'off', plain: false, sharp: true, loading: '', error: '', info: null as Loaded | null };
+  const state = { model: MODELS[0], count: 40, looks: 'random' as 'random' | 'saved' | 'off', seed: 0, shadows: true, detail: 10, shapes: 'baked' as 'live' | 'baked' | 'off', underwear: false, auto: true, smart: true, cloth: 'off' as 'off' | 'live' | 'freeze' | 'near', perChar: 0, motion: 'walk' as 'walk' | 'idle' | 'off', plain: false, sharp: true, loading: '', error: '', info: null as Loaded | null };
   const resize = () => {
     renderer.setPixelRatio(state.sharp ? Math.min(window.devicePixelRatio, 2) : 1);
     renderer.setSize(host.clientWidth, host.clientHeight, false);
@@ -989,12 +995,12 @@ export async function startDevRoom() {
     const worn = skin as { mesh: THREE.SkinnedMesh; dict: Record<string, number> } | undefined;
     if (wearsCloth && worn) {
       // (put on her when her turn comes: see the tick's queue)
-      person.clothMake = () => {
+      person.clothMake = (freeze: boolean) => {
         let keep: GeoKeep | undefined;
         src.parts[0].traverse((o) => { const g = (o as THREE.Mesh).geometry; if (!keep && g?.getAttribute?.('_cloth_cover')) keep = g.userData.devRoom as GeoKeep; });
         if (!keep?.index0) throw new Error('her body has no triangle list');
         root.updateMatrixWorld(true);
-        return new ClothTest({ part: src.parts[0], display: worn.mesh, inner, tall, index: keep.index0, morphs: keep.morph0, dict: worn.dict, shape, motion: MOTION_TARGETS, scene, freeze: state.cloth === 'freeze', colour: look.top });
+        return new ClothTest({ part: src.parts[0], display: worn.mesh, inner, tall, index: keep.index0, morphs: keep.morph0, dict: worn.dict, shape, motion: MOTION_TARGETS, scene, freeze, colour: look.top });
       };
     }
     return person;
@@ -1074,7 +1080,7 @@ export async function startDevRoom() {
   const smartBtn = button(optRow, '', () => { state.smart = !state.smart; sync(); void rebuild(); });
   const underBtn = button(optRow, '', () => { state.underwear = !state.underwear; sync(); void rebuild(); });
   const plainBtn = button(optRow, '', () => { state.plain = !state.plain; sync(); void rebuild(); });
-  const clothBtn = button(optRow, '', () => { state.cloth = state.cloth === 'off' ? 'live' : state.cloth === 'live' ? 'freeze' : 'off'; sync(); void rebuild(); });
+  const clothBtn = button(optRow, '', () => { state.cloth = state.cloth === 'off' ? 'live' : state.cloth === 'live' ? 'freeze' : state.cloth === 'freeze' ? 'near' : 'off'; sync(); void rebuild(); });
   const sharpBtn = button(optRow, '', () => { state.sharp = !state.sharp; sync(); resize(); });
   const sync = () => {
     modelBtns.forEach((b, i) => b.classList.toggle('on', MODELS[i] === state.model));
@@ -1098,7 +1104,7 @@ export async function startDevRoom() {
     underBtn.classList.toggle('on', state.underwear);
     plainBtn.textContent = `Materials: ${state.plain ? 'plain' : 'full'}`;
     plainBtn.classList.toggle('on', !state.plain);
-    clothBtn.textContent = `Cloth tee: ${state.cloth === 'off' ? 'off' : state.cloth === 'live' ? 'simulated' : 'frozen once dressed'}`;
+    clothBtn.textContent = `Cloth tee: ${state.cloth === 'off' ? 'off' : state.cloth === 'live' ? 'simulated' : state.cloth === 'freeze' ? 'frozen once dressed' : 'simulated near the camera'}`;
     clothBtn.classList.toggle('on', state.cloth !== 'off');
     sharpBtn.textContent = `Sharpness: ${state.sharp ? '2x' : '1x'}`;
     sharpBtn.classList.toggle('on', state.sharp);
@@ -1122,6 +1128,7 @@ export async function startDevRoom() {
     t += dt;
     let simulating = 0;
     for (const p of people) {
+      p.dist = Math.hypot(camera.position.x - p.root.position.x, camera.position.y - 1.4, camera.position.z - p.root.position.z);
       if (p.lods.length) {
         // AUTO detail: her level by her distance from the camera (a level is only left once she is 10% past
         // its edge, so someone walking along an edge doesn't flicker between two)
@@ -1177,12 +1184,23 @@ export async function startDevRoom() {
     // THE CLOTH TEES' QUEUE: a tee being simulated is several milliseconds of every frame, and a copy of her whole
     // body in memory. So only a few are simulated at once: frozen once dressed, the next in line takes its place, a
     // few at a time until everybody is dressed; simulated for good, the first few wear cloth and the rest wait in paint.
-    if (simulating < (state.cloth === 'freeze' ? CLOTH_DRESSING_AT_ONCE : CLOTH_SIMULATED_AT_MOST)) {
+    const putOn = (q: Person, freeze: boolean) => {
+      q.cloth?.dispose();
+      q.cloth = undefined;
+      try { q.cloth = q.clothMake!(freeze); } catch (e) { q.clothMake = undefined; console.error('[devroom] the cloth tee could not be put on her', e); state.error = `No cloth tee: ${e instanceof Error ? e.message : String(e)}`; }
+    };
+    if (simulating < (state.cloth === 'live' ? CLOTH_SIMULATED_AT_MOST : CLOTH_DRESSING_AT_ONCE)) {
       const next = people.find((q) => q.clothMake && !q.cloth);
-      if (next) {
-        const make = next.clothMake!;
-        next.clothMake = undefined;
-        try { next.cloth = make(); } catch (e) { console.error('[devroom] the cloth tee could not be put on her', e); state.error = `No cloth tee: ${e instanceof Error ? e.message : String(e)}`; }
+      if (next) putOn(next, state.cloth !== 'live');
+    }
+    // NEAR THE CAMERA (v0.42; Joshua: "0-3m = 3% + Live/Sim On", beyond it off): everybody is dressed and frozen as
+    // above; then whoever comes within CLOTH_NEAR of the camera has her tee simulated again (the nearest first, at most
+    // CLOTH_DRESSING_AT_ONCE at once), and it is frozen again as it hangs when she has gone back past it.
+    if (state.cloth === 'near') {
+      for (const q of people) if (q.cloth && q.cloth.phase !== 'frozen' && q.clothNear && (q.dist ?? 0) > CLOTH_NEAR * 1.1) { q.cloth.release(); q.clothNear = false; }
+      if (simulating < CLOTH_DRESSING_AT_ONCE && !people.some((q) => q.clothMake && !q.cloth)) {
+        const near = people.filter((q) => q.clothMake && q.cloth?.phase === 'frozen' && (q.dist ?? Infinity) < CLOTH_NEAR * 0.95).sort((a, b) => a.dist! - b.dist!)[0];
+        if (near) { putOn(near, false); near.clothNear = true; }
       }
     }
     camera.position.set(Math.sin(view.yaw) * Math.cos(view.pitch) * view.dist, Math.sin(view.pitch) * view.dist + 1.2, Math.cos(view.yaw) * Math.cos(view.pitch) * view.dist);
