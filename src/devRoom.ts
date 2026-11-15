@@ -48,7 +48,8 @@ const MODELS: ModelDef[] = [
   { key: 'builder', label: "Builder body", files: [BUILDER + 'sarah-v2-body-slim.glb', BUILDER + 'sarah-v2-hair.glb'], builder: true },
   { key: 'game', label: "Game's Sarah", files: [`${import.meta.env.BASE_URL}models/h-sarah.glb`], builder: false },
 ];
-const COUNTS = [1, 3, 6, 10, 15, 20, 30, 40];
+/** How many people the room can hold (v0.49; Joshua: "a slider from 1-400 people but also where I can manually type in a specific number"). */
+const MOST_PEOPLE = 400;
 const HEIGHT = 2.8; // people are this tall in the game
 /**
  * DETAIL (v0.29.3, Joshua's "smart LOD" idea): how much of the model's triangles are drawn, in %.
@@ -483,6 +484,8 @@ export async function startDevRoom() {
     .dr-stat { font:600 11px/1.3 ui-monospace,Menlo,monospace; background:rgba(28,35,42,.82); border-radius:8px; padding:5px 8px; white-space:pre-wrap; max-width:100%; box-sizing:border-box; pointer-events:none; }
     .dr-fps { font-size:18px; }
     .dr-shut .dr-set { display:none; }
+    .dr-num { font:600 13px ui-monospace,Menlo,monospace; color:#fff; background:rgba(28,35,42,.9); border:1px solid rgba(255,255,255,.25); border-radius:8px; padding:4px 6px; width:64px; box-sizing:border-box; pointer-events:auto; }
+    .dr-slide { flex:1 1 100px; min-width:80px; pointer-events:auto; accent-color:#2f7fd0; }
     .dr-log { font:600 11px/1.35 ui-monospace,Menlo,monospace; color:#fff; background:rgba(28,35,42,.9); border:0; border-radius:8px; padding:6px 8px; width:min(100%, 340px); height:150px; box-sizing:border-box; pointer-events:auto; resize:none; -webkit-user-select:text; user-select:text; }
   `;
   host.appendChild(css);
@@ -1124,7 +1127,19 @@ export async function startDevRoom() {
     state.loading = 'Preparing…';
     await applyModelSettings(src);
     if (ticket !== building) return;
-    for (let i = 0; i < state.count; i++) people.push(makePerson(state.model, src, i));
+    // (a big crowd is made a few at a time, so the page keeps answering while it is; past 40 they are packed
+    // evenly, as in the stress test, where the rings of the small room would stretch out of sight)
+    for (let i = 0; i < state.count; i++) {
+      const p = makePerson(state.model, src, i);
+      if (state.count > 40) stressPlace(p, i);
+      people.push(p);
+      if (i % 8 === 7 && i < state.count - 1) {
+        state.loading = `Adding people… ${i + 1} of ${state.count}`;
+        await new Promise((next) => requestAnimationFrame(next));
+        if (ticket !== building) return;
+      }
+    }
+    ground.scale.setScalar(state.count > 40 ? Math.max(1, (stressSpot(state.count).radius + 6) / 22) : 1);
     // How many triangles ONE of them is, as she is drawn now (her visible pieces and her hair)
     let tris = 0;
     people[0]?.root.traverse((o) => {
@@ -1253,7 +1268,38 @@ export async function startDevRoom() {
 
   // ---- The panel's buttons ----
   const modelBtns = MODELS.map((def) => button(modelRow, def.label, () => { state.model = def; sync(); void rebuild(); }));
-  const countBtns = COUNTS.map((n) => button(countRow, String(n), () => { state.count = n; sync(); void rebuild(); }));
+  // HOW MANY PEOPLE: a slider and a box to type a number in, 1 to MOST_PEOPLE (they show the same number)
+  const countLabel = document.createElement('div');
+  countLabel.className = 'dr-stat';
+  countLabel.textContent = 'People';
+  const countSlide = document.createElement('input');
+  countSlide.type = 'range';
+  countSlide.min = '1';
+  countSlide.max = String(MOST_PEOPLE);
+  countSlide.step = '1';
+  countSlide.className = 'dr-slide';
+  const countBox = document.createElement('input');
+  countBox.type = 'number';
+  countBox.inputMode = 'numeric';
+  countBox.min = '1';
+  countBox.max = String(MOST_PEOPLE);
+  countBox.className = 'dr-num';
+  countRow.style.alignItems = 'center';
+  countRow.style.flexWrap = 'nowrap'; // (the three stay on one line)
+  countRow.style.maxWidth = '360px';
+  countRow.append(countLabel, countSlide, countBox);
+  const setCount = (raw: string) => {
+    const n = Math.min(MOST_PEOPLE, Math.max(1, Math.round(Number(raw)) || 1));
+    if (n === state.count) { sync(); return; }
+    state.count = n;
+    sync();
+    void rebuild();
+  };
+  // (dragging shows the number; the room is rebuilt when the slider is let go)
+  countSlide.addEventListener('input', () => { countBox.value = countSlide.value; });
+  countSlide.addEventListener('change', () => setCount(countSlide.value));
+  countBox.addEventListener('change', () => setCount(countBox.value));
+  countBox.addEventListener('keydown', (e) => { if (e.key === 'Enter') countBox.blur(); });
   const detailBtns = DETAILS.map((d) => button(detailRow, `${d}%`, () => { state.detail = d; state.auto = false; sync(); void rebuild(); }));
   const setAuto = (table: typeof TABLE) => {
     const on = !(state.auto && TABLE === table);
@@ -1279,7 +1325,8 @@ export async function startDevRoom() {
   const sharpBtn = button(optRow, '', () => { state.sharp = !state.sharp; sync(); resize(); });
   const sync = () => {
     modelBtns.forEach((b, i) => b.classList.toggle('on', MODELS[i] === state.model));
-    countBtns.forEach((b, i) => b.classList.toggle('on', COUNTS[i] === state.count));
+    countSlide.value = String(state.count);
+    if (document.activeElement !== countBox) countBox.value = String(state.count);
     morphBtn.textContent = `Looks: ${state.looks === 'saved' ? 'Char1-3' : state.looks}`;
     morphBtn.classList.toggle('on', state.looks !== 'off');
     shuffleBtn.classList.toggle('on', false);
