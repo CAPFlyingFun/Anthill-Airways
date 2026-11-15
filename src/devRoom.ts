@@ -80,10 +80,39 @@ const AUTO = [
  * right by the camera have all 43 of their body shapes blended live, and the rest are baked as in AUTO.
  */
 const AUTO_LITE: { within: number; detail: number; live?: boolean }[] = [
-  { within: 4 * METRE, detail: 3, live: true }, // 0-3 m (up to 4)
-  { within: 7 * METRE, detail: 2 },             // 4-6 m (up to 7; v0.42, Joshua: "4-6m = 2% / +7m = 1%")
-  { within: Infinity, detail: 1 },              // 7 m and beyond
+  // (v0.50, Joshua: "0-2m: 3% live on / 3-4: 2% live off / 5-8m: 1% live off / 9m: start fading, totally be
+  // invisible at 18m". Before: 3% to 4 m, 2% to 7 m. The fading is FADE, below.)
+  { within: 3 * METRE, detail: 3, live: true }, // 0-2 m (up to 3)
+  { within: 5 * METRE, detail: 2 },             // 3-4 m (up to 5)
+  { within: Infinity, detail: 1 },              // 5 m and beyond
 ];
+/**
+ * FADE (v0.50; Joshua, with 400 in the room: "the people kept popping in and out... need to do some gradual fade to
+ * nothing... 9m: start fading, totally be invisible at 18m"). Past `start` a person is drawn with more and more of
+ * her dots left out (a screen-door fade: no see-through sorting, and every dot left out is a dot not shaded), and
+ * past `end` she isn't drawn at all. SMART FPS's limit on how many are drawn works through this too: it pulls both
+ * distances in until that many are left, so the furthest fade out where they used to pop.
+ */
+// (v0.50, later the same day: "quicker fade with haze like a 5% white colored model": she is whole to 15 m, not 9,
+// and as she goes she pales toward white, so she reads as far off in the haze and not as a see-through person.)
+const FADE = { start: 15 * METRE, end: 18 * METRE, least: 4 * METRE, haze: 0.85 };
+/** Adds the fade to a material's program: `fade.value` 1 = all of her, 0 = none. */
+function fadeShader(shader: { uniforms: Record<string, unknown>; fragmentShader: string }, fade: { value: number }) {
+  shader.uniforms.uFade = fade;
+  shader.fragmentShader = shader.fragmentShader
+    .replace('#include <common>', '#include <common>\nuniform float uFade;')
+    .replace('#include <clipping_planes_fragment>', '#include <clipping_planes_fragment>\n{ float drDot = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715)))); if (drDot >= uFade) discard; }')
+    // (the haze: paler the further gone she is. Her shadow's program has no such line, and is left alone)
+    .replace('#include <opaque_fragment>', `#include <opaque_fragment>\ngl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(1.0), (1.0 - uFade) * ${FADE.haze.toFixed(2)});`);
+}
+/** A person's own copy of one of her other materials (her hair, a flat test colour), with the fade. */
+function fadedMaterial(base: THREE.Material, fade: { value: number }) {
+  const m = base.clone();
+  m.onBeforeCompile = (shader) => fadeShader(shader, fade);
+  m.customProgramCacheKey = () => 'devroom-fade';
+  m.userData.devRoomOwn = true;
+  return m;
+}
 /**
  * AUTO LIVE (v0.44; Joshua: "an Auto Live version that goes 1-3% like the Auto Lite but works with the Live Body"):
  * Auto lite's distances and detail, with every level's shapes live.
@@ -95,7 +124,8 @@ const AUTO_LIVE: { within: number; detail: number; live?: boolean }[] = AUTO_LIT
 // view: "Set these settings as default": Auto lite, body shapes LIVE, shadows on, cloth tee off, out of view not drawn.
 // With the shapes live everybody is drawn at 3% with all her shapes: Auto lite's lighter levels are baked bodies.)
 // (v0.42.1: the room opens on AUTO LITE. Joshua, 2026-11-14, on his phone with 40 walking: "These settings work best")
-let TABLE: { within: number; detail: number; live?: boolean }[] = AUTO_LIVE;
+// (v0.50: the room opens on AUTO LITE again, as Joshua's new scale has the shapes live for the nearest only.)
+let TABLE: { within: number; detail: number; live?: boolean }[] = AUTO_LITE;
 /** A person this far down the table (5% or lighter) lets go of her heaviest bodies again, to save memory. */
 const AUTO_DROP_FROM = 3;
 /** Cloth tees: how many are dressed at a time on their way to being frozen, and the most simulated for good. GAME TUNING. */
@@ -365,7 +395,7 @@ function rng(seed: number) {
  * body, distance from her middle). One compiled program for everyone; each
  * clone has its own two colours.
  */
-function paintedMaterial(base: THREE.Material, box: THREE.Box3, look: Look, fine = true) {
+function paintedMaterial(base: THREE.Material, box: THREE.Box3, look: Look, fine = true, fade?: { value: number }) {
   const m = base.clone();
   // (her skin's bump detail is drawn from a second picture, the normal map. On a much lighter body the
   // picture no longer lines up with the big triangles, and it shows as dark blotches on her face: off below 25%)
@@ -411,8 +441,9 @@ function paintedMaterial(base: THREE.Material, box: THREE.Box3, look: Look, fine
       // (cloth is smooth: her skin's fine detail isn't drawn through it, as under the builder's paint)
       .replace('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\nnormal = normalize(mix(normal, nonPerturbedNormal, drCloth));')
       .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(roughnessFactor, 0.85, drCloth);');
+    if (fade) fadeShader(shader, fade);
   };
-  m.customProgramCacheKey = () => (fine ? 'devroom-painted' : 'devroom-painted-plain');
+  m.customProgramCacheKey = () => (fine ? 'devroom-painted' : 'devroom-painted-plain') + (fade ? '-fade' : '');
   m.userData.devRoomOwn = true;
   return m;
 }
@@ -438,6 +469,12 @@ interface Person {
   clothMake?: (freeze: boolean) => ClothTest;
   /** How far she is from the camera (to her middle), as of this frame. */
   dist?: number;
+  /** FADE: how much of her is drawn, 1 = all (every one of her materials reads this one value). */
+  fade: { value: number };
+  /** She is in the scene (someone not drawn is taken out of it, so her 80 bones cost nothing: v0.50). */
+  shown: boolean;
+  /** Her shadow's material (it thins out with her). */
+  depth?: THREE.Material;
   /** AUTO detail: the level her distance alone asks for (SMART FPS may draw her lighter: `level` is what she is drawn at). */
   band?: number;
   /** Her tee is being simulated because she is near the camera ('Cloth tee: near the camera'). */
@@ -556,7 +593,9 @@ export async function startDevRoom() {
   scene.add(ground);
   const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 300);
   // Drag: orbit. Pinch / wheel: zoom.
-  const view = { yaw: 0, pitch: 0.62, dist: 26 };
+  // (v0.50: the camera starts nearer, 5.4 m from the middle and not 15.6: at the old distance the fade would have
+  // had the whole room half gone, and nobody near enough for the 3% and 2% levels)
+  const view = { yaw: 0, pitch: 0.62, dist: 9 };
   const pointers = new Map<number, { x: number; y: number }>();
   let pinch = 0;
   const el = renderer.domElement;
@@ -583,7 +622,7 @@ export async function startDevRoom() {
   el.addEventListener('wheel', (e) => { view.dist = THREE.MathUtils.clamp(view.dist * (1 + Math.sign(e.deltaY) * 0.1), 4, 60); }, { passive: true });
   const people: Person[] = [];
   // (the defaults are the settings Joshua settled on, 2026-11-14: 40 walking, auto detail, baked, smart, pieces skipped)
-  const state = { model: MODELS[0], count: 40, looks: 'random' as 'random' | 'saved' | 'off', seed: 0, shadows: true, detail: 3, shapes: 'baked' as 'live' | 'baked' | 'off', underwear: false, auto: true, fps: true, smart: true, cull: true, cloth: 'off' as 'off' | 'live' | 'freeze' | 'near', perChar: 0, motion: 'walk' as 'walk' | 'idle' | 'off', plain: false, sharp: true, loading: '', error: '', info: null as Loaded | null };
+  const state = { model: MODELS[0], count: 40, looks: 'random' as 'random' | 'saved' | 'off', seed: 0, shadows: true, detail: 3, shapes: 'baked' as 'live' | 'baked' | 'off', underwear: false, auto: true, fps: true, smart: true, cull: true, fade: true, cloth: 'off' as 'off' | 'live' | 'freeze' | 'near', perChar: 0, motion: 'walk' as 'walk' | 'idle' | 'off', plain: false, sharp: true, loading: '', error: '', info: null as Loaded | null };
   const resize = () => {
     renderer.setPixelRatio(state.sharp ? Math.min(window.devicePixelRatio, 2) : 1);
     renderer.setSize(host.clientWidth, host.clientHeight, false);
@@ -890,6 +929,15 @@ export async function startDevRoom() {
     // Her shape, with the builder's own morphs and rules: her belly at her look's size, her bust with it
     const shape: Record<string, number> = { ...bellyWeights(look.bump / 100), ...bustWeights(look.bump, look.bust ?? 0), navelFlat: navelFlatFor(look.bump, look.navel ?? 0) };
     const lods: PersonLod[] = [];
+    // (FADE: one value for all of her, read by each of her materials and by her shadow's)
+    const fadeValue = { value: 1 };
+    const fade = state.fade ? fadeValue : undefined;
+    let fadeDepth: THREE.MeshDepthMaterial | undefined;
+    if (fade) {
+      fadeDepth = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
+      fadeDepth.onBeforeCompile = (shader) => fadeShader(shader, fade);
+      fadeDepth.customProgramCacheKey = () => 'devroom-fade';
+    }
     let skin: { mesh: THREE.SkinnedMesh; dict: Record<string, number> } | undefined;
     for (const part of src.parts) {
       const copy = cloneSkinned(part); // (shares the geometry and textures; her skeleton is her own)
@@ -961,17 +1009,23 @@ export async function startDevRoom() {
           // (the cheapest material there is, one flat colour: is it her skin and outfit that cost?)
           mesh.material = new THREE.MeshLambertMaterial({ color: def.builder ? look.top : 0xc9a27e });
           mesh.material.userData.devRoomOwn = true;
+          if (fade) { mesh.material.onBeforeCompile = (shader) => fadeShader(shader, fade); mesh.material.customProgramCacheKey = () => 'devroom-fade'; }
+        } else if (fade && !body) {
+          // (her hair and anything else of hers: her own copies, so they fade with her)
+          mesh.material = Array.isArray(mesh.material) ? mesh.material.map((m) => fadedMaterial(m, fade)) : fadedMaterial(mesh.material, fade);
         }
+        // (her shadow thins out with her)
+        if (fadeDepth) mesh.customDepthMaterial = fadeDepth;
         if (body) {
           if (!state.plain) {
             const base = mesh.material;
             mesh.material = Array.isArray(mesh.material)
-              ? mesh.material.map((m) => paintedMaterial(m, src.box, look, state.detail >= 25 && !auto))
-              : paintedMaterial(mesh.material, src.box, look, state.detail >= 25 && !auto);
+              ? mesh.material.map((m) => paintedMaterial(m, src.box, look, state.detail >= 25 && !auto, fade))
+              : paintedMaterial(mesh.material, src.box, look, state.detail >= 25 && !auto, fade);
             if (auto) {
               // (AUTO: a second material with her fine bump picture, for the levels heavy enough to carry it)
               auto.plain = mesh.material;
-              auto.fine = Array.isArray(base) ? base.map((m) => paintedMaterial(m, src.box, look, true)) : paintedMaterial(base, src.box, look, true);
+              auto.fine = Array.isArray(base) ? base.map((m) => paintedMaterial(m, src.box, look, true, fade)) : paintedMaterial(base, src.box, look, true, fade);
             }
           }
           if (state.shapes === 'live' && dict && mesh.morphTargetInfluences) {
@@ -986,7 +1040,7 @@ export async function startDevRoom() {
     scene.add(root);
     const ring = Math.floor(i / 6);
     const radius = 4 + ring * 3.2;
-    const person: Person = { root, lods, level: TABLE.length - 1, angle: (i % 6) * (Math.PI / 3) + ring * 0.5, radius, speed: ((2.0 - ring * 0.15) / radius) * (ring % 2 ? -1 : 1), phase: r() * 6 };
+    const person: Person = { root, lods, fade: fadeValue, shown: true, depth: fadeDepth, level: TABLE.length - 1, angle: (i % 6) * (Math.PI / 3) + ring * 0.5, radius, speed: ((2.0 - ring * 0.15) / radius) * (ring % 2 ? -1 : 1), phase: r() * 6 };
     if (def.builder && state.motion !== 'off') {
       try {
         const body = inner.children[0];
@@ -1045,6 +1099,8 @@ export async function startDevRoom() {
   const frustum = new THREE.Frustum(), cullMatrix = new THREE.Matrix4(), cullBall = new THREE.Sphere(new THREE.Vector3(), 2.4), cullAt = new THREE.Vector3();
   let inView = 0;
   let drawn = 0;
+  /** FADE: where nobody is drawn any more, right now (FADE.end, or nearer while SMART FPS is holding the number drawn down). */
+  let fadeEnd = FADE.end;
   const seen: Person[] = [];
   // --------------------------------------------------------------------------
   // 🎚️ SMART FPS (v0.48; Joshua, 2026-11-14, from his stress tests: "a smart system that automatically adjusts
@@ -1120,6 +1176,7 @@ export async function startDevRoom() {
         for (const geo of l.geos) if (!geo?.userData.devRoomShared) geo?.dispose(); // (her other detail levels; the shared live body isn't hers)
         for (const set of [l.fine, l.plain]) for (const m of set ? (Array.isArray(set) ? set : [set]) : []) m.dispose();
       }
+      p.depth?.dispose();
       p.cloth?.dispose();
       p.live?.rig.dispose();
       p.root.removeFromParent();
@@ -1186,7 +1243,7 @@ export async function startDevRoom() {
   const stressSettings = () => [
     state.auto ? (TABLE === AUTO ? 'Auto' : TABLE === AUTO_LITE ? 'Auto lite' : 'Auto live') : `${state.detail}%`,
     `shapes ${state.auto && TABLE === AUTO_LIVE ? 'live' : state.shapes}`, `shadows ${state.shadows ? 'on' : 'off'}`, `motion ${state.motion}`,
-    `out of view ${state.cull ? 'not drawn' : 'drawn'}`, `smart FPS ${state.fps ? 'on' : 'off'}`, state.cloth === 'off' ? '' : `cloth ${state.cloth}`, `sharpness ${state.sharp ? '2x' : '1x'}`,
+    `out of view ${state.cull ? 'not drawn' : 'drawn'}`, `smart FPS ${state.fps ? 'on' : 'off'}`, `far away ${state.fade ? (stress.mode === 'view' ? 'drawn (no fade in this test)' : 'fades out 15-18 m') : 'drawn'}`, state.cloth === 'off' ? '' : `cloth ${state.cloth}`, `sharpness ${state.sharp ? '2x' : '1x'}`,
   ].filter(Boolean).join(' · ');
   const stressEnd = (why: string) => {
     if (!stress.on) return;
@@ -1321,6 +1378,7 @@ export async function startDevRoom() {
   const plainBtn = button(optRow, '', () => { state.plain = !state.plain; sync(); void rebuild(); });
   const clothBtn = button(optRow, '', () => { state.cloth = state.cloth === 'off' ? 'live' : state.cloth === 'live' ? 'freeze' : state.cloth === 'freeze' ? 'near' : 'off'; sync(); void rebuild(); });
   const cullBtn = button(optRow, '', () => { state.cull = !state.cull; sync(); });
+  const fadeBtn = button(optRow, '', () => { state.fade = !state.fade; sync(); void rebuild(); });
   const fpsBtn = button(optRow, '', () => { state.fps = !state.fps; smartSet(0); smart.need = SMART.patience; sync(); });
   const sharpBtn = button(optRow, '', () => { state.sharp = !state.sharp; sync(); resize(); });
   const sync = () => {
@@ -1357,6 +1415,8 @@ export async function startDevRoom() {
     stressCopyBtn.style.display = stress.lines.length ? '' : 'none';
     cullBtn.textContent = `Out of view: ${state.cull ? 'not drawn' : 'drawn'}`;
     cullBtn.classList.toggle('on', state.cull);
+    fadeBtn.textContent = `Far away: ${state.fade ? 'fades out 15-18 m' : 'drawn'}`;
+    fadeBtn.classList.toggle('on', state.fade);
     fpsBtn.textContent = `Smart FPS: ${state.fps ? 'on' : 'off'}`;
     fpsBtn.classList.toggle('on', state.fps);
   };
@@ -1472,18 +1532,48 @@ export async function startDevRoom() {
       cullBall.radius = state.shadows ? 4.5 : 2.4;
     }
     seen.length = 0;
+    // (FADE: off for the ALL IN VIEW stress test, which is there to count how many can be drawn at once)
+    const fading = state.fade && !(stress.on && stress.mode === 'view');
+    // (the stretch she fades over: half the way, 9 m of 18; narrower the more SMART FPS has pulled the end in, so
+    // the few still drawn then are drawn whole)
+    const fadeBand = fadeEnd * (1 - FADE.start / FADE.end) * (fadeEnd / FADE.end);
+    inView = 0;
     for (const p of people) {
-      const show = !state.cull || frustum.intersectsSphere(cullBall.set(cullAt.set(p.root.position.x, 1.4, p.root.position.z), cullBall.radius));
+      let show = !state.cull || frustum.intersectsSphere(cullBall.set(cullAt.set(p.root.position.x, 1.4, p.root.position.z), cullBall.radius));
+      if (show) inView++;
+      let f = 1;
+      if (fading) {
+        // (how much of her is drawn: all of her up to where the fade starts, none where it ends)
+        f = THREE.MathUtils.clamp((fadeEnd - (p.dist ?? 0)) / fadeBand, 0, 1);
+        if (f <= 0) show = false;
+      }
+      p.fade.value = f;
       p.root.visible = show;
       if (show) seen.push(p);
     }
-    inView = seen.length;
-    // (SMART FPS: of those in view, only the nearest `smart.most` are drawn)
-    drawn = inView;
-    if (state.fps && seen.length > smart.most) {
-      seen.sort((a, b) => (a.dist ?? 0) - (b.dist ?? 0));
-      for (let i = smart.most; i < seen.length; i++) seen[i].root.visible = false;
-      drawn = smart.most;
+    drawn = seen.length;
+    if (fading) {
+      // (SMART FPS: of those in view only the nearest `smart.most` are drawn. With the fade that is done by
+      // distance: the fade's end is pulled in to where one too many stands, a little each frame, so nobody pops)
+      let want = FADE.end;
+      if (state.fps && seen.length > smart.most) {
+        seen.sort((a, b) => (a.dist ?? 0) - (b.dist ?? 0));
+        want = Math.max(FADE.least, seen[smart.most].dist ?? FADE.end);
+      } else if (state.fps && seen.length >= smart.most - 2) want = fadeEnd; // (just right: hold it there)
+      fadeEnd = Math.min(FADE.end, fadeEnd + (want - fadeEnd) * Math.min(1, dt * (want < fadeEnd ? 3 : 0.6)));
+    } else {
+      fadeEnd = FADE.end;
+      if (state.fps && seen.length > smart.most) {
+        seen.sort((a, b) => (a.dist ?? 0) - (b.dist ?? 0));
+        for (let i = smart.most; i < seen.length; i++) seen[i].root.visible = false;
+        drawn = smart.most;
+      }
+    }
+    // (someone not drawn is taken out of the scene: 400 people are some 40,000 bones, and three.js works out where
+    // every bone in the scene is each frame, drawn or not. That was most of the cost of a big crowd out of view.)
+    for (const p of people) {
+      const on = p.root.visible;
+      if (on !== p.shown) { p.shown = on; if (on) scene.add(p.root); else scene.remove(p.root); }
     }
     for (const p of people) p.cloth?.show(p.root.visible);
     smartTick(ms);
@@ -1531,6 +1621,7 @@ export async function startDevRoom() {
         `slowest frame ${worstShown.toFixed(0)} ms`,
         `${people.length} x ${state.model.label}${state.cull ? ` · ${inView} in view` : ''}${drawn < inView ? ` · ${drawn} drawn` : ''}`,
         state.fps ? `smart FPS: ${smart.step === 0 ? 'full detail' : smart.step === 1 ? 'one level lighter' : smart.step === 2 ? 'all at the lightest' : `all at the lightest · at most ${smart.most} drawn`}` : '',
+        state.fade ? (stress.on && stress.mode === 'view' ? 'fade: off for this test' : `fade: from ${((fadeEnd - fadeEnd * (1 - FADE.start / FADE.end) * (fadeEnd / FADE.end)) / METRE).toFixed(1)} m · gone at ${(fadeEnd / METRE).toFixed(1)} m`) : '',
         `${(r.triangles / 1e6).toFixed(2)}M triangles drawn · ${r.calls} draw calls`,
         state.auto && people.some((q) => q.lods.length)
           ? `auto${TABLE === AUTO ? '' : TABLE === AUTO_LITE ? ' lite' : ' live'}: ${TABLE.map((a, k) => [`${a.detail}%${a.live ? ' live' : ''}`, people.filter((q) => q.level === k).length] as const).filter(([, c]) => c > 0).map(([d, c]) => `${c} at ${d}`).join(' · ')}`
