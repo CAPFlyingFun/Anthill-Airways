@@ -85,6 +85,9 @@ export class Passengers {
   stops: Stop[] = [];
   /** 👑 The share of new travellers who are VIPs (0 until the lounge opens). */
   vipChance = 0;
+  /** How long the check-in line gets, and how many may wait at each gate (⬆️ upgrades). */
+  queueMax: number = TY.queueMax;
+  gateCap: number[] = [];
   /** x check-in speed (⬆️ staff). */
   checkMult = 1;
   /** Called when a passenger finishes checking in (the airfield pays + gives XP). */
@@ -171,7 +174,7 @@ export class Passengers {
   update(dt: number) {
     // New travellers walk in while the line has room
     this.arriveT -= dt;
-    if (this.arriveT <= 0 && this.line.length < TY.queueMax) {
+    if (this.arriveT <= 0 && this.line.length < this.queueMax) {
       // (busier as the airport grows: each open gate brings more travellers)
       this.arriveT = (TY.arriveEvery / (0.6 + 0.4 * this.gates)) * (0.7 + Math.random() * 0.6);
       const p = this.spawn(this.spots.edge);
@@ -260,7 +263,7 @@ export class Passengers {
   private freeGate() {
     let best = -1;
     for (let g = 0; g < this.gates; g++) {
-      if (this.atGate[g].length >= 6) continue;
+      if (this.atGate[g].length >= (this.gateCap[g] ?? 6)) continue;
       if (best < 0 || this.atGate[g].length < this.atGate[best].length) best = g;
     }
     return best;

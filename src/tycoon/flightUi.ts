@@ -49,6 +49,8 @@ export interface FlightUiHooks {
   watch: (g: number) => void;
   /** 📋 The whole flight board. */
   board: () => void;
+  /** ⬆️ The hangar's fleet menu (false: no hangar yet). */
+  fleet: () => boolean;
 }
 
 const clock = (secs: number) => {
@@ -102,6 +104,7 @@ export class FlightUi {
       <button class="fl-x" aria-label="Close">✕</button>
       <div class="fl-por"><span class="fl-ring"><i class="fl-ic"></i></span></div>
       <button class="fl-aim" aria-label="Watch this plane">🎯</button>
+      <button class="fl-up" aria-label="Fleet upgrades">⬆</button>
       <div class="fl-no"></div>
       <div class="fl-type"></div>
       <div class="fl-route"></div>
@@ -114,6 +117,10 @@ export class FlightUi {
       <div class="fl-step"></div>`;
     for (const k of ['ring', 'ic', 'no', 'type', 'route', 'pax', 'bags', 'fuel', 'pay', 'step']) this.c[k] = this.card.querySelector(`.fl-${k}`)!;
     this.card.querySelector('.fl-x')!.addEventListener('click', () => this.show(null));
+    this.card.querySelector('.fl-up')!.addEventListener('click', () => {
+      if (!hooks.fleet()) return;
+      this.show(null);
+    });
     this.card.querySelector('.fl-aim')!.addEventListener('click', () => {
       if (this.open !== null) hooks.watch(this.open);
     });

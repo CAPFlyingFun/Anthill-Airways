@@ -1256,3 +1256,44 @@ body.in-cut .hotbar, body.in-cut .use-btn { visibility: hidden; }
 
 /* Airport Tycoon: the ⬆️ upgrade button sits above the flight chips */
 body.tycoon .up-btn { bottom: calc(68px + var(--safe-b)); }
+
+/* ============================================================================
+   ⬆️ Airport Tycoon v0.72: the upgrade menu, after Galaxy Defenders' turret / hero menus: a dark navy panel in the
+   middle of the screen, a row per upgrade (green edge = affordable, dim red = not yet, MAX = done).
+   ============================================================================ */
+.gm-overlay {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  background: rgba(4, 8, 16, 0.72); pointer-events: auto; font-family: -apple-system, Arial, sans-serif;
+}
+.gm-panel {
+  width: min(328px, calc(100vw - 24px)); max-height: calc(100vh - 60px - var(--safe-t) - var(--safe-b));
+  display: flex; flex-direction: column; padding: 14px; border-radius: 16px;
+  background: #0e1a30; border: 2px solid #2c4a72; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+}
+.gm-title { color: #cfe0ff; font-weight: 700; font-size: 16px; text-align: center; }
+.gm-cash { color: #7c93b8; font-size: 11px; text-align: center; margin: 3px 0 10px; font-variant-numeric: tabular-nums; }
+.gm-rows { display: flex; flex-direction: column; gap: 6px; overflow-y: auto; min-height: 0; -webkit-overflow-scrolling: touch; }
+#hud .gm-row {
+  flex: none; display: flex; flex-direction: column; gap: 3px; width: 100%; padding: 7px 12px 8px; border-radius: 10px;
+  background: #241620; border: 1.5px solid #3a4f74; color: #e8eefc; text-align: left;
+  font-family: -apple-system, Arial, sans-serif;
+}
+.gm-row .l1, .gm-row .l2 { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+.gm-row .nm { font-size: 13px; font-weight: 700; }
+.gm-row .pr { font-size: 12px; font-weight: 700; color: #ff8a9a; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.gm-row .lv { font-size: 11px; font-style: normal; color: #6f86ab; white-space: nowrap; }
+.gm-row .ds { font-size: 11px; font-style: normal; color: #9fb6d6; text-align: right; }
+#hud .gm-row.ok { background: #16331f; border-color: #2bd4a0; }
+.gm-row.ok .pr { color: #7cfc9b; }
+#hud .gm-row.ok:active { filter: brightness(1.25); }
+#hud .gm-row.max { background: #1a2740; }
+.gm-row.max .nm { color: #88aaaa; }
+.gm-row.max .pr, .gm-row.lock .pr { color: #5e7196; }
+#hud .gm-row.lock { background: #171c28; border-color: #2a3346; }
+.gm-row.lock .nm { color: #5e6b82; }
+#hud .gm-close {
+  flex: none; margin-top: 10px; height: 38px; border-radius: 10px; background: #1a2740; border: 1.5px solid #3a4f74;
+  color: #9fb0d0; font-size: 14px; font-family: -apple-system, Arial, sans-serif;
+}
+/* the ⬆️ shortcut on the flight card (to the hangar's fleet menu) */
+.fl-up { position: absolute; top: 40px; left: 6px; width: 28px; height: 28px; border-radius: 50%; border: none; padding: 0; background: #16331f; color: #7cfc9b; font-size: 15px; font-weight: 900; box-shadow: 0 0 0 1.5px #2bd4a0; }

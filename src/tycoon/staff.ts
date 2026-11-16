@@ -32,7 +32,6 @@ export const STAFF: StaffDef[] = [
   { id: 'bags', icon: '🧳', name: 'Baggage ants', needs: 'ty-bags', base: 90 },
   { id: 'checkin', icon: '🎫', name: 'Check-in ant', needs: 'ty-checkin', base: 100 },
   { id: 'cafe', icon: '🍪', name: 'Café crew', needs: 'ty-crumbs', base: 140 },
-  { id: 'shop', icon: '🎁', name: 'Gift shop', needs: 'ty-shop', base: 160 },
   { id: 'banker', icon: '🏦', name: 'Banker', needs: 'ty-banker', base: 150 },
   { id: 'janitor', icon: '🧹', name: 'Janitor ant', needs: 'ty-janitor', base: 120 },
   { id: 'you', icon: '🎒', name: 'Your backpack', needs: null, base: 70 },

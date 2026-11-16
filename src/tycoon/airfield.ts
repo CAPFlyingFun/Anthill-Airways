@@ -42,7 +42,8 @@ import { SURFACE, artBaggageCart, artBackdrop, artBug, artDewTank, artFuelFlower
 import { Plane } from './plane';
 import { Passengers, type Pax, type Stop } from './passengers';
 import { FLEET, bestPlane, openRoutes, routeOf } from './fleet';
-import { STAFF, STAFF_MAX, buyStaff, staffCost, staffFx, staffPanel, type StaffId } from './staff';
+import { STAFF, STAFF_MAX, buyStaff, staffCost, staffFx, type StaffId } from './staff';
+import { UPS, UpMenu, upPrice, type MenuRow, type UpDef } from './upgrades';
 import { Events } from './events';
 import { trash } from '../world/trash';
 import { mat, mesh, PAL } from './kit';
@@ -237,7 +238,7 @@ export class Airfield {
     this.pax.gates = this.gates.filter((g) => g.open).length;
     this.pax.onCheckIn = (p) => {
       // (👑 a VIP pays more for the same seat)
-      this.bill(TY.ticket * (p.vip ? TY.vipTicket : 1), desk.front);
+      this.bill(this.ticket * (p.vip ? TY.vipTicket : 1), desk.front);
       this.st.passengers++;
       bump('sold');
       this.progress.addXp(TY.xpCheckIn);
@@ -280,6 +281,19 @@ export class Airfield {
       this.tiles.push(t);
     }
     for (const id of save.unlocked) this.applyUnlock(id, false);
+    this.refreshTiles(false);
+
+    // (v0.72 migrations: a fleet bought on the old tiles comes with the hangar; the gift shop's old staff level
+    // becomes its Faster Restock level)
+    if (this.owns('ty-bees') && !this.owns('ty-hangar')) {
+      save.unlocked.push('ty-hangar');
+      this.applyUnlock('ty-hangar', false);
+    }
+    if (this.st.staff?.shop) {
+      (this.st.ups ??= {})['shop.stock'] = Math.min(6, this.st.staff.shop);
+      delete this.st.staff.shop;
+    }
+    this.buildTargets(desk.door);
     this.refreshTiles(false);
 
     this.tutorial = new Tutorial(this, hud, save, this.script());
@@ -626,7 +640,7 @@ export class Airfield {
         const it = c.shelf.pop();
         if (!it) return;
         this.flyers.fly(it.mesh, () => p.pos.clone().setY(p.pos.y + 1), () => it.mesh.removeFromParent(), 0.3, 0.6);
-        this.bill(TY.snackPrice, c.spot);
+        this.bill(TY.snackPrice + this.up('cafe.price'), c.spot);
         this.dropLitter(p.pos);
         this.goals.add('snacks', 1);
         this.progress.addXp(1);
@@ -691,7 +705,7 @@ export class Airfield {
         const it = s.shelf.pop();
         if (!it) return;
         this.flyers.fly(it.mesh, () => p.pos.clone().setY(p.pos.y + 1), () => it.mesh.removeFromParent(), 0.3, 0.6);
-        this.bill(TY.shopPrice + staffFx.shopPrice(this.staffLv('shop')), s.spot);
+        this.bill(TY.shopPrice + this.up('shop.price'), s.spot);
         this.dropLitter(p.pos);
         this.progress.addXp(1);
         this.sfx.sale();
@@ -752,7 +766,7 @@ export class Airfield {
       // (a VIP relaxes for a moment, then pays the lounge fee and heads for the gate)
       has: (p) => p.stopT >= TY.loungeSecs,
       buy: () => {
-        this.bill(TY.loungeFee, l.spot);
+        this.bill(TY.loungeFee + 3 * this.up('lounge.fee'), l.spot);
         this.progress.addXp(2);
       },
     });
@@ -761,7 +775,6 @@ export class Airfield {
   // --------------------------------------------------------------------------
   // ⬆️ STAFF upgrades (v0.70): near the manager in the terminal, tap the ⬆️ button: a row per hired job.
   // --------------------------------------------------------------------------
-  private staffOpen = false;
   private padHintT = 0;
   /** The STAFF OFFICE: a pad behind the counter, left of the check-in ant, with the manager ant up on the counter. */
   private staffAt = new THREE.Vector3();
@@ -889,25 +902,222 @@ export class Airfield {
   staffLv(id: StaffId) {
     return this.st.staff?.[id] ?? 0;
   }
-  private openStaff() {
-    this.staffOpen = true;
-    this.sfx.popup();
-    this.hud.openUpgrades({
-      model: () => staffPanel(this.st.staff ??= {}, this.save.cash, (id) => this.owns(id)),
-      buy: (id, n) => {
-        const spent = buyStaff(this.st.staff ??= {}, id, n, this.save.cash);
-        if (spent <= 0) return;
-        this.save.cash -= spent;
-        this.hud.setCash(this.save.cash);
-        this.sfx.upgrade();
-        this.applyStaff();
-      },
-      tab: () => {},
-      close: () => {
-        this.staffOpen = false;
-      },
-    });
+  // --------------------------------------------------------------------------
+  // ⬆️ UPGRADES (v0.72, tycoon/upgrades.ts): every building is a TARGET. A green arrow bobs over it when there's a
+  // level you can afford; tap it (or walk near and tap the ⬆️ button) for its menu.
+  // --------------------------------------------------------------------------
+  private hangar!: ArtPiece;
+  private menu = new UpMenu(document.getElementById('hud')!);
+  private targets: { id: string; name: string; at: THREE.Vector3; r: number; live: () => boolean; rows: () => MenuRow[]; buy: (row: string) => void; arrow: THREE.Sprite; can: boolean }[] = [];
+  private targetT = 0;
+  private arrowT = 0;
+  /** A building upgrade's level ("gate0.fuel"). */
+  up(key: string) {
+    return this.st.ups?.[key] ?? 0;
   }
+  /** 🎫 A ticket's price now. */
+  private get ticket() {
+    return TY.ticket + this.up('terminal.ticket');
+  }
+  /** How long gate `g`'s plane waits for more passengers once one's aboard. */
+  private boardWait(g: Gate) {
+    return TY.boardWait * (1 - 0.1 * this.up(`gate${this.gates.indexOf(g)}.board`));
+  }
+  private pay(cost: number) {
+    if (this.save.cash < cost) return false;
+    this.save.cash -= cost;
+    this.hud.setCash(this.save.cash);
+    this.sfx.upgrade();
+    return true;
+  }
+
+  private addTarget(id: string, name: string, at: THREE.Vector3, r: number, live: () => boolean, rows: () => MenuRow[], buy: (row: string) => void, arrowY = 7) {
+    const arrow = new THREE.Sprite(Airfield.arrowMat());
+    arrow.scale.set(1.8, 1.8, 1);
+    arrow.position.copy(at).setY(arrowY);
+    arrow.renderOrder = 6;
+    arrow.visible = false;
+    arrow.userData.y = arrowY;
+    this.scene.add(arrow);
+    this.targets.push({ id, name, at, r, live, rows, buy, arrow, can: false });
+  }
+  /** A building whose menu is a plain list of upgrades (`defs`), saved as "<id>.<k>". */
+  private addBuilding(id: string, name: string, at: THREE.Vector3, r: number, defs: UpDef[], live: () => boolean, arrowY = 7) {
+    this.addTarget(
+      id, name, at, r, live,
+      () => defs.map((d) => {
+        const lv = this.up(`${id}.${d.k}`);
+        return { id: d.k, ic: d.ic, name: d.name, desc: d.desc, lv: `Lv ${lv}/${d.max}`, cost: lv >= d.max ? null : upPrice(d, lv) };
+      }),
+      (k) => {
+        const d = defs.find((x) => x.k === k);
+        if (!d) return;
+        const key = `${id}.${k}`;
+        const lv = this.up(key);
+        if (lv < d.max && this.pay(upPrice(d, lv))) (this.st.ups ??= {})[key] = lv + 1;
+      },
+      arrowY,
+    );
+  }
+  /** The green ⬆ arrow (one texture for all of them). */
+  private static arrowMaterial: THREE.SpriteMaterial | null = null;
+  private static arrowMat() {
+    if (Airfield.arrowMaterial) return Airfield.arrowMaterial;
+    const c = document.createElement('canvas');
+    c.width = c.height = 128;
+    const x = c.getContext('2d')!;
+    x.translate(64, 64);
+    x.shadowColor = '#7CFC9B';
+    x.shadowBlur = 18;
+    x.fillStyle = '#7CFC9B';
+    x.strokeStyle = '#0e3a22';
+    x.lineWidth = 5;
+    x.beginPath();
+    x.moveTo(0, -46); x.lineTo(44, 4); x.lineTo(16, 4); x.lineTo(16, 44); x.lineTo(-16, 44); x.lineTo(-16, 4); x.lineTo(-44, 4);
+    x.closePath();
+    x.stroke();
+    x.fill();
+    Airfield.arrowMaterial = new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), transparent: true, depthTest: false });
+    return Airfield.arrowMaterial;
+  }
+
+  private buildTargets(doorAt: THREE.Vector3) {
+    const v = (x: number, z: number) => new THREE.Vector3(x, 0, z);
+    this.gates.forEach((g, i) => {
+      const post = g.piece.root.localToWorld(new THREE.Vector3(-14.2, 0, 2.6));
+      this.addBuilding(`gate${i}`, `Gate ${i + 1}`, post, 8, UPS.gate, () => g.open, 8);
+    });
+    this.flowers.forEach((f, i) => this.addBuilding(`flower${i}`, `Nectar flower ${i + 1}`, v(f.zone.x, f.zone.z), 6, UPS.flower, () => f.piece.root.visible, 6));
+    this.addBuilding('terminal', 'Terminal', doorAt.clone().setY(0), 7, UPS.terminal, () => true, 9);
+    this.addBuilding('cafe', 'Café kitchen', v(AT.oven.x, AT.oven.z + 3), 7, UPS.cafe, () => this.cafeOpen, 6);
+    this.addBuilding('shop', 'Gift shop', this.shop.spot.clone().setY(0), 5, UPS.shop, () => this.shop.open, 8);
+    this.addBuilding('lounge', 'VIP Lounge', this.lounge.spot.clone().setY(0), 7, UPS.lounge, () => this.lounge.open, 7);
+    this.addBuilding('recycler', 'Recycler', v(AT.recycler.x, AT.recycler.z + 2), 8, UPS.recycler, () => this.recycler.open, 7);
+    this.addBuilding('tower', 'Control Tower', v(AT.tower.x, AT.tower.z + 5), 10, UPS.tower, () => this.owns('ty-tower'), 9);
+
+    // ⬆️ The Staff Office: a row per hired job (levels in save.tycoon.staff)
+    const staffDesc: Record<string, string> = { fuel: '+12% speed · +1 carry / 2 Lv', bags: '+12% speed · +1 carry / 2 Lv', cafe: '+12% speed · +1 carry / 2 Lv', janitor: '+12% speed · +1 carry / 2 Lv', checkin: '+15% check-in speed', banker: '+20% grab speed', you: '+1 carry' };
+    this.addTarget(
+      'staff', 'Staff upgrades', this.staffAt.clone(), 6, () => true,
+      () => STAFF.filter((d) => !d.needs || this.owns(d.needs)).map((d) => {
+        const lv = this.staffLv(d.id);
+        return { id: d.id, ic: d.icon, name: d.name, desc: staffDesc[d.id] ?? '', lv: `Lv ${lv}/${STAFF_MAX}`, cost: lv >= STAFF_MAX ? null : staffCost(d, lv) };
+      }),
+      (id) => {
+        const spent = buyStaff((this.st.staff ??= {}), id, 1, this.save.cash);
+        if (spent > 0) this.pay(spent);
+      },
+      7,
+    );
+
+    // 🛖 The Hangar: your fleet. Upgrades for whatever flies, then each aircraft: owned, the next to unlock, later ones.
+    this.addTarget(
+      'hangar', 'Hangar', v(AT.hangar.x, AT.hangar.z), 13, () => this.owns('ty-hangar'),
+      () => {
+        const rows: MenuRow[] = UPS.plane.map((d) => {
+          const lv = this.up(`fleet.${d.k}`);
+          return { id: `fleet.${d.k}`, ic: d.ic, name: `${d.name} (all aircraft)`, desc: d.desc, lv: `Lv ${lv}/${d.max}`, cost: lv >= d.max ? null : upPrice(d, lv) };
+        });
+        const flying = bestPlane((id) => this.owns(id));
+        let nextShown = false;
+        for (const t of FLEET) {
+          const seats = `${t.seats + this.up('fleet.seats')} seats · ×${t.speed} speed`;
+          if (!t.unlock || this.owns(t.unlock)) rows.push({ id: t.kind, ic: t.icon, name: t.name, desc: seats, lv: t === flying ? '✈️ FLYING NOW' : 'Retired', cost: null, done: 'OWNED' });
+          else {
+            const lock = nextShown ? '🔒 Later' : this.save.level < t.level ? `🔒 Lv ${t.level}` : undefined;
+            rows.push({ id: t.kind, ic: t.icon, name: `Unlock ${t.name}`, desc: seats, lv: 'NEW AIRCRAFT', cost: t.cost, lock });
+            nextShown = true;
+          }
+        }
+        return rows;
+      },
+      (id) => {
+        const d = UPS.plane.find((x) => `fleet.${x.k}` === id);
+        if (d) {
+          const lv = this.up(id);
+          if (lv < d.max && this.pay(upPrice(d, lv))) {
+            (this.st.ups ??= {})[id] = lv + 1;
+            if (d.k === 'seats') for (const g of this.gates) g.swap = true; // (each plane gets its new seat at its gate)
+          }
+          return;
+        }
+        const t = FLEET.find((f) => f.kind === id);
+        if (!t?.unlock || this.owns(t.unlock) || this.save.level < t.level || !this.pay(t.cost)) return;
+        this.save.unlocked.push(t.unlock);
+        this.applyUnlock(t.unlock, true);
+      },
+      12,
+    );
+  }
+
+  /** Open a target's menu. */
+  openTarget(id: string) {
+    const t = this.targets.find((x) => x.id === id);
+    if (!t || !t.live()) return false;
+    this.sfx.popup();
+    this.menu.open(() => ({ title: `⬆️ ${t.name}`, cash: this.save.cash, rows: t.rows() }), (row) => t.buy(row));
+    return true;
+  }
+  /** A tap on the 3D view: the building nearest the tap (within a thumb's reach) opens its menu. */
+  tapTarget(x: number, y: number, w: number, h: number) {
+    let best: string | null = null;
+    let bestD = 58;
+    const v = new THREE.Vector3();
+    for (const t of this.targets) {
+      if (!t.live()) continue;
+      for (const yy of [1.5, t.arrow.userData.y as number]) {
+        v.copy(t.at).setY(yy).project(this.camera);
+        if (v.z > 1) continue;
+        const d = Math.hypot((v.x * 0.5 + 0.5) * w - x, (-v.y * 0.5 + 0.5) * h - y);
+        if (d < bestD) {
+          bestD = d;
+          best = t.id;
+        }
+      }
+    }
+    return best ? this.openTarget(best) : false;
+  }
+  /** Arrows over what you can afford, and the ⬆️ button for the building you're standing by. */
+  private updateTargets(dt: number) {
+    this.arrowT += dt;
+    this.targetT -= dt;
+    if (this.targetT <= 0) {
+      this.targetT = 0.5;
+      for (const t of this.targets) t.can = t.live() && t.rows().some((r) => r.cost !== null && !r.lock && this.save.cash >= r.cost);
+    }
+    const p = this.player.pos;
+    let near: (typeof this.targets)[number] | null = null;
+    let nearD = Infinity;
+    for (const t of this.targets) {
+      t.arrow.visible = t.can;
+      if (t.can) t.arrow.position.y = (t.arrow.userData.y as number) + Math.sin(this.arrowT * 5) * 0.4;
+      if (!t.live()) continue;
+      const d = Math.hypot(p.x - t.at.x, p.z - t.at.z);
+      if (d < t.r && d < nearD) {
+        nearD = d;
+        near = t;
+      }
+    }
+    if (near && !this.menu.isOpen) {
+      const id = near.id;
+      this.hud.setUpgradeButton(near.name, () => this.openTarget(id), near.can, this);
+    } else if (this.hud.ownsUpgradeButton(this)) this.hud.setUpgradeButton(null);
+  }
+  /** Put the building upgrade levels to work (pads, lines, VIPs, the oven, every plane's speed). */
+  private applyUps() {
+    const type = bestPlane((id) => this.owns(id));
+    const boost = (this.owns('ty-tower') ? TY.towerBoost * (1 + 0.05 * this.up('tower.boost')) : 1) * type.speed * (1 + 0.06 * this.up('fleet.speed'));
+    this.gates.forEach((g, i) => {
+      g.fuel.max = TY.fuelMax + 2 * this.up(`gate${i}.fuel`);
+      this.pax.gateCap[i] = Math.max(6, g.plane.model.seats.length + 2) + 2 * this.up(`gate${i}.seats`);
+      g.plane.boost = boost;
+    });
+    this.flowers.forEach((f, i) => (f.stack.max = TY.flowerMax + 2 * this.up(`flower${i}.cap`)));
+    this.pax.queueMax = TY.queueMax + this.up('terminal.line');
+    if (this.lounge.open) this.pax.vipChance = TY.vipShare + 0.03 * this.up('lounge.vips');
+    (this.cafe.oven as unknown as { cookTime: number }).cookTime = OVEN.cookTime / (this.owns('ty-chef') ? CONFIG.bakery.fastOvenMultiplier : 1) / (1 + 0.15 * this.up('cafe.oven'));
+  }
+
   /** Put the staff levels to work: helpers' speed and carry, check-in speed, the Banker's grab, your backpack. */
   private applyStaff() {
     for (const w of this.workers) {
@@ -947,6 +1157,21 @@ export class Airfield {
     const t = bestPlane((id) => this.owns(id));
     const m = artBug(t.kind, t.length, { seed: 3 + i * 4 });
     m.root.userData.planeType = t.kind;
+    // 💺 as many seats as its type has (+ the hangar's Extra Seat levels): extra ones sit between the model's own
+    // seats, a little to each side
+    const want = t.seats + this.up('fleet.seats');
+    const own = m.seats.length;
+    m.seats.length = Math.min(own, want);
+    for (let e = 0; m.seats.length < want; e++) {
+      const a = m.seats[e % own];
+      const b = m.seats[(e + 1) % own] ?? a;
+      const seat = new THREE.Object3D();
+      const d = a.position.distanceTo(b.position) || 0.5;
+      seat.position.copy(a.position).lerp(b.position, 0.5);
+      seat.position.x += (e % 2 ? 1 : -1) * d * (0.3 + 0.12 * Math.floor(e / own));
+      (a.parent ?? m.bob).add(seat);
+      m.seats.push(seat);
+    }
     return m;
   }
 
@@ -999,7 +1224,7 @@ export class Airfield {
       // 🗺️ a longer route's fare: the rest of each passenger's fare is paid as it lifts off
       const fare = plane.outbound?.fare ?? 1;
       if (fare > 1 && plane.aboard > 0) {
-        const bonus = Math.round(plane.aboard * TY.ticket * (fare - 1));
+        const bonus = Math.round(plane.aboard * this.ticket * (fare - 1));
         this.bill(bonus, plane.pos);
         if (this.near(plane.pos, 40)) this.hud.floatAt(plane.pos.clone().setY(plane.pos.y + 6), this.camera, `🗺️ ${routeOf(plane.outbound?.place).place} fares +$${bonus}`, 'gold');
       }
@@ -1046,7 +1271,9 @@ export class Airfield {
   private buildDecor() {
     this.place(artTower(), AT.tower.x, AT.tower.z);
     this.place(artWindsock(), AT.windsock.x, AT.windsock.z);
-    this.place(artHangar(), AT.hangar.x, AT.hangar.z, -0.5);
+    // (🛖 the hangar is built with its tile: until then it's put away, and not solid)
+    this.hangar = this.place(artHangar(), AT.hangar.x, AT.hangar.z, -0.5, false);
+    shown(this.hangar.root, false);
     this.place(artDewTank(), AT.flowers[1].x + 24, AT.flowers[1].z - 8, -0.4);
     this.place(artBaggageCart(), 60, -4, 0.6);
     this.place(artSign('ANTHILL AIRWAYS'), AT.terminal.x - 30, AT.terminal.z + 24, 0.5);
@@ -1141,7 +1368,7 @@ export class Airfield {
       this.scene.add(chef.root);
       c.chef = chef;
       if (animate) this.flyers.grow(chef.root);
-    } else if (id === 'ty-bees' || id === 'ty-dragonfly' || id === 'ty-butterfly') {
+    } else if (FLEET.some((f) => f.unlock === id)) {
       // ✈️ every gate swaps its plane for the new one (✈️ fleet.ts) as soon as it's parked and empty
       for (const g of this.gates) g.swap = true;
       const t = FLEET.find((f) => f.unlock === id)!;
@@ -1157,6 +1384,13 @@ export class Airfield {
       titleTag(w.model, '🧹 JANITOR', TITLE.ant);
       this.workers.push(w);
       if (animate) this.flyers.grow(w.model.root);
+    } else if (id === 'ty-hangar') {
+      shown(this.hangar.root, true);
+      this.blockers.push(...(this.hangar.root.userData.walls as Blocker[]));
+      if (animate) {
+        this.flyers.grow(this.hangar.root);
+        this.hud.banner('🛖 Hangar built!', 'Tap it (or walk up to it) to unlock new aircraft and upgrade your fleet', 3600);
+      }
     } else if (id === 'ty-shop') {
       this.openShop(animate);
     } else if (id === 'ty-lounge') {
@@ -1173,7 +1407,7 @@ export class Airfield {
   private bagsWanted(g: Gate) {
     const i = this.gates.indexOf(g);
     const aboard = g.plane.parked ? g.plane.aboard : 0; // (in the air, its riders' bags are already in its hold)
-    return Math.min(TY.bagPadMax, aboard + g.boarding.length + this.pax.atGate[i].length);
+    return Math.min(Math.max(TY.bagPadMax, g.plane.model.seats.length), aboard + g.boarding.length + this.pax.atGate[i].length);
   }
   private bagsNeeded(g: Gate) {
     return this.bagsWanted(g) - g.bags.count;
@@ -1274,7 +1508,7 @@ export class Airfield {
       rows.push({ kind, no: f.flight ? `AA ${f.flight}` : '', place, gate: f.gate, status: f.board, eta: f.eta, tone });
       // (a full gate holds up check-in: say so)
       const waiting = this.pax.atGate[f.gate - 1].length + g.boarding.length;
-      if (waiting >= 6 && !g.plane.parked) rows.push({ kind: 'dep', no: '', place: `Gate ${f.gate} is full`, gate: f.gate, status: `${waiting} WAITING`, eta: g.plane.etaGate(), tone: 'warn' });
+      if (waiting >= (this.pax.gateCap[f.gate - 1] ?? 6) && !g.plane.parked) rows.push({ kind: 'dep', no: '', place: `Gate ${f.gate} is full`, gate: f.gate, status: `${waiting} WAITING`, eta: g.plane.etaGate(), tone: 'warn' });
     });
     return rows;
   }
@@ -1310,7 +1544,7 @@ export class Airfield {
         eta: null,
         ring: 1,
         tone: 'go',
-        pay: dep ? p.aboard * TY.ticket : p.aboard * TY.landingFee,
+        pay: dep ? p.aboard * this.ticket : p.aboard * TY.landingFee,
       };
       const set = (step: string, short: string, tone: PlaneInfo['tone'], eta: number | null = null, ring = 1, board = step) =>
         Object.assign(info, { step, short, tone, eta, ring, board });
@@ -1324,9 +1558,9 @@ export class Airfield {
           if (fu < per) set('⛽ NEEDS NECTAR', 'NECTAR', 'warn', null, fu / per, `NEEDS NECTAR ⛽ ${fu}/${per}`);
           else if (p.aboard > 0) {
             const full = p.freeSeats === 0 && !g.boarding.length;
-            const done = full || g.boardT >= TY.boardWait;
+            const done = full || g.boardT >= this.boardWait(g);
             if (done && g.bags.count < p.aboard) set('🧳 NEEDS BAGS', 'BAGS', 'warn', null, g.bags.count / p.aboard, `NEEDS BAGS 🧳 ${g.bags.count}/${p.aboard}`);
-            else set('BOARDING', 'BOARDING', 'go', full ? 0 : Math.max(0, TY.boardWait - g.boardT), Math.min(1, g.boardT / TY.boardWait), `BOARDING ${p.aboard}/${seats}`);
+            else set('BOARDING', 'BOARDING', 'go', full ? 0 : Math.max(0, this.boardWait(g) - g.boardT), Math.min(1, g.boardT / this.boardWait(g)), `BOARDING ${p.aboard}/${seats}`);
           } else if (waiting > 0) set('BOARDING SOON', 'BOARDING', 'go');
           else set('WAITING FOR PASSENGERS', 'WAITING', 'info', null, 0.15);
           break;
@@ -1386,7 +1620,7 @@ export class Airfield {
       else if (f.eta !== null) text += ` · ${f.dir === 'dep' ? '🛫' : '🛬'} ${clockText(f.eta)}`;
       this.gates[f.gate - 1].label.setText(text);
     }
-    const full = this.gates.every((g, i) => !g.open || this.pax.atGate[i].length >= 6);
+    const full = this.gates.every((g, i) => !g.open || this.pax.atGate[i].length >= (this.pax.gateCap[i] ?? 6));
     this.deskSign.setText(this.bagDrop.full ? '🧳 BAG DROP FULL · MOVE THE BAGS' : full ? '🎫 GATES FULL · WAIT FOR A PLANE' : '🎫 CHECK-IN');
   }
 
@@ -1447,12 +1681,12 @@ export class Airfield {
     this.flowers.forEach((f, i) => {
       if (!f.piece.root.visible) return;
       f.t += dt;
-      if (f.t >= TY.flowerEvery / (this.events.dew ? 2 : 1) && !f.stack.full) {
+      if (f.t >= TY.flowerEvery / (this.events.dew ? 2 : 1) / (1 + 0.15 * this.up(`flower${i}.speed`)) && !f.stack.full) {
         f.t = 0;
         const it = f.stack.addInstant('nectar');
         this.flyers.grow(it.mesh, 0.25);
       }
-      f.piece.setLevel?.(f.stack.count / TY.flowerMax);
+      f.piece.setLevel?.(f.stack.count / f.stack.max);
       this.st.flowers[i] = f.stack.count;
       this.every(f.zone, dt, f.zone.contains(p) && wantsNectar, iv * 1.5, () => {
         if (me.canTake('nectar') && this.flyers.transfer(f.stack, me.stack)) {
@@ -1545,7 +1779,7 @@ export class Airfield {
 
     // 🎁 the gift shop makes a pollen sweet every few seconds
     if (this.shop.open && !this.shop.shelf.full) {
-      this.shop.t += dt * staffFx.quick(this.staffLv('shop'));
+      this.shop.t += dt * (1 + 0.15 * this.up('shop.stock'));
       if (this.shop.t >= TY.shopEvery) {
         this.shop.t = 0;
         this.flyers.grow(this.shop.shelf.addInstant('candy').mesh, 0.25);
@@ -1587,7 +1821,7 @@ export class Airfield {
       rc.t += dt;
       const top = rc.input.items[rc.input.items.length - 1];
       const blocked = top?.type === 'nectar' && rc.nectar >= TY.recycleNectar - 1 && rc.output.full;
-      if (rc.t >= TY.recycleEvery && rc.input.canPop() && !blocked) {
+      if (rc.t >= TY.recycleEvery / (1 + 0.2 * this.up('recycler.speed')) && rc.input.canPop() && !blocked) {
         rc.t = 0;
         const it = rc.input.pop()!;
         const at = new THREE.Vector3(AT.recycler.x, 2.5, AT.recycler.z);
@@ -1597,20 +1831,14 @@ export class Airfield {
             rc.nectar = 0;
             this.flyers.grow(rc.output.addInstant('fuel').mesh, 0.25);
           }
-        } else this.bill(TY.recyclePay, at);
+        } else this.bill(TY.recyclePay + this.up('recycler.pay'), at);
       }
     }
 
     // ⬆️ the STAFF OFFICE pad: step on it to open the upgrades
-    // (v0.71.1: no pad to step on. Anywhere near the manager, on either side of the counter, the ⬆️ button
-    // shows; tap it for the panel. Gold when there's a level you can afford.)
-    const nearStaff = Math.hypot(p.x - this.staffAt.x, p.z - this.staffAt.z) < 9;
-    if (nearStaff && !this.staffOpen) {
-      const levels = this.st.staff ?? {};
-      const can = STAFF.some((d) => (!d.needs || this.owns(d.needs)) && (levels[d.id] ?? 0) < STAFF_MAX && this.save.cash >= staffCost(d, levels[d.id] ?? 0));
-      this.hud.setUpgradeButton('Staff upgrades', () => this.openStaff(), can, this);
-    } else if (this.hud.ownsUpgradeButton(this)) this.hud.setUpgradeButton(null);
+    this.updateTargets(dt);
     this.applyStaff();
+    this.applyUps();
     // 🦎🌧️🪶 now and then, something happens
     this.events.update(dt, !this.learning);
 
@@ -1743,7 +1971,7 @@ export class Airfield {
     if (plane.aboard > 0) g.boardT += dt;
     // 🧳 everyone aboard needs their bag on the gate's BAGS pad (counted after this frame's passengers sat down)
     const bagsOk = g.bags.count >= plane.aboard;
-    const ready = plane.aboard > 0 && !g.boarding.length && (plane.freeSeats === 0 || g.boardT >= TY.boardWait);
+    const ready = plane.aboard > 0 && !g.boarding.length && (plane.freeSeats === 0 || g.boardT >= this.boardWait(g));
     // (and nothing still flying onto its pads: a stack only gives up items that have landed)
     const settled = g.fuel.canPop() && (plane.aboard === 0 || g.bags.canPop());
     if (ready && fuelled && bagsOk && settled) {

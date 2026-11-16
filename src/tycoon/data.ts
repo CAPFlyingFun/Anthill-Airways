@@ -176,7 +176,8 @@ export const TY_UNLOCKS: UnlockDef[] = [
   { id: 'ty-cafe', name: 'Nectar Café', icon: '🍪', cost: 220, pos: [-52, 26], requires: ['ty-banker'], level: 3 },
   { id: 'ty-crumbs', name: 'Crumb Runner Ant', icon: '🍪', cost: 200, pos: [-58, 0], requires: ['ty-cafe'] },
   { id: 'ty-chef', name: 'Chef Ant (faster oven)', icon: '🔥', cost: 650, pos: [-30, -2], requires: ['ty-crumbs'], level: 5 },
-  { id: 'ty-bees', name: 'Bee Shuttles (3 seats)', icon: '🐝', cost: 1300, pos: [-12, -2], requires: ['ty-gate3'], level: 6 },
+  // (v0.72: the 🛖 hangar: new aircraft are unlocked, and upgraded, in its menu; the fleet tiles are gone)
+  { id: 'ty-hangar', name: 'Hangar (your fleet)', icon: '🛖', cost: 600, pos: [60, -8], requires: ['ty-gate2'], level: 4 },
   { id: 'ty-gate4', name: 'Gate 4 + Plane', icon: '✈️', cost: 1800, pos: [38, -4], requires: ['ty-gate3'], level: 7 },
   { id: 'ty-runner3', name: 'Fuel Runner 3', icon: '⛽', cost: 700, pos: [32, 32], requires: ['ty-gate4'] },
   { id: 'ty-bags2', name: 'Baggage Ant 2', icon: '🧳', cost: 320, pos: [-6, 2], requires: ['ty-gate2', 'ty-bags'] },
@@ -190,7 +191,5 @@ export const TY_UNLOCKS: UnlockDef[] = [
   { id: 'ty-route-lizard', name: 'Route: 🦎 Lizard Rock (×3.3)', icon: '🗺️', cost: 5500, pos: [-16, 58], requires: ['ty-route-tide'], level: 12 },
   { id: 'ty-shop', name: 'Pollen Gift Shop', icon: '🎁', cost: 600, pos: [2, 16], requires: ['ty-cafe'], level: 5 },
   { id: 'ty-lounge', name: 'VIP Lounge (VIPs pay ×3)', icon: '👑', cost: 1500, pos: [-20, -7], requires: ['ty-gate2'], level: 7 },
-  { id: 'ty-dragonfly', name: 'Dragonfly Express (4 seats, fast)', icon: '🪽', cost: 3500, pos: [48, 6], requires: ['ty-bees'], level: 9 },
-  { id: 'ty-butterfly', name: 'Butterfly Charters (6 seats)', icon: '🦋', cost: 8000, pos: [48, 14], requires: ['ty-dragonfly'], level: 12 },
   { id: 'ty-bags3', name: 'Baggage Ant 3', icon: '🧳', cost: 750, pos: [8, -3], requires: ['ty-gate3', 'ty-bags2'] },
 ];

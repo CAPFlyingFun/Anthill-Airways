@@ -56,14 +56,16 @@ const HOWTO_HTML = `
       doing. 🎯 on the card points the camera at it until you walk. 📋 is the whole flight board.</li>
     <li>📅 <b>Daily goals</b> (the bar under the airfield's name): finish each day's goals quickly for ⭐⭐⭐
       and a cash bonus.</li>
-    <li>⬆️ Walk up to the <b>MANAGER</b> ant on the check-in counter (the Staff Office) and tap the
-      <b>⬆️ Staff upgrades</b> button to upgrade your ants' jobs (faster, carry more) and your backpack.</li>
+    <li>⬆️ <b>Upgrades:</b> a bouncing green arrow floats over anything you can afford to upgrade. Tap the building
+      (a gate, a flower, the terminal, the café kitchen…), or walk up to it and tap the <b>⬆️</b> button, for its menu.
+      The <b>MANAGER</b> ant on the check-in counter upgrades your ants' jobs and your backpack.</li>
+    <li>🛖 Build the <b>Hangar</b> (east of the gates): its menu unlocks bigger aircraft and upgrades the whole
+      fleet (💺 extra seats, 💨 speed).</li>
     <li>🗑️ Carrying something you don't need? Stand on a <b>trash bin</b> to toss it for a little cash. The
       ♻️ <b>Recycler</b> (a tile) turns 3 nectar into a drop of <b>jet fuel</b> that fuels a whole flight, and pays for
       everything else. Once it's open, passengers put wrappers in the bins: carry them to the recycler, or hire the
       🧹 <b>Janitor ant</b>.</li>
-    <li>🗺️ <b>Route</b> tiles open longer routes that pay higher fares. The <b>fleet</b> tiles swap every plane for a
-      bigger one: 🐝 bees, 🪽 dragonflies, 🦋 butterflies.</li>
+    <li>🗺️ <b>Route</b> tiles open longer routes that pay higher fares.</li>
     <li>🎁 The <b>Gift Shop</b> sells pollen sweets to passengers; the 👑 <b>VIP Lounge</b> brings golden VIPs who pay ×3.</li>
     <li>🦎 Now and then something happens: a lizard sunbathing on the runway (walk up to shoo it), a 🌧️ dew shower
       (flowers fill twice as fast), or a 🪶 feather to find.</li>
@@ -128,10 +130,12 @@ export async function startTycoon({ app, renderer, save, hud, sfx, input, progre
       hud.banner('🎯 Watching the plane', 'Walk to come back to your ant', 1800);
     },
     board: openBoard,
+    fleet: () => field.openTarget('hangar'),
   });
   input.onTap = (x, y) => {
+    // (a plane first: its flight card; else a building: its ⬆️ upgrade menu)
     const g = field.planeAt(x, y, app.clientWidth, app.clientHeight);
-    if (g === null) return false;
+    if (g === null) return field.tapTarget(x, y, app.clientWidth, app.clientHeight);
     flights.show(g);
     return true;
   };

@@ -69,6 +69,8 @@ export interface TycoonSave {
   day?: DaySave;
   /** ⬆️ Staff upgrade levels, by job (v0.70): see tycoon/staff.ts. */
   staff?: Record<string, number>;
+  /** ⬆️ Building upgrade levels (v0.72), by "<building>.<upgrade>": see tycoon/upgrades.ts. */
+  ups?: Record<string, number>;
   /** Where you were standing. */
   x: number;
   z: number;
