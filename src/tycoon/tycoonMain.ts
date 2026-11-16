@@ -22,6 +22,7 @@ import { GAME_SPEED, OFFLINE } from '../data/config';
 import { Updater, versionLabel } from '../core/updater';
 import { Minimap } from '../ui/minimap';
 import { Airfield, clockText, type FlightRow } from './airfield';
+import { FlightUi } from './flightUi';
 
 export interface TycoonContext {
   app: HTMLElement;
@@ -46,8 +47,16 @@ const HOWTO_HTML = `
       <b>CHECK-IN</b> counter to check them in: each one pays a ticket.</li>
     <li>🍪 The <b>Nectar Café</b> (a tile): carry picnic crumbs to the kitchen's oven; the snacks go to the café
       counter inside the terminal, and passengers buy one on the way to their gate.</li>
-    <li>🐞 A fuelled plane boards its passengers, taxis to the runway, takes off and flies its route.
-      When it lands, the arriving passengers pay a landing fee.</li>
+    <li>🧳 Each passenger's <b>seed-bag</b> goes to the <b>BAG DROP</b> outside the terminal. Carry the bags to
+      the gate's <b>BAGS</b> pad: a plane won't leave without its passengers' bags.</li>
+    <li>🐞 A fuelled plane boards its passengers and taxis to the <b>HOLD</b> line by the runway.
+      🗼 <b>Only one bug may use the runway at a time:</b> tap its flashing <b>🗼 CLEAR</b> chip at the bottom to
+      clear it for take-off. Coming back, it circles until you clear it to land (or hire the 🎧 <b>Tower ant</b>).
+      The arriving passengers pay a landing fee.</li>
+    <li>✈️ Tap a chip at the bottom (or a plane) for its <b>flight card</b>: passengers, bags, nectar and what it's
+      doing. 🎯 on the card points the camera at it until you walk. 📋 is the whole flight board.</li>
+    <li>📅 <b>Daily goals</b> (the bar under the airfield's name): finish each day's goals quickly for ⭐⭐⭐
+      and a cash bonus.</li>
     <li>💵 Walk over the <b>cash pad</b> to collect. Spend it on the <b>glowing tiles</b>: ants who fuel the planes,
       check passengers in and collect the cash for you.</li>
     <li>👁️ The eye button switches to first person: see the airport through your ant's eyes.</li>
@@ -73,8 +82,7 @@ export async function startTycoon({ app, renderer, save, hud, sfx, input, progre
   // 🗺️ The minimap
   const map = new Minimap(document.getElementById('mapSlot')!, Airfield.MAP_BOUNDS, () => field.mapView(), 40);
 
-  // ✈️ The flight board: a chip under the zone name with the next departure / arrival (or a gate that needs
-  // nectar); tap it for the whole board, which keeps ticking while it's open.
+  // ✈️ The flight board (📋 on the chips row): every gate's departure / arrival, ticking while it's open.
   const boardPanel = document.getElementById('departures')!;
   const boardRows = document.getElementById('boardRows')!;
   const rowHtml = (r: FlightRow) =>
@@ -89,18 +97,54 @@ export async function startTycoon({ app, renderer, save, hud, sfx, input, progre
       `<div class="fl-sec">🛬 ARRIVALS</div>${arr.map(rowHtml).join('') || '<div class="fl-none">Nothing in the air</div>'}`;
   };
   let boardTimer = 0;
-  document.getElementById('nextBtn')!.addEventListener('click', () => {
+  const openBoard = () => {
     boardPanel.querySelector('.board-title')!.textContent = '✈️ ANTHILL AIRWAYS';
     boardPanel.querySelector('.board-tip')!.innerHTML =
-      'A plane goes when it has <b>⛽ nectar</b> on its gate\'s FUEL pad and passengers aboard (it waits a few seconds for more). ' +
-      'Check passengers in at <b>🎫 CHECK-IN</b>: each gate holds 6 waiting.';
+      'A plane goes when it has <b>⛽ nectar</b> on its gate\'s FUEL pad, its passengers\' <b>🧳 bags</b> on the BAGS pad, ' +
+      'and passengers aboard (it waits a few seconds for more). Then 🗼 <b>clear it</b> for take-off: only one bug on the runway at a time.';
     drawBoard();
     boardPanel.classList.remove('hidden');
     window.clearInterval(boardTimer);
     boardTimer = window.setInterval(() => (boardPanel.classList.contains('hidden') ? window.clearInterval(boardTimer) : drawBoard()), 500);
-  });
+  };
   document.getElementById('closeBoard')!.addEventListener('click', () => boardPanel.classList.add('hidden'));
-  window.setInterval(() => hud.setNext(field.nextChip()), 500);
+
+  // ✈️ The chips along the bottom and the flight card (tap a chip, or tap a plane)
+  const flights = new FlightUi(document.getElementById('hud')!, {
+    info: () => field.planeInfo(),
+    clear: (g) => field.clearGate(g),
+    select: (g) => (field.selected = g),
+    watch: (g) => {
+      field.watch = g;
+      hud.banner('🎯 Watching the plane', 'Walk to come back to your ant', 1800);
+    },
+    board: openBoard,
+  });
+  input.onTap = (x, y) => {
+    const g = field.planeAt(x, y, app.clientWidth, app.clientHeight);
+    if (g === null) return false;
+    flights.show(g);
+    return true;
+  };
+
+  // 📅 The daily goals: a bar under the zone name (tap it for the panel)
+  const goalsPanel = document.createElement('div');
+  goalsPanel.className = 'overlay hidden';
+  goalsPanel.innerHTML = `<div class="card goals-card"><h2>📅 Daily Goals</h2><div class="gl-body"></div><button class="menu-btn">Close</button></div>`;
+  document.getElementById('hud')!.appendChild(goalsPanel);
+  const goalsBody = goalsPanel.querySelector('.gl-body')!;
+  let goalsTimer = 0;
+  goalsPanel.querySelector('button')!.addEventListener('click', () => goalsPanel.classList.add('hidden'));
+  document.getElementById('nextBtn')!.addEventListener('click', () => {
+    goalsBody.innerHTML = field.goals.panelHtml();
+    goalsPanel.classList.remove('hidden');
+    window.clearInterval(goalsTimer);
+    goalsTimer = window.setInterval(() => (goalsPanel.classList.contains('hidden') ? window.clearInterval(goalsTimer) : (goalsBody.innerHTML = field.goals.panelHtml())), 1000);
+  });
+  window.setInterval(() => {
+    flights.update();
+    hud.setNext(field.goals.barText());
+  }, 250);
 
   // 3) First-person / third-person view
   const viewBtn = document.getElementById('viewBtn')!;
@@ -214,7 +258,10 @@ export async function startTycoon({ app, renderer, save, hud, sfx, input, progre
       { icon: '⭐', label: 'Your level', value: String(save.level) },
       { icon: '🛫', label: 'Flights', value: t.flights.toLocaleString() },
       { icon: '🎫', label: 'Passengers checked in', value: t.passengers.toLocaleString() },
-      { icon: '🐜', label: 'Ants working', value: String(field.workers.length + field.bankers.length + (save.unlocked.includes('ty-checkin') ? 1 : 0)) },
+      { icon: '🧳', label: 'Bags loaded', value: (t.bagsLoaded ?? 0).toLocaleString() },
+      { icon: '🛬', label: 'Landings', value: (t.landings ?? 0).toLocaleString() },
+      { icon: '📅', label: 'Days flown', value: `${t.day?.stars.length ?? 0} · ⭐ ${field.goals.totalStars}` },
+      { icon: '🐜', label: 'Ants working', value: String(field.workers.length + field.bankers.length + (save.unlocked.includes('ty-checkin') ? 1 : 0) + (save.unlocked.includes('ty-atc') ? 1 : 0)) },
       { icon: '💤', label: 'Idle income now', value: `${money(save.rate * 60)}/min` },
     ];
   });

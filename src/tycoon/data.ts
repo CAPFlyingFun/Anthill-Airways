@@ -5,15 +5,18 @@
 // lawn; to an ant the grass around it is a forest 47 units tall. The camera looks toward -z ("north"):
 //
 //        z = -58   ════════ RUNWAY (pebble edging, leaf centerline) ════════      (top of the screen)
-//        z = -44   ───────── taxiway ─────────
+//        z = -36   ───────── taxiway ─────────   (each gate's link runs up to the runway, with a 🗼 HOLD line)
 //        z = -16   GATE 1        GATE 2                 🌼 nectar flowers
 //        z =  14   🐚 TERMINAL (check-in)                          🐜 the nest
 //                                                                                  (bottom: the camera)
 //
-// THE LOOP: 🐞 passengers walk in from the lawn → check in at the terminal (they pay a ticket: 💵 on the cash pad)
-// → wait at their gate → the ladybug needs nectar (⛽ carried from the flowers to the gate's fuel pad) → board →
-// taxi → take off → fly the route → land → arriving passengers get off (a landing fee 💵) → again.
-// The glowing tiles hire ants who do the jobs for you: a Fuel Runner, a Check-in ant, a Banker.
+// THE LOOP: 🐞 passengers walk in from the lawn → check in at the terminal (they pay a ticket: 💵 on the cash pad,
+// and their 🧳 seed-bag goes to the BAG DROP) → wait at their gate → the plane needs nectar (⛽ carried from the
+// flowers to the gate's FUEL pad) and its passengers' bags (🧳 carried from the BAG DROP to the gate's BAGS pad)
+// → board → taxi to the hold line → 🗼 cleared for take-off → fly the route → circle until 🗼 cleared to land →
+// land → arriving passengers get off (a landing fee 💵) → again.
+// The glowing tiles hire ants who do the jobs for you: a Fuel Runner, a Check-in ant, a Baggage ant, a Tower ant,
+// a Banker. (v0.69: bags, runway clearance, the flight card and 📅 daily goals came from AirportPRG.)
 // ============================================================================
 import type { UnlockDef } from '../data/config';
 import { mm } from './scale';
@@ -58,9 +61,21 @@ export const TY = {
   routeSecs: 9,
   /** The 🗼 Control Tower: x this on taxi/route speed. */
   towerBoost: 1.3,
+  /** 🧳 Seed-bags: the BAG DROP holds this many (check-in waits when it's full), each gate's BAGS pad, and how
+   *  many a Baggage ant carries (more than other ants: bags are light, and there are a lot of them). */
+  bagDropMax: 16,
+  bagPadMax: 6,
+  bagCarry: 8,
+  /** 🗼 Runway clearance: the Tower ant clears a waiting plane after this long (you can tap sooner). */
+  towerDelay: 1.2,
+  /** The holding pattern: arrivals circle this high (each gate 3 higher) and this wide until cleared to land. */
+  holdAlt: 22,
+  holdRadius: 16,
   /** XP. */
   xpCheckIn: 3,
   xpFuel: 1,
+  xpBag: 1,
+  xpClear: 2,
   xpFlight: 12,
 } as const;
 
@@ -86,11 +101,17 @@ export const AT = {
   /** The café counter, inside the terminal (in the terminal's own space: left of the check-in counter). */
   cafeLocal: { x: -9, z: 1.5 },
   tower: { x: 62, z: -30 },
+  /** 🧳 The BAG DROP: bags slide out of the terminal here (just outside its airside doorway). */
+  bagDrop: { x: 0, z: 1 },
+  /** 🗼 The holding pattern's centre: over the runway's far (west) end, where arrivals circle. */
+  hold: { x: -102, z: -62 },
   windsock: { x: 74, z: -42 },
   hangar: { x: 70, z: -18 },
   /** The runway: centred here, running along x. */
   runway: { x: 0, z: -58, length: 170, width: 20 },
-  taxiZ: -44,
+  /** The taxiway along the north of the gates (v0.69: moved 8 closer to the gates so each link has room for its
+   *  🗼 HOLD line before the runway). */
+  taxiZ: -36,
   /** Passengers walk in from the lawn here, and arriving passengers walk off into the lawn here (west). */
   lawnEdge: { x: 62, z: 50 },
   lawnExit: { x: -84, z: 18 },
@@ -113,6 +134,8 @@ export function walkable(x: number, z: number) {
 export const TY_UNLOCKS: UnlockDef[] = [
   { id: 'ty-runner', name: 'Fuel Runner Ant', icon: '⛽', cost: 30, pos: [-2, 8], requires: [] },
   { id: 'ty-checkin', name: 'Check-in Ant', icon: '🎫', cost: 70, pos: [-6, 24], requires: ['ty-runner'] },
+  { id: 'ty-bags', name: 'Baggage Ant', icon: '🧳', cost: 60, pos: [8, 4], requires: ['ty-checkin'] },
+  { id: 'ty-atc', name: 'Tower Ant (clears the runway)', icon: '🎧', cost: 90, pos: [52, -24], requires: ['ty-checkin'] },
   { id: 'ty-banker', name: 'Banker Ant', icon: '🏦', cost: 120, pos: [-40, 30], requires: ['ty-checkin'] },
   { id: 'ty-flower2', name: 'Nectar Flower 2', icon: '🌼', cost: 160, pos: [24, 26], requires: ['ty-runner'] },
   { id: 'ty-gate2', name: 'Gate 2 + Ladybug', icon: '🐞', cost: 400, pos: [-10, -4], requires: ['ty-banker'], level: 3 },
@@ -125,4 +148,6 @@ export const TY_UNLOCKS: UnlockDef[] = [
   { id: 'ty-bees', name: 'Bee Shuttles (3 seats)', icon: '🐝', cost: 1300, pos: [-12, -2], requires: ['ty-gate3'], level: 6 },
   { id: 'ty-gate4', name: 'Gate 4 + Plane', icon: '✈️', cost: 1800, pos: [38, -4], requires: ['ty-gate3'], level: 7 },
   { id: 'ty-runner3', name: 'Fuel Runner 3', icon: '⛽', cost: 700, pos: [32, 32], requires: ['ty-gate4'] },
+  { id: 'ty-bags2', name: 'Baggage Ant 2', icon: '🧳', cost: 320, pos: [-6, 2], requires: ['ty-gate2', 'ty-bags'] },
+  { id: 'ty-bags3', name: 'Baggage Ant 3', icon: '🧳', cost: 750, pos: [8, -3], requires: ['ty-gate3', 'ty-bags2'] },
 ];

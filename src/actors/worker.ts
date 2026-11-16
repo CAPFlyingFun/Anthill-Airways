@@ -73,6 +73,8 @@ export class Worker {
   private timer = 0;
   private speed: number;
   private offset = new THREE.Vector3((Math.random() - 0.5) * 1.0, 0, (Math.random() - 0.5) * 1.0);
+  /** Seconds stuck waiting (an empty source, or a full destination): after a moment it thinks again (v0.69). */
+  private stuckT = 0;
 
   /**
    * @param pickRoute called at the start of each trip; returns where to go.
@@ -169,6 +171,16 @@ export class Worker {
           else if (this.stack.full || (r.src.count === 0 && this.stack.count > 0)) this.state = 'toDest';
           else break; // waiting for the source to refill
         }
+        // (empty-handed at an empty source for a while: maybe there's somewhere better to go now)
+        this.stuckT = this.state === 'load' && this.stack.count === 0 ? this.stuckT + dt : 0;
+        if (this.stuckT > 1) {
+          this.stuckT = 0;
+          const fresh = this.pickRoute();
+          if (fresh.src !== r.src) {
+            this.route = fresh;
+            this.state = 'toSource';
+          }
+        }
         break;
       }
       case 'toDest':
@@ -187,6 +199,17 @@ export class Worker {
           } else if (!r.dst.full) {
             if (flyers.transfer(this.stack, r.dst)) this.gainXp(1); // worker XP: 1 per item delivered
           } else break; // destination full: wait
+        }
+        // (still carrying, and the destination stays full: take the rest wherever it's wanted now, v0.69. Two
+        // Fuel Runners could stand at one gate's full FUEL pad while another gate ran dry.)
+        this.stuckT = this.state === 'unload' && this.stack.count > 0 && r.dst.full ? this.stuckT + dt : 0;
+        if (this.stuckT > 1) {
+          this.stuckT = 0;
+          const fresh = this.pickRoute();
+          if (fresh.dst !== r.dst && !fresh.dst.full) {
+            this.route = fresh;
+            this.state = 'toDest';
+          }
         }
         break;
     }

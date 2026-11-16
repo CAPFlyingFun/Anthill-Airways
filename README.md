@@ -17,6 +17,12 @@ is built from code (`src/tycoon/`: `bugs/`, `flora/`, `airport/`, with the game 
 nectar → fuel → check-in → board → fly → land, with ants to hire for each job.
 Art lab (dev only): `npx vite`, then `/Anthill-Airways/lab/?show=bugs|flora|airport`.
 
+**v0.69, ideas from AirportPRG:** 🧳 seed-bags (each passenger's bag goes to the BAG DROP; a plane waits for its
+passengers' bags on its gate's BAGS pad), 🗼 runway clearance (one bug on the runway at a time: planes wait at the
+HOLD line or circle in a holding pattern until you tap their 🗼 CLEAR chip, or the Tower ant clears them), ✈️ flight
+chips along the bottom and a flight card per plane (`flightUi.ts`), and 📅 daily goals with ⭐ stars and a cash
+bonus (`goals.ts`).
+
 ## 🏝️ Anthill Island (test version, v0.33)
 
 The new one-island game from the design doc, playable in its own save slot: **⚙️ Settings → Save slots →

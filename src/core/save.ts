@@ -62,9 +62,29 @@ export interface TycoonSave {
   passengers: number;
   /** The next flight number (AA 101, AA 102…). */
   seq?: number;
+  /** 🧳 Bags loaded and 🛬 landings, lifetime (📊 stats, v0.69). */
+  bagsLoaded?: number;
+  landings?: number;
+  /** 📅 The daily goals (v0.69): see tycoon/goals.ts. */
+  day?: DaySave;
   /** Where you were standing. */
   x: number;
   z: number;
+}
+
+/** 📅 Airport Tycoon's daily goals: the day you're on, how long it's taken, how far each goal is, and the ⭐ won. */
+export interface DaySave {
+  /** The current day (1 = the first). */
+  n: number;
+  /** Seconds played on it so far. */
+  t: number;
+  /** Its goals (by kind: how many) and its par time for ⭐⭐⭐ (kept, so a day never changes halfway). */
+  g: Record<string, number>;
+  par: number;
+  /** Progress on each of its goals (by kind). */
+  c: Record<string, number>;
+  /** ⭐ won on each finished day (index 0 = day 1). */
+  stars: number[];
 }
 
 /** 🦖 The story: where you are and what's happened. (The current objective is save.tutorial.) */

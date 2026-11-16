@@ -1126,3 +1126,125 @@ body.in-cut .hotbar, body.in-cut .use-btn { visibility: hidden; }
 .bag-cap { text-align: right; font-size: 12px; font-weight: 800; margin: 6px 0 0; }
 .store-box .inv-tool span { color: #2a2017; }
 .store-box .inv-tool i { background: rgba(0, 0, 0, 0.12); }
+
+/* ============================================================================
+   ✈️ Airport Tycoon v0.69 (after AirportPRG): the flight chips along the bottom, the flight card on the left,
+   and the 📅 daily goals panel.
+   ============================================================================ */
+.fl-chips {
+  position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(10px + var(--safe-b));
+  display: flex; gap: 6px; align-items: center; pointer-events: auto;
+  max-width: calc(100vw - 16px); overflow-x: auto; scrollbar-width: none; padding: 3px;
+}
+.fl-chips::-webkit-scrollbar { display: none; }
+.fl-boardbtn {
+  flex: none; width: 40px; height: 40px; border-radius: 50%; border: 2px solid rgba(255, 255, 255, 0.5);
+  background: rgba(20, 24, 30, 0.8); font-size: 18px; color: #fff; padding: 0;
+}
+.fl-chip {
+  --tone: #ffd166;
+  flex: none; display: flex; align-items: center; gap: 6px; padding: 3px 10px 3px 3px; border-radius: 999px;
+  background: rgba(20, 24, 30, 0.82); border: 2px solid var(--tone); color: #fff;
+}
+.fl-chip.warn, .fl-card.warn { --tone: #ff6b6b; }
+.fl-chip.info, .fl-card.info { --tone: #9aa3ad; }
+.fl-chip.act, .fl-card.act { --tone: #5cff7a; }
+.fl-chip.act { background: rgba(26, 96, 40, 0.94); animation: flPulse 0.9s ease-in-out infinite; }
+.fl-chip.sel { box-shadow: 0 0 0 3px #fff; }
+.fl-ring {
+  --p: 100;
+  position: relative; display: grid; place-items: center; flex: none; width: 34px; height: 34px; border-radius: 50%;
+  background: conic-gradient(var(--tone) calc(var(--p) * 1%), rgba(255, 255, 255, 0.18) 0);
+}
+.fl-ring i {
+  display: grid; place-items: center; width: 27px; height: 27px; border-radius: 50%;
+  background: #1d4f86; font-style: normal; font-size: 16px; line-height: 1;
+}
+.fl-chip .tx { display: flex; flex-direction: column; align-items: flex-start; line-height: 1.1; }
+.fl-chip b { font-size: 12px; font-weight: 900; color: #ffd166; letter-spacing: 0.5px; white-space: nowrap; }
+.fl-chip small { font-size: 11px; font-weight: 900; color: #fff; white-space: nowrap; font-variant-numeric: tabular-nums; }
+@keyframes flPulse { 50% { transform: scale(1.06); } }
+
+/* The flight card: AirportPRG's blue card with the round portrait on top */
+.fl-card {
+  --tone: #ffd166;
+  position: fixed; left: calc(10px + var(--safe-l)); bottom: calc(64px + var(--safe-b)); width: 172px;
+  padding: 44px 10px 10px; border-radius: 16px; background: linear-gradient(#2f93e0, #1b5fa8);
+  border: 2px solid rgba(255, 255, 255, 0.35); box-shadow: 0 5px 0 rgba(0, 0, 0, 0.25);
+  color: #fff; text-align: center; pointer-events: auto;
+}
+.fl-por {
+  position: absolute; top: -38px; left: 50%; transform: translateX(-50%); padding: 4px; border-radius: 50%;
+  background: linear-gradient(#56b4f5, #1b5fa8); box-shadow: 0 3px 0 rgba(0, 0, 0, 0.25);
+}
+.fl-por .fl-ring { width: 72px; height: 72px; }
+.fl-por .fl-ring i { width: 60px; height: 60px; font-size: 36px; }
+.fl-card button { pointer-events: auto; }
+.fl-x, .fl-aim {
+  position: absolute; top: 6px; width: 28px; height: 28px; border-radius: 50%; border: none; padding: 0;
+  font-size: 13px; font-weight: 900; color: #fff;
+}
+.fl-x { right: 6px; background: rgba(0, 0, 0, 0.3); }
+.fl-aim { left: 6px; background: rgba(255, 255, 255, 0.25); font-size: 15px; }
+.fl-no { font-size: 20px; font-weight: 900; letter-spacing: 1px; text-shadow: 0 2px 0 rgba(0, 0, 0, 0.3); }
+.fl-type { font-size: 11px; font-weight: 800; opacity: 0.92; }
+.fl-route {
+  margin: 6px -10px 0; padding: 4px 6px; background: rgba(255, 255, 255, 0.18);
+  font-size: 11.5px; font-weight: 900; line-height: 1.25;
+}
+.fl-stats { display: grid; grid-template-columns: repeat(3, 1fr); margin: 0 -10px; background: #f3f6fa; color: #2a3a4a; }
+.fl-stats div { padding: 4px 0 3px; display: flex; flex-direction: column; align-items: center; border-left: 1px solid #d8e0ea; }
+.fl-stats div:first-child { border-left: none; }
+.fl-stats span { font-size: 16px; line-height: 1.2; }
+.fl-stats b { font-size: 15px; font-weight: 900; font-variant-numeric: tabular-nums; }
+.fl-pay { font-size: 11px; font-weight: 800; margin-top: 5px; min-height: 13px; }
+.fl-step {
+  display: block; width: 100%; margin-top: 6px; padding: 9px 6px; border-radius: 10px; border: none;
+  background: #1d3550; color: #fff; font-size: 12.5px; font-weight: 900; letter-spacing: 0.3px; font-variant-numeric: tabular-nums;
+}
+.fl-card.warn .fl-step { background: #7a2424; }
+.fl-step.act {
+  background: linear-gradient(#7ee36a, #3fae3a); color: #0e2a10; box-shadow: 0 4px 0 #2a7a28;
+  animation: flPulse 0.9s ease-in-out infinite;
+}
+@media (orientation: landscape) and (max-height: 520px) {
+  .fl-card { width: 160px; padding-top: 34px; bottom: calc(56px + var(--safe-b)); }
+  .fl-por { top: -28px; }
+  .fl-por .fl-ring { width: 56px; height: 56px; }
+  .fl-por .fl-ring i { width: 46px; height: 46px; font-size: 27px; }
+  .fl-no { font-size: 17px; }
+  .fl-route { margin-top: 3px; padding: 3px 6px; }
+  .fl-step { padding: 7px 6px; margin-top: 4px; }
+  .fl-pay { margin-top: 3px; }
+}
+
+/* 📅 The daily goals panel (the bar under the zone name opens it) */
+.goals-card { padding: 18px 16px 12px; }
+.gl-total { font-weight: 900; color: #b07a00; margin-bottom: 8px; }
+.gl-today { background: #fff; border-radius: 14px; padding: 10px 12px; box-shadow: inset 0 0 0 2px #ead9bf; text-align: left; }
+.gl-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px; }
+.gl-head b { font-size: 18px; }
+.gl-head span { font-weight: 900; color: #2f6fb3; }
+.gl-goal { display: grid; grid-template-columns: 26px 1fr auto; align-items: center; gap: 2px 6px; padding: 5px 0; }
+.gl-goal .ic { font-size: 18px; grid-row: span 2; }
+.gl-goal .nm { font-weight: 800; font-size: 14px; }
+.gl-goal b { font-size: 13px; font-variant-numeric: tabular-nums; }
+.gl-goal .bar { grid-column: 2 / 4; height: 7px; border-radius: 4px; background: #ead9bf; overflow: hidden; }
+.gl-goal .bar i { display: block; height: 100%; background: #5ccf5a; }
+.gl-goal.ok .nm { color: #2f8a3a; }
+.gl-timer, .gl-reward { font-size: 13px; font-weight: 800; margin-top: 6px; }
+.gl-reward { color: #2f8a3a; }
+.gl-days { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 10px; }
+.gl-day {
+  border-radius: 10px; padding: 7px 4px; background: #fff; box-shadow: inset 0 0 0 2px #ead9bf;
+  display: flex; flex-direction: column; gap: 4px; align-items: center; font-size: 12px; overflow: hidden;
+}
+.gl-day.now { box-shadow: inset 0 0 0 3px #2f93e0; }
+.gl-day.now span { color: #2f6fb3; font-weight: 900; }
+.gl-day.locked { background: #dfe6ee; color: #7a8898; }
+/* the red "REMOVE BEFORE FLIGHT" streamer on the days still to come */
+.rbf {
+  background: #d62828; color: #fff; font-size: 7.5px; font-weight: 900; letter-spacing: 0.4px; padding: 3px 5px;
+  border-radius: 2px; transform: rotate(-7deg); box-shadow: 0 2px 0 rgba(0, 0, 0, 0.25); white-space: nowrap;
+}
+.gl-none { font-weight: 800; }

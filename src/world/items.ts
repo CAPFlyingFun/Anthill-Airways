@@ -26,6 +26,8 @@ export type ItemType = 'crumb' | 'snack' | 'leaf' | 'wrap' | 'sugar' | 'candy' |
   | 'fuel'
   // 🐜✈️ Airport Tycoon: a drop of flower nectar, the bugs' jet fuel (v0.68)
   | 'nectar'
+  // 🐜✈️ Airport Tycoon: a passenger's seed-bag (a pastel squashed bean with a handle), v0.69
+  | 'seedbag'
   // 🏝️ Anthill Island: the Repair Garage's box of parts (v0.47)
   | 'part'
   // 🏝️ Anthill Island: the Drive-Thru Diner's meal bag (v0.55)
@@ -40,7 +42,7 @@ export type ItemType = 'crumb' | 'snack' | 'leaf' | 'wrap' | 'sugar' | 'candy' |
   | 'stone' | 'branch' | 'fiber';
 
 /** Height of one item when stacked. */
-export const ITEM_H: Record<ItemType, number> = { nectar: 0.4, clothes: 0.24, antfarm: 0.5, log: 0.34, berry: 0.3, mast: 1.0, radio: 0.5, stone: 0.26, branch: 0.14, fiber: 0.16, bread: 0.2, parcel: 0.3, extinguisher: 0.5, medicine: 0.3, medkit: 0.3, luggage: 0.46, meal: 0.42, part: 0.3, fuel: 0.44, crumb: 0.3, snack: 0.32, leaf: 0.14, wrap: 0.32, sugar: 0.4, candy: 0.3, cash: 0.11, bag: 0.48, snackbox: 0.36, fruit: 0.4, smoothie: 0.5, meat: 0.32, egg: 0.42, ticket: 0.1, obsidian: 0.36, gem: 0.4, magma: 0.4, crystal: 0.52, laundry: 0.4, towel: 0.2, grocery: 0.42, tray: 0.36, beans: 0.38, coffee: 0.4, shopbag: 0.5 };
+export const ITEM_H: Record<ItemType, number> = { nectar: 0.4, seedbag: 0.4, clothes: 0.24, antfarm: 0.5, log: 0.34, berry: 0.3, mast: 1.0, radio: 0.5, stone: 0.26, branch: 0.14, fiber: 0.16, bread: 0.2, parcel: 0.3, extinguisher: 0.5, medicine: 0.3, medkit: 0.3, luggage: 0.46, meal: 0.42, part: 0.3, fuel: 0.44, crumb: 0.3, snack: 0.32, leaf: 0.14, wrap: 0.32, sugar: 0.4, candy: 0.3, cash: 0.11, bag: 0.48, snackbox: 0.36, fruit: 0.4, smoothie: 0.5, meat: 0.32, egg: 0.42, ticket: 0.1, obsidian: 0.36, gem: 0.4, magma: 0.4, crystal: 0.52, laundry: 0.4, towel: 0.2, grocery: 0.42, tray: 0.36, beans: 0.38, coffee: 0.4, shopbag: 0.5 };
 
 // Shared geometry + materials: every crumb reuses the same ones (fast).
 const geo = {
@@ -92,6 +94,9 @@ const geo = {
   part: new THREE.BoxGeometry(0.4, 0.28, 0.4),                              // a box of car parts (the Repair Garage)
   fuel: new THREE.BoxGeometry(0.34, 0.42, 0.2),                             // a red jerry can (the Gas Station)
   nectar: new THREE.SphereGeometry(0.2, 14, 10).scale(1, 1.05, 1).translate(0, 0, 0), // 🐜✈️ a drop of amber nectar
+  seedbag: new THREE.SphereGeometry(0.24, 14, 10).scale(1.25, 0.78, 0.85),     // 🐜✈️ a squashed bean: a bug's suitcase
+  seedbagHandle: new THREE.TorusGeometry(0.09, 0.028, 6, 12, Math.PI),
+  seedbagTag: new THREE.BoxGeometry(0.1, 0.13, 0.02),
   shopbag: new THREE.BoxGeometry(0.36, 0.44, 0.26),                        // a paper bag of groceries (the Corner Store)
   baguette: new THREE.CylinderGeometry(0.035, 0.035, 0.34, 8),
   // 🦖 The story
@@ -153,6 +158,9 @@ const mat = {
   part: new THREE.MeshStandardMaterial({ color: 0x5b7c99, roughness: 0.7 }),
   fuel: new THREE.MeshStandardMaterial({ color: 0xd62828, roughness: 0.6 }),
   nectar: new THREE.MeshStandardMaterial({ color: 0xffb02e, roughness: 0.15, metalness: 0.05, emissive: 0x6a3a00, emissiveIntensity: 0.5 }),
+  // (the same pastel bean colours as the baggage cart's load)
+  seedbags: [0xff7aa8, 0x5fb4ff, 0xffd24a, 0xa0e060].map((c) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.55 })),
+  seedbagTag: new THREE.MeshStandardMaterial({ color: 0xfff6ea, roughness: 0.6 }),
   shopbag: new THREE.MeshStandardMaterial({ color: 0xc9a36b, roughness: 0.95 }),
   baguette: new THREE.MeshStandardMaterial({ color: 0xe0b46a, roughness: 0.8 }),
   silver: new THREE.MeshStandardMaterial({ color: 0xdfe4ea, roughness: 0.25, metalness: 0.8 }),
@@ -177,7 +185,7 @@ const mat = {
 };
 
 /** Cash value of each sellable item (counter price; gate runs pay the same per item). */
-export const ITEM_VALUE: Record<ItemType, number> = { nectar: 4, stone: 0, branch: 0, fiber: 0, clothes: 0, antfarm: 0, log: 0, berry: 0, mast: 0, radio: 0, bread: 2000, parcel: 4500, extinguisher: 20000, medicine: 34000, medkit: 40000, luggage: 125000, meal: 1300, part: 600, fuel: 90, crumb: 2, snack: 5, leaf: 3, wrap: 14, sugar: 10, candy: 40, cash: 0, bag: 15, snackbox: 25, fruit: 0, smoothie: 60, meat: 0, egg: 80, ticket: 50, obsidian: 0, gem: 150, magma: 0, crystal: 450, laundry: 0, towel: 0, grocery: 0, tray: 220, beans: 2, coffee: 20, shopbag: 50 };
+export const ITEM_VALUE: Record<ItemType, number> = { nectar: 4, seedbag: 0, stone: 0, branch: 0, fiber: 0, clothes: 0, antfarm: 0, log: 0, berry: 0, mast: 0, radio: 0, bread: 2000, parcel: 4500, extinguisher: 20000, medicine: 34000, medkit: 40000, luggage: 125000, meal: 1300, part: 600, fuel: 90, crumb: 2, snack: 5, leaf: 3, wrap: 14, sugar: 10, candy: 40, cash: 0, bag: 15, snackbox: 25, fruit: 0, smoothie: 60, meat: 0, egg: 80, ticket: 50, obsidian: 0, gem: 150, magma: 0, crystal: 450, laundry: 0, towel: 0, grocery: 0, tray: 220, beans: 2, coffee: 20, shopbag: 50 };
 
 /** Build the 3D mesh for one item. Box faces order: +x, -x, +y(top), -y, +z, -z */
 export function makeItem(type: ItemType): THREE.Mesh {
@@ -284,6 +292,15 @@ export function makeItem(type: ItemType): THREE.Mesh {
     const gear = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.11, 0.05, 8), mat.cashSide);
     gear.position.y = 0.16;
     m.add(gear);
+  } else if (type === 'seedbag') {
+    // A passenger's seed-bag: a pastel squashed bean with a dark handle on top and a little white tag
+    m = new THREE.Mesh(geo.seedbag, mat.seedbags[Math.floor(Math.random() * mat.seedbags.length)]);
+    const handle = new THREE.Mesh(geo.seedbagHandle, mat.handle);
+    handle.position.y = 0.17;
+    const tag = new THREE.Mesh(geo.seedbagTag, mat.seedbagTag);
+    tag.position.set(0.2, 0.05, 0.19);
+    tag.rotation.z = 0.3;
+    m.add(handle, tag);
   } else if (type === 'nectar') {
     // A round drop of glowing amber nectar with a little shine on top (the bugs' jet fuel)
     m = new THREE.Mesh(geo.nectar, mat.nectar);
