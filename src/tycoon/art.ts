@@ -43,7 +43,7 @@ export function artGround(size: number, clearings: { x: number; z: number; r: nu
 
 export interface ArtLawn {
   root: THREE.Object3D;
-  update(dt: number, camera: THREE.Camera): void;
+  update(dt: number, camera: THREE.Camera, focus?: THREE.Vector3): void;
 }
 /** 🌱 The lawn: a forest of grass blades 47 units tall around the clearings (`avoid` = keep clear). */
 export function artLawn(size: number, avoid: (x: number, z: number) => boolean): ArtLawn {

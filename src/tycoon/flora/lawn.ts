@@ -82,6 +82,10 @@ export class Lawn {
   /** Stats for the integrator: how many blades, triangles and chunk meshes exist. */
   stats = { blades: 0, trianglesAll: 0, chunkMeshes: 0, plants: 0 };
   private time = { value: 0 };
+  /** 👀 The see-through hole (v0.72.2): where the player is on screen (x, y: -1..1), how far from the camera, and
+   *  the screen's width / height. z = 0: no hole. */
+  private see = { value: new THREE.Vector4(0, 0, 0, 1) };
+  private tmp = new THREE.Vector3();
   private chunks: Chunk[] = [];
   private cam = new THREE.Vector3();
 
@@ -97,10 +101,27 @@ export class Lawn {
     const geo = makeBladeGeometry();
     const mat = new THREE.MeshStandardMaterial({ vertexColors: true, side: THREE.DoubleSide, roughness: 0.68, metalness: 0 });
     const uTime = this.time;
+    const uSee = this.see;
     mat.onBeforeCompile = (sh) => {
       sh.uniforms.uTime = uTime;
+      sh.uniforms.uSee = uSee;
+      // 👀 Grass between the camera and the player fades out (a dotted edge), so a blade never hides what
+      // you're doing: any bit of a blade that's nearer the camera than the player, around the player on screen.
+      sh.fragmentShader = sh.fragmentShader
+        .replace('#include <common>', '#include <common>\nuniform vec4 uSee;\nvarying vec3 vSee;')
+        .replace(
+          '#include <clipping_planes_fragment>',
+          `#include <clipping_planes_fragment>
+           if (uSee.z > 0.0 && vSee.z < uSee.z + 3.0) {
+             vec2 sd = (vSee.xy / vSee.z - uSee.xy) * vec2(min(uSee.w, 1.0), 1.0);
+             float keep = smoothstep(0.62, 0.9, length(sd));
+             float dots = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+             if (dots >= keep) discard;
+           }`
+        );
       sh.vertexShader = sh.vertexShader
-        .replace('#include <common>', '#include <common>\nuniform float uTime;')
+        .replace('#include <project_vertex>', '#include <project_vertex>\nvSee = gl_Position.xyw;')
+        .replace('#include <common>', '#include <common>\nuniform float uTime;\nvarying vec3 vSee;')
         .replace(
           '#include <begin_vertex>',
           `#include <begin_vertex>
@@ -115,7 +136,7 @@ export class Lawn {
            #endif`
         );
     };
-    mat.customProgramCacheKey = () => 'flora-lawn-blade';
+    mat.customProgramCacheKey = () => 'flora-lawn-blade-see';
 
     // ----- decide where every blade goes -----
     // per chunk: blades far from the clearing ("main", no shadows) and blades near it ("near", shadows)
@@ -282,9 +303,16 @@ export class Lawn {
   }
 
   /** Call every frame: advances the wind, and thins far-away chunks (LOD). */
-  update(dt: number, camera: THREE.Camera) {
+  update(dt: number, camera: THREE.Camera, focus?: THREE.Vector3) {
     this.time.value += dt;
     camera.getWorldPosition(this.cam);
+    // 👀 where the player is on screen, for the see-through hole (none in first person: nothing's in the way)
+    const see = this.see.value;
+    if (focus && focus.distanceTo(this.cam) > 6) {
+      const depth = -this.tmp.copy(focus).applyMatrix4(camera.matrixWorldInverse).z;
+      this.tmp.copy(focus).project(camera);
+      see.set(this.tmp.x, this.tmp.y, depth, (camera as THREE.PerspectiveCamera).aspect ?? 1);
+    } else see.z = 0;
     for (const c of this.chunks) {
       const d = Math.hypot(c.cx - this.cam.x, c.cz - this.cam.z);
       const level = d < 170 ? 0 : d < 300 ? 1 : 2;

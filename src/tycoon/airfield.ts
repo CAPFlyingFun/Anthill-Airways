@@ -1719,7 +1719,7 @@ export class Airfield {
     if (this.towerAnt) animateCreature(this.towerAnt, dt, 0);
     for (const piece of this.pieces) piece.update?.(dt);
     for (const piece of this.paved) piece.update?.(dt);
-    this.lawn.update(dt, this.camera);
+    this.lawn.update(dt, this.camera, this.player.firstPerson ? undefined : this.player.model.root.position);
 
     const iv = CONFIG.player.pickupInterval / prog.workMult;
 

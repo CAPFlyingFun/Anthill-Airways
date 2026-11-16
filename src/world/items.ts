@@ -555,7 +555,8 @@ interface Grow {
   obj: THREE.Object3D;
   t: number;
   dur: number;
-  to: number;
+  /** The size it's growing to (x, y and z kept apart: a sign's sprite is wider than it is tall). */
+  to: THREE.Vector3;
 }
 
 export class Flyers {
@@ -619,7 +620,7 @@ export class Flyers {
     // Already popping? Its scale right now is mid-bounce (it overshoots), so keep the size
     // it's heading for. (Quick taps on an upgrade used to leave buildings bigger each time.)
     const i = this.grows.findIndex((g) => g.obj === obj);
-    const to = i >= 0 ? this.grows[i].to : obj.scale.x || 1;
+    const to = i >= 0 ? this.grows[i].to : obj.scale.x ? obj.scale.clone() : new THREE.Vector3(1, 1, 1);
     if (i >= 0) this.grows.splice(i, 1);
     obj.scale.setScalar(0.001);
     this.grows.push({ obj, t: 0, dur, to });
@@ -646,7 +647,7 @@ export class Flyers {
       const c = 1.70158;
       const x = g.t - 1;
       const s = 1 + (c + 1) * x * x * x + c * x * x;
-      g.obj.scale.setScalar(Math.max(0.001, s * g.to));
+      g.obj.scale.copy(g.to).multiplyScalar(Math.max(0.001, s));
       if (g.t >= 1) this.grows.splice(i, 1);
     }
   }
