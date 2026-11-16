@@ -56,8 +56,8 @@ const HOWTO_HTML = `
       doing. 🎯 on the card points the camera at it until you walk. 📋 is the whole flight board.</li>
     <li>📅 <b>Daily goals</b> (the bar under the airfield's name): finish each day's goals quickly for ⭐⭐⭐
       and a cash bonus.</li>
-    <li>⬆️ Step on the <b>STAFF OFFICE</b> pad inside the terminal (left of the check-in ant) to upgrade your ants'
-      jobs (faster, carry more) and your backpack.</li>
+    <li>⬆️ Walk up to the <b>MANAGER</b> ant on the check-in counter (the Staff Office) and tap the
+      <b>⬆️ Staff upgrades</b> button to upgrade your ants' jobs (faster, carry more) and your backpack.</li>
     <li>🗑️ Carrying something you don't need? Stand on a <b>trash bin</b> to toss it for a little cash. The
       ♻️ <b>Recycler</b> (a tile) turns 3 nectar into a drop of <b>jet fuel</b> that fuels a whole flight, and pays for
       everything else. Once it's open, passengers put wrappers in the bins: carry them to the recycler, or hire the
@@ -138,6 +138,7 @@ export async function startTycoon({ app, renderer, save, hud, sfx, input, progre
 
   // 📅 The daily goals: a bar under the zone name (tap it for the panel)
   document.getElementById('nextBtn')!.classList.add('goal-bar');
+  document.body.classList.add('tycoon');
   const goalsPanel = document.createElement('div');
   goalsPanel.className = 'overlay hidden';
   goalsPanel.innerHTML = `<div class="card goals-card"><h2>📅 Daily Goals</h2><div class="gl-body"></div><button class="menu-btn">Close</button></div>`;

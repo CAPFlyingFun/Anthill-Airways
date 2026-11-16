@@ -1253,3 +1253,6 @@ body.in-cut .hotbar, body.in-cut .use-btn { visibility: hidden; }
     rgba(160, 190, 220, 0.12);
   background-size: 140px 300px, 190px 420px, auto;
 }
+
+/* Airport Tycoon: the ⬆️ upgrade button sits above the flight chips */
+body.tycoon .up-btn { bottom: calc(68px + var(--safe-b)); }

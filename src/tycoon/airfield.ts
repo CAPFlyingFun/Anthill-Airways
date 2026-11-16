@@ -42,7 +42,7 @@ import { SURFACE, artBaggageCart, artBackdrop, artBug, artDewTank, artFuelFlower
 import { Plane } from './plane';
 import { Passengers, type Pax, type Stop } from './passengers';
 import { FLEET, bestPlane, openRoutes, routeOf } from './fleet';
-import { STAFF, buyStaff, staffFx, staffPanel, type StaffId } from './staff';
+import { STAFF, STAFF_MAX, buyStaff, staffCost, staffFx, staffPanel, type StaffId } from './staff';
 import { Events } from './events';
 import { trash } from '../world/trash';
 import { mat, mesh, PAL } from './kit';
@@ -759,19 +759,14 @@ export class Airfield {
   }
 
   // --------------------------------------------------------------------------
-  // ⬆️ STAFF upgrades (v0.70): stand on the pad by the nest; the panel opens with a row per hired job.
+  // ⬆️ STAFF upgrades (v0.70): near the manager in the terminal, tap the ⬆️ button: a row per hired job.
   // --------------------------------------------------------------------------
-  private staffZone!: Zone;
   private staffOpen = false;
   private padHintT = 0;
-  private staffWasIn = false;
   /** The STAFF OFFICE: a pad behind the counter, left of the check-in ant, with the manager ant up on the counter. */
   private staffAt = new THREE.Vector3();
   private buildStaffPad(at: THREE.Vector3) {
     this.staffAt.copy(at);
-    const pad = makePad(1.9, 1.5, 'STAFF', '#7df9a0');
-    pad.position.set(at.x, at.y + 0.06, at.z);
-    this.scene.add(pad);
     const label = new TextSprite(0.9, '#7df9a0');
     label.setText('⬆️ STAFF OFFICE');
     label.sprite.position.set(at.x - 2.5, 5.4, at.z - 2);
@@ -785,7 +780,7 @@ export class Airfield {
     titleTag(boss, '⬆️ MANAGER', TITLE.ant);
     this.scene.add(boss.root);
     this.idlers.push(boss);
-    this.staffZone = new Zone(at.x, at.z, 0.8, 0.7);
+    this.staffAt.set(boss.root.position.x, 0, boss.root.position.z); // (the office is wherever the manager is)
   }
 
   // --------------------------------------------------------------------------
@@ -1607,9 +1602,14 @@ export class Airfield {
     }
 
     // ⬆️ the STAFF OFFICE pad: step on it to open the upgrades
-    const onStaff = this.staffZone.contains(p);
-    if (onStaff && !this.staffWasIn && !this.staffOpen) this.openStaff();
-    this.staffWasIn = onStaff;
+    // (v0.71.1: no pad to step on. Anywhere near the manager, on either side of the counter, the ⬆️ button
+    // shows; tap it for the panel. Gold when there's a level you can afford.)
+    const nearStaff = Math.hypot(p.x - this.staffAt.x, p.z - this.staffAt.z) < 9;
+    if (nearStaff && !this.staffOpen) {
+      const levels = this.st.staff ?? {};
+      const can = STAFF.some((d) => (!d.needs || this.owns(d.needs)) && (levels[d.id] ?? 0) < STAFF_MAX && this.save.cash >= staffCost(d, levels[d.id] ?? 0));
+      this.hud.setUpgradeButton('Staff upgrades', () => this.openStaff(), can, this);
+    } else if (this.hud.ownsUpgradeButton(this)) this.hud.setUpgradeButton(null);
     this.applyStaff();
     // 🦎🌧️🪶 now and then, something happens
     this.events.update(dt, !this.learning);
