@@ -131,6 +131,18 @@ export async function startTycoon({ app, renderer, save, hud, sfx, input, progre
     },
     board: openBoard,
     fleet: () => field.openTarget('hangar'),
+    // ⚠️ what's happening right now (the lizard, a feather, the dew): tap it to look there
+    alert: () => {
+      const a = field.events.alert();
+      return a && { text: a.text, bad: a.bad };
+    },
+    alertTap: () => {
+      const at = field.events.alert()?.at;
+      if (!at) return;
+      field.watch = null;
+      field.watchAt = at;
+      hud.banner('🎯 Over here!', 'Walk to come back to your ant', 1800);
+    },
   });
   input.onTap = (x, y) => {
     // (a plane first: its flight card; else a building: its ⬆️ upgrade menu)

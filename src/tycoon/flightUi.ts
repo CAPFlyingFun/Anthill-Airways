@@ -51,6 +51,10 @@ export interface FlightUiHooks {
   board: () => void;
   /** ⬆️ The hangar's fleet menu (false: no hangar yet). */
   fleet: () => boolean;
+  /** ⚠️ An event that's on right now (the alert above the chips), or null. `bad`: red and pulsing. */
+  alert: () => { text: string; bad: boolean } | null;
+  /** The alert was tapped (look at it). */
+  alertTap: () => void;
 }
 
 const clock = (secs: number) => {
@@ -86,6 +90,7 @@ export class FlightUi {
   private card: HTMLElement;
   private c: Record<string, HTMLElement> = {};
   private last: PlaneInfo[] = [];
+  private alertEl: HTMLButtonElement;
 
   constructor(parent: HTMLElement, private hooks: FlightUiHooks) {
     // (in the HUD, but before its panels: Settings, the flight board and the cards all cover the chips)
@@ -97,6 +102,11 @@ export class FlightUi {
     boardBtn.addEventListener('click', () => hooks.board());
     this.bar.appendChild(boardBtn);
     parent.insertBefore(this.bar, before);
+
+    // ⚠️ the alert above the chips (the lizard on the runway…): it stays for as long as the event does
+    this.alertEl = el('button', 'fl-alert hidden') as HTMLButtonElement;
+    this.alertEl.addEventListener('click', () => hooks.alertTap());
+    parent.insertBefore(this.alertEl, before);
 
     // 🪪 the card
     this.card = el('div', 'fl-card hidden');
@@ -139,6 +149,7 @@ export class FlightUi {
   setVisible(on: boolean) {
     this.bar.classList.toggle('hidden', !on);
     if (!on) this.card.classList.add('hidden');
+    if (!on) this.alertEl.classList.add('hidden');
     else if (this.open !== null) this.card.classList.remove('hidden');
   }
 
@@ -146,6 +157,9 @@ export class FlightUi {
   update() {
     const info = this.hooks.info();
     this.last = info;
+    const alert = this.bar.classList.contains('hidden') ? null : this.hooks.alert();
+    this.alertEl.className = `fl-alert${alert ? '' : ' hidden'}${alert?.bad ? ' bad' : ''}`;
+    if (alert) put(this.alertEl, alert.text);
     // chips: one per open gate, in gate order
     for (const f of info) {
       let chip = this.chips.get(f.gate);

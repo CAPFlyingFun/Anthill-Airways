@@ -16,6 +16,7 @@ import { animateCreature, faceToward } from '../actors/models';
 import type { Hud } from '../ui/hud';
 import type { Sfx } from '../core/audio';
 import { artBug, type ArtBug } from './art';
+import { TextSprite } from '../world/labels';
 import { AT } from './data';
 import { mat, mesh } from './kit';
 
@@ -51,6 +52,8 @@ export class Events {
   private lizState: 'in' | 'sun' | 'out' = 'in';
   private lizPath: THREE.Vector3[] = [];
   private shooed = false;
+  /** ⚠️ The warning floating over the lizard (v0.72.2). */
+  private lizWarn: TextSprite | null = null;
   // 🪶
   private feather: THREE.Group | null = null;
   private shadow: THREE.Mesh | null = null;
@@ -63,6 +66,17 @@ export class Events {
     if (this.lizard && this.lizState !== 'out') return [{ x: this.lizard.root.position.x, z: this.lizard.root.position.z, icon: '🦎', label: 'Shoo!', alert: true }];
     if (this.feather) return [{ x: this.feather.position.x, z: this.feather.position.z, icon: '🪶', alert: true }];
     return [];
+  }
+
+  /**
+   * ⚠️ What's going on right now, for the alert above the flight chips (v0.72.2: it stays up for as long as the
+   * event does, so you always know why the planes are circling). `at` = where to look (tap the alert), `bad` = red.
+   */
+  alert(): { text: string; at: THREE.Vector3 | null; bad: boolean } | null {
+    if (this.lizard && this.lizState !== 'out') return { text: '⚠️ 🦎 LIZARD ON THE RUNWAY · walk up to it to shoo it!', at: this.lizard.root.position, bad: true };
+    if (this.feather) return { text: '🪶 A feather dropped · find it for a bonus', at: this.feather.position, bad: false };
+    if (this.dew) return { text: `🌧️ Dew shower · flowers fill ×2 · ${Math.max(0, Math.ceil(35 - this.t))}s`, at: null, bad: false };
+    return null;
   }
 
   /** Something to walk to right now (for the tutorial-style arrow), or null. */
@@ -101,6 +115,9 @@ export class Events {
       this.lizard = artBug('anole', 45, { seed: Math.floor(Math.random() * 99) });
       this.lizard.root.position.set(x - 20, 0, rw.z - 70);
       this.h.scene.add(this.lizard.root);
+      this.lizWarn = new TextSprite(2.2, '#ff6b6b');
+      this.lizWarn.setText('⚠️ SHOO ME!');
+      this.h.scene.add(this.lizWarn.sprite);
       this.lizPath = [v3(x - 6, 0, rw.z - 26), v3(x, 0, rw.z)];
       this.lizState = 'in';
       this.shooed = false;
@@ -133,6 +150,11 @@ export class Events {
     const m = this.lizard!;
     const p = m.root.position;
     const me = this.h.player();
+    // (the warning bobs over its back until it's been sent off)
+    if (this.lizWarn) {
+      this.lizWarn.sprite.position.set(p.x, 15 + Math.sin(this.t * 4) * 1.2, p.z);
+      this.lizWarn.sprite.visible = this.lizState !== 'out';
+    }
     const walk = (speed: number) => {
       const next = this.lizPath[0];
       if (!next) return true;
@@ -175,6 +197,8 @@ export class Events {
       this.runwayBlocked = Math.abs(p.z - AT.runway.z) < 14;
       if (walk(this.shooed ? 30 : 12)) {
         m.root.removeFromParent();
+        this.lizWarn?.sprite.removeFromParent();
+        this.lizWarn = null;
         this.lizard = null;
         this.runwayBlocked = false;
         this.end();

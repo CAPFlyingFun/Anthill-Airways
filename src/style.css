@@ -1137,6 +1137,15 @@ body.in-cut .hotbar, body.in-cut .use-btn { visibility: hidden; }
   max-width: calc(100vw - 16px); overflow-x: auto; scrollbar-width: none; padding: 3px;
 }
 .fl-chips::-webkit-scrollbar { display: none; }
+/* ⚠️ the event alert above the chips (v0.72.2) */
+.fl-alert {
+  /* (top left, under the goals bar and beside the minimap: the bottom middle is the ⬆️ upgrade button's) */
+  position: fixed; left: calc(10px + var(--safe-l)); top: calc(104px + var(--safe-t)); pointer-events: auto;
+  max-width: min(330px, calc(100vw - 150px)); padding: 7px 12px; border-radius: 14px; border: 2px solid #8fd3ff;
+  background: rgba(20, 24, 30, 0.88); color: #fff; font: inherit; font-weight: 800; font-size: 13px; line-height: 1.25; text-align: left;
+}
+.fl-alert.bad { border-color: #ff6b6b; background: rgba(120, 20, 20, 0.92); animation: alertPulse 0.9s ease-in-out infinite; }
+@keyframes alertPulse { 50% { box-shadow: 0 0 0 5px rgba(255, 107, 107, 0.35); border-color: #ffd166; } }
 .fl-boardbtn {
   flex: none; width: 40px; height: 40px; border-radius: 50%; border: 2px solid rgba(255, 255, 255, 0.5);
   background: rgba(20, 24, 30, 0.8); font-size: 18px; color: #fff; padding: 0;

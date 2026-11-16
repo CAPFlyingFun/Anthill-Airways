@@ -164,6 +164,8 @@ export class Airfield {
   events!: Events;
   /** 🎯 The gate whose plane the camera is watching (null = you). Moving cancels it. */
   watch: number | null = null;
+  /** 🎯 A spot the camera is looking at instead (an event: the lizard, the feather). Moving cancels it. */
+  watchAt: THREE.Vector3 | null = null;
   /** The selected plane's gate (its flight card is open; a ring glows under it). */
   selected: number | null = null;
   /** Point the camera follows (you, or the plane you're watching): the LOD system measures from here. */
@@ -1622,7 +1624,8 @@ export class Airfield {
           set('TAXIING TO THE RUNWAY', 'TAXI', 'go', p.etaTakeoff(), 1, 'TAXIING');
           break;
         case 'hold':
-          set('🗼 HOLDING SHORT · NEXT UP', 'HOLDING', 'go', null, 1, 'HOLDING SHORT');
+          if (this.events.runwayBlocked) set('🦎 LIZARD ON THE RUNWAY', '🦎 BLOCKED', 'warn', null, 1, 'RUNWAY BLOCKED 🦎');
+          else set('🗼 HOLDING SHORT · NEXT UP', 'HOLDING', 'go', null, 1, 'HOLDING SHORT');
           break;
         case 'lineUp':
           set('LINING UP', 'LINE UP', 'go', p.etaTakeoff(), 1);
@@ -1636,7 +1639,8 @@ export class Airfield {
           set('ON ITS WAY BACK', 'IN THE AIR', 'info', p.etaLanding(), p.routeFrac, 'ON TIME');
           break;
         case 'holding':
-          set('🗼 CIRCLING · NEXT TO LAND', 'CIRCLING', 'go', null, 1, 'CIRCLING');
+          if (this.events.runwayBlocked) set('🦎 LIZARD ON THE RUNWAY', '🦎 BLOCKED', 'warn', null, 1, 'RUNWAY BLOCKED 🦎');
+          else set('🗼 CIRCLING · NEXT TO LAND', 'CIRCLING', 'go', null, 1, 'CIRCLING');
           break;
         case 'landing':
           set('LANDING 🛬', 'LANDING', 'go', p.etaLanding(), 1, 'LANDING');
@@ -1711,7 +1715,7 @@ export class Airfield {
     me.speedMult = prog.speedMult * 1.6; // (the airfield is big: you walk a bit faster than in the colony)
     me.update(dt, move, this.blockers, walkable);
     p.y = this.groundY(p.x, p.z);
-    if (move.lengthSq() > 0.02) this.watch = null; // (walking brings the camera back to you)
+    if (move.lengthSq() > 0.02) this.watch = this.watchAt = null; // (walking brings the camera back to you)
     this.st.x = p.x;
     this.st.z = p.z;
     for (const m of this.idlers) animateCreature(m, dt, 0);
@@ -1719,7 +1723,7 @@ export class Airfield {
     if (this.towerAnt) animateCreature(this.towerAnt, dt, 0);
     for (const piece of this.pieces) piece.update?.(dt);
     for (const piece of this.paved) piece.update?.(dt);
-    this.lawn.update(dt, this.camera, this.player.firstPerson ? undefined : this.player.model.root.position);
+    this.lawn.update(dt, this.camera, this.player.firstPerson ? undefined : (this.watchAt ?? this.focus));
 
     const iv = CONFIG.player.pickupInterval / prog.workMult;
 
@@ -2056,7 +2060,8 @@ export class Airfield {
   private updateCamera(dt: number) {
     // (a watched plane flying off on its route, out of sight: back to you)
     if (this.watch !== null && !this.gates[this.watch].plane.inSight) this.watch = null;
-    const target = this.watch !== null ? this.tmpCam.copy(this.gates[this.watch].plane.pos).setY(0) : this.player.pos;
+    if (this.watchAt && !this.events.alert()?.at) this.watchAt = null; // (the event's over)
+    const target = this.watchAt ? this.tmpCam.copy(this.watchAt).setY(0) : this.watch !== null ? this.tmpCam.copy(this.gates[this.watch].plane.pos).setY(0) : this.player.pos;
     const fp = this.player.firstPerson;
     this.setFov(fp ? fpFov(this.camera.aspect) : this.thirdFov);
     if (fp) {
