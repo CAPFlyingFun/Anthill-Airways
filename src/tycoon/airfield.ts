@@ -34,7 +34,7 @@ import { spawnCreature } from '../actors/creatures';
 import { animateCreature, makeAnt, type CreatureModel } from '../actors/models';
 import { Flyers, Stack, makeItem, type StackItem } from '../world/items';
 import { TextSprite, TITLE, makePad, titleTag } from '../world/labels';
-import { Bakery, CashPad, OVEN, ResourcePile, UnlockTile, Zone, gridLayout, type Blocker } from '../world/stations';
+import { Bakery, CashPad, OVEN, ResourcePile, TrashBin, UnlockTile, Zone, gridLayout, type Blocker } from '../world/stations';
 import { TUTORIAL_DONE, Tutorial, type TutorialScript } from '../world/tutorial';
 import type { MapRect, MapView } from '../ui/minimap';
 import { AT, CLEARINGS, TY, TYCOON_SAVE_V, TY_UNLOCKS, walkable } from './data';
@@ -44,6 +44,7 @@ import { Passengers, type Pax, type Stop } from './passengers';
 import { FLEET, bestPlane, openRoutes, routeOf } from './fleet';
 import { STAFF, buyStaff, staffFx, staffPanel, type StaffId } from './staff';
 import { Events } from './events';
+import { trash } from '../world/trash';
 import { mat, mesh, PAL } from './kit';
 import { distToPath } from './airport/common';
 import { Goals, type GoalKind } from './goals';
@@ -255,7 +256,9 @@ export class Airfield {
     this.buildCafe(desk.cafe);
     this.buildShop(desk.shop);
     this.buildLounge();
-    this.buildStaffPad();
+    this.buildStaffPad(desk.staff);
+    this.buildBins();
+    this.buildRecycler();
     this.events = new Events({
       scene: this.scene,
       camera: this.camera,
@@ -352,6 +355,8 @@ export class Airfield {
       Math.hypot(x - AT.nest.x, z - AT.nest.z) < 16 ||
       AT.gates.some((g) => Math.abs(x - g.x) < 12 && z > g.z - 30 && z < g.z + 8) ||
       AT.flowers.some((f) => Math.hypot(x - f.x, z - f.z) < 10) ||
+      Math.hypot(x - AT.recycler.x, z - AT.recycler.z) < 11 ||
+      AT.bins.some((b) => Math.hypot(x - b.x, z - b.z) < 6) ||
       TY_UNLOCKS.some((u) => Math.hypot(x - u.pos[0], z - u.pos[1]) < 8) ||
       !CLEARINGS.some((c) => Math.hypot(x - c.x, z - c.z) < c.r - 4);
     const area = { x: 0, z: 0, w: 240, d: 190 };
@@ -553,6 +558,7 @@ export class Airfield {
       cash: door.clone().add(new THREE.Vector3(-7, 0, 7)),
       cafe: at(AT.cafeLocal.x, 0.5, AT.cafeLocal.z),
       shop: at(AT.shopLocal.x, 0.5, AT.shopLocal.z),
+      staff: at(AT.staffLocal.x, 0.5, AT.staffLocal.z),
     };
   }
 
@@ -621,6 +627,7 @@ export class Airfield {
         if (!it) return;
         this.flyers.fly(it.mesh, () => p.pos.clone().setY(p.pos.y + 1), () => it.mesh.removeFromParent(), 0.3, 0.6);
         this.bill(TY.snackPrice, c.spot);
+        this.dropLitter(p.pos);
         this.goals.add('snacks', 1);
         this.progress.addXp(1);
         this.sfx.sale();
@@ -685,6 +692,7 @@ export class Airfield {
         if (!it) return;
         this.flyers.fly(it.mesh, () => p.pos.clone().setY(p.pos.y + 1), () => it.mesh.removeFromParent(), 0.3, 0.6);
         this.bill(TY.shopPrice + staffFx.shopPrice(this.staffLv('shop')), s.spot);
+        this.dropLitter(p.pos);
         this.progress.addXp(1);
         this.sfx.sale();
       },
@@ -755,17 +763,132 @@ export class Airfield {
   // --------------------------------------------------------------------------
   private staffZone!: Zone;
   private staffOpen = false;
+  private padHintT = 0;
   private staffWasIn = false;
-  private buildStaffPad() {
-    const { x, z } = AT.staffPad;
-    const pad = makePad(3.6, 3.6, '⬆️ STAFF', '#7df9a0');
-    pad.position.set(x, 0.05, z);
+  /** The STAFF OFFICE: a pad behind the counter, left of the check-in ant, with the manager ant up on the counter. */
+  private staffAt = new THREE.Vector3();
+  private buildStaffPad(at: THREE.Vector3) {
+    this.staffAt.copy(at);
+    const pad = makePad(1.9, 1.5, 'STAFF', '#7df9a0');
+    pad.position.set(at.x, at.y + 0.06, at.z);
     this.scene.add(pad);
-    const label = new TextSprite(1.0, '#7df9a0');
-    label.setText('⬆️ STAFF UPGRADES');
-    label.sprite.position.set(x, 3.4, z);
+    const label = new TextSprite(0.9, '#7df9a0');
+    label.setText('⬆️ STAFF OFFICE');
+    label.sprite.position.set(at.x - 2.5, 5.4, at.z - 2);
+    (label.sprite.material as THREE.SpriteMaterial).depthTest = false; // (readable through the roof)
+    label.sprite.renderOrder = 5;
     this.scene.add(label.sprite);
-    this.staffZone = new Zone(x, z, 1.8, 1.8);
+    // the manager ant: up on the end of the counter, looking down at the pad
+    const boss = spawnCreature('worker', 1.8) ?? makeAnt(0x8e2f14);
+    boss.root.position.set(at.x - 1.2, at.y + 1.25, at.z + 2.7);
+    boss.root.rotation.y = Math.PI;
+    titleTag(boss, '⬆️ MANAGER', TITLE.ant);
+    this.scene.add(boss.root);
+    this.idlers.push(boss);
+    this.staffZone = new Zone(at.x, at.z, 0.8, 0.7);
+  }
+
+  // --------------------------------------------------------------------------
+  // 🗑️ Trash bins (v0.71): stand on one to toss what you don't want ($1 a piece: world/trash.ts, 100 pieces every
+  // 5 minutes; never seed-bags, they're luggage). Once the ♻️ Recycler is open, passengers put their snack and
+  // sweet wrappers (leaves) in the bins: stand on a bin to pick the wrappers up and carry them to the recycler.
+  // --------------------------------------------------------------------------
+  private bins: { bin: TrashBin; litter: Stack; label: TextSprite }[] = [];
+  private buildBins() {
+    for (const b of AT.bins) {
+      const bin = new TrashBin(this.scene, b.x, b.z);
+      const g = new THREE.Group();
+      g.position.set(b.x + 1.7, 0, b.z - 1.5);
+      this.scene.add(g);
+      const litter = new Stack(g, gridLayout(2, 2, 0.5, 0.5, 0.06), TY.binMax);
+      const label = new TextSprite(0.8, '#c9d1d9');
+      label.setText('🗑️');
+      label.sprite.position.set(b.x, 3.4, b.z - 1.7);
+      this.scene.add(label.sprite);
+      this.bins.push({ bin, litter, label });
+      this.blockers.push({ minX: b.x - 0.8, maxX: b.x + 0.8, minZ: b.z - 2.5, maxZ: b.z - 0.95 });
+    }
+  }
+  /** A passenger's wrapper goes into the nearest bin with room (once there's a recycler to take it to). */
+  private dropLitter(from: THREE.Vector3) {
+    if (!this.recycler.open) return;
+    const open = this.bins.filter((b) => !b.litter.full);
+    if (!open.length) return;
+    const b = open.reduce((a, c) => (Math.hypot(c.bin.zone.x - from.x, c.bin.zone.z - from.z) < Math.hypot(a.bin.zone.x - from.x, a.bin.zone.z - from.z) ? c : a));
+    const it: StackItem = { mesh: makeItem('leaf'), type: 'leaf', value: 0, flying: false };
+    it.mesh.position.copy(from).setY(1.5);
+    this.scene.add(it.mesh);
+    this.flyers.pushInto(it, b.litter, 0.9);
+  }
+
+  // --------------------------------------------------------------------------
+  // ♻️ The Recycler (v0.71, a tile): a seed-husk machine. Drop things on its IN pad: every 3 nectar become one drop
+  // of JET FUEL on its OUT pad (one drop on a FUEL pad fuels a whole flight; Fuel Runners fetch it too), and
+  // anything else (crumbs, sweets, wrappers) pays cash onto the cash pad.
+  // --------------------------------------------------------------------------
+  private recycler!: { parts: THREE.Object3D[]; input: Stack; output: Stack; inZone: Zone; outZone: Zone; nectar: number; t: number; open: boolean; spin: THREE.Object3D };
+  private buildRecycler() {
+    const { x, z } = AT.recycler;
+    const g = new THREE.Group();
+    g.position.set(x, 0, z);
+    // a striped sunflower-seed husk on its side, with a spinning leaf wheel on top
+    const husk = mesh(new THREE.SphereGeometry(1, 20, 12).scale(2.6, 1.7, 1.7), mat(0x3d3a36, { rough: 0.6 }));
+    husk.position.y = 1.5;
+    g.add(husk);
+    for (const dx of [-1.3, 0, 1.3]) {
+      const stripe = mesh(new THREE.TorusGeometry(1.62 * Math.sqrt(1 - (dx / 2.6) ** 2), 0.09, 6, 20).rotateY(Math.PI / 2), mat(0xefe6d2, { rough: 0.7 }), false);
+      stripe.position.set(dx, 1.5, 0);
+      g.add(stripe);
+    }
+    const spin = new THREE.Group();
+    spin.position.set(0, 3.5, 0);
+    for (let k = 0; k < 3; k++) {
+      const blade = mesh(new THREE.SphereGeometry(0.5, 8, 6).scale(1.6, 0.12, 0.6), mat(0x58b947, { rough: 0.6 }));
+      blade.position.set(Math.cos((k / 3) * Math.PI * 2) * 0.8, 0, Math.sin((k / 3) * Math.PI * 2) * 0.8);
+      blade.rotation.y = -(k / 3) * Math.PI * 2;
+      spin.add(blade);
+    }
+    g.add(spin);
+    const inPad = makePad(2.4, 2.2, 'IN', '#58b947');
+    inPad.position.set(-3, 0.05, 3);
+    const outPad = makePad(2.4, 2.2, 'OUT', '#ffb02e');
+    outPad.position.set(3, 0.05, 3);
+    const inG = new THREE.Group();
+    inG.position.set(-3, 0, 1.2);
+    const outG = new THREE.Group();
+    outG.position.set(3, 0, 1.2);
+    g.add(inPad, outPad, inG, outG);
+    this.scene.add(g);
+    const sign = new TextSprite(1.0, '#9be38c');
+    sign.setText('♻️ RECYCLER');
+    sign.sprite.position.set(x, 5.6, z);
+    this.scene.add(sign.sprite);
+    this.recycler = {
+      parts: [g, sign.sprite],
+      input: new Stack(inG, gridLayout(3, 2, 0.6, 0.6, 0.06), 12),
+      output: new Stack(outG, gridLayout(3, 2, 0.6, 0.6, 0.06), 6),
+      inZone: new Zone(x - 3, z + 3, 1.2, 1.1),
+      outZone: new Zone(x + 3, z + 3, 1.2, 1.1),
+      nectar: 0,
+      t: 0,
+      open: false,
+      spin,
+    };
+    for (const o of this.recycler.parts) shown(o, false);
+  }
+  private openRecycler(animate: boolean) {
+    const r = this.recycler;
+    r.open = true;
+    for (const o of r.parts) {
+      shown(o, true);
+      if (animate) this.flyers.grow(o);
+    }
+    this.blockers.push({ minX: AT.recycler.x - 2.6, maxX: AT.recycler.x + 2.6, minZ: AT.recycler.z - 1.7, maxZ: AT.recycler.z + 1.7 });
+    if (animate) this.hud.banner('♻️ Recycler open!', '3 nectar → 1 jet fuel (a whole flight). Passengers now put wrappers in the 🗑️ bins: recycle them for cash', 4600);
+  }
+  /** ⛽ How much fuel is on gate `g`'s pad, in nectar drops (a drop of jet fuel counts as a whole flight's worth). */
+  private fuelUnits(g: Gate) {
+    return g.fuel.items.reduce((n, it) => n + (it.type === 'fuel' ? TY.fuelPerFlight : 1), 0);
   }
   /** A job's staff level. */
   staffLv(id: StaffId) {
@@ -1030,6 +1153,15 @@ export class Airfield {
       if (animate) this.hud.banner(`${t.icon} ${t.name} fleet!`, `Each gate's plane is swapped for a ${t.name.toLowerCase()} when it's next at its gate`, 3200);
     } else if (id === 'ty-route-picnic' || id === 'ty-route-log' || id === 'ty-route-tide' || id === 'ty-route-lizard') {
       if (animate) this.hud.banner('🗺️ New route open!', 'Longer routes pay higher fares: some flights go there now', 3000);
+    } else if (id === 'ty-recycler') {
+      this.openRecycler(animate);
+    } else if (id === 'ty-janitor') {
+      // 🧹 empties the fullest bin into the recycler
+      const w = new Worker(this.scene, nest.x, nest.z, () => this.janitorRoute(), { color: 0x58b947 }, 2.1);
+      Object.assign(w.model.root.userData, { job: 'janitor', carry0: w.baseCarry });
+      titleTag(w.model, '🧹 JANITOR', TITLE.ant);
+      this.workers.push(w);
+      if (animate) this.flyers.grow(w.model.root);
     } else if (id === 'ty-shop') {
       this.openShop(animate);
     } else if (id === 'ty-lounge') {
@@ -1067,8 +1199,20 @@ export class Airfield {
     const flowers = this.flowers.filter((f) => f.piece.root.visible);
     const f = flowers.reduce((a, b) => (b.stack.count > a.stack.count ? b : a), flowers[0]);
     const gates = this.gates.filter((g) => g.open);
-    const g = gates.reduce((a, b) => (b.fuel.count < a.fuel.count ? b : a), gates[0]);
+    const g = gates.reduce((a, b) => (this.fuelUnits(b) < this.fuelUnits(a) ? b : a), gates[0]);
+    // (♻️ jet fuel waiting at the recycler goes first)
+    const r = this.recycler;
+    if (r.open && r.output.count > 0) return { src: r.output, srcZone: r.outZone, dst: g.fuel, dstZone: g.fuelZone };
     return { src: f.stack, srcZone: f.zone, dst: g.fuel, dstZone: g.fuelZone };
+  }
+
+  /** 🧹 The fullest bin's wrappers -> the recycler (nothing to carry: wait by the recycler). */
+  private idleLitter = new Stack(new THREE.Group(), gridLayout(1, 1, 1, 1, 0), 1);
+  private janitorRoute() {
+    const r = this.recycler;
+    const b = this.bins.reduce((a, c) => (c.litter.count > a.litter.count ? c : a));
+    if (!b.litter.count) return { src: this.idleLitter, srcZone: r.inZone, dst: r.input, dstZone: r.inZone };
+    return { src: b.litter, srcZone: b.bin.zone, dst: r.input, dstZone: r.inZone };
   }
 
   private unlock(tile: UnlockTile) {
@@ -1179,9 +1323,10 @@ export class Airfield {
         case 'parked': {
           const need = p.aboard + g.boarding.length;
           info.bags = [Math.min(g.bags.count, Math.max(need, 0)), need];
-          info.fuel = [Math.min(g.fuel.count, per), per];
+          const fu = this.fuelUnits(g);
+          info.fuel = [Math.min(fu, per), per];
           const waiting = this.pax.atGate[i].length + g.boarding.length;
-          if (g.fuel.count < per) set('⛽ NEEDS NECTAR', 'NECTAR', 'warn', null, g.fuel.count / per, `NEEDS NECTAR ⛽ ${g.fuel.count}/${per}`);
+          if (fu < per) set('⛽ NEEDS NECTAR', 'NECTAR', 'warn', null, fu / per, `NEEDS NECTAR ⛽ ${fu}/${per}`);
           else if (p.aboard > 0) {
             const full = p.freeSeats === 0 && !g.boarding.length;
             const done = full || g.boardT >= TY.boardWait;
@@ -1296,11 +1441,11 @@ export class Airfield {
 
     const iv = CONFIG.player.pickupInterval / prog.workMult;
 
-    // 🎒 You only pick up what can be used: nectar while the open FUEL pads have room for it, and bags while the
-    // gates' passengers still need them (so a backpack full of one thing never leaves you unable to carry the other)
+    // 🎒 You pick up as much nectar as you can carry (v0.71: extras go in a 🗑️ bin or the ♻️ recycler), but only
+    // the bags the gates' passengers still need (bags can't be thrown away: they're luggage)
     const carrying = (t: string) => me.stack.items.reduce((n, it) => n + (it.type === t ? 1 : 0), 0);
     const open = this.gates.filter((g) => g.open);
-    const wantsNectar = me.canTake('nectar') && carrying('nectar') < open.reduce((n, g) => n + g.fuel.max - g.fuel.count, 0);
+    const wantsNectar = me.canTake('nectar');
     const wantsBags = me.canTake('seedbag') && carrying('seedbag') < open.reduce((n, g) => n + Math.max(0, this.bagsNeeded(g)), 0);
 
     // 🌼 Flowers make nectar; stand at one to take it
@@ -1326,13 +1471,19 @@ export class Airfield {
     // ⛽ Gates: fuel them, board, go
     this.gates.forEach((g, i) => {
       if (!g.open) return;
-      this.every(g.fuelZone, dt, g.fuelZone.contains(p) && me.stack.has('nectar'), iv * 1.5, () => {
-        if (this.flyers.transferType(me.stack, g.fuel, 'nectar')) {
+      const hasFuel = me.stack.has('nectar') || me.stack.has('fuel');
+      this.every(g.fuelZone, dt, g.fuelZone.contains(p) && hasFuel, iv * 1.5, () => {
+        if (this.flyers.transferType(me.stack, g.fuel, 'fuel') || this.flyers.transferType(me.stack, g.fuel, 'nectar')) {
           this.sfx.drop();
           prog.addXp(TY.xpFuel);
-          if (g.fuel.count >= TY.fuelPerFlight) this.tutorial.did(STEP.fuel);
+          if (this.fuelUnits(g) >= TY.fuelPerFlight) this.tutorial.did(STEP.fuel);
         }
       });
+      // (a full pad, and you're still holding nectar: say where the extras can go)
+      if (g.fuelZone.contains(p) && hasFuel && g.fuel.full && (this.padHintT -= dt) <= 0) {
+        this.padHintT = 6;
+        this.hud.banner('⛽ This FUEL pad is full', this.recycler.open ? 'Extras: the ♻️ recycler turns 3 nectar into jet fuel' : 'Extras: toss them in a 🗑️ bin for a little cash', 2600);
+      }
       // 🧳 drop your seed-bags on its BAGS pad (it takes only as many as its passengers need)
       g.bags.max = Math.max(g.bags.count, this.bagsWanted(g));
       this.every(g.bagZone, dt, g.bagZone.contains(p) && me.stack.has('seedbag'), iv, () => {
@@ -1349,6 +1500,11 @@ export class Airfield {
     this.updateRunway();
 
     // 🧳 The BAG DROP: stand on it to pick up the seed-bags
+    // (bags waiting, but your backpack is full of other things: say what to do about it)
+    if (this.bagDropZone.contains(p) && me.stack.full && this.bagDrop.count > 0 && carrying('seedbag') === 0 && (this.padHintT -= dt) <= 0) {
+      this.padHintT = 6;
+      this.hud.banner('🎒 Backpack full!', 'Drop the nectar on a FUEL pad, or toss it in a 🗑️ bin, to carry bags', 2800);
+    }
     this.every(this.bagDropZone, dt, this.bagDropZone.contains(p) && wantsBags, iv, () => {
       if (me.canTake('seedbag') && this.flyers.transfer(this.bagDrop, me.stack)) this.sfx.pickup();
     });
@@ -1400,7 +1556,57 @@ export class Airfield {
         this.flyers.grow(this.shop.shelf.addInstant('candy').mesh, 0.25);
       }
     }
-    // ⬆️ the STAFF pad: step on it to open the upgrades
+    // 🗑️ Bins: pick up the wrappers in one (to recycle), or toss what you're carrying (not bags, not wrappers)
+    let atBin: THREE.Vector3 | null = null;
+    let dumping = false;
+    for (const b of this.bins) {
+      b.label.setText(b.litter.count >= TY.binFull ? '🗑️ FULL' : b.litter.count ? `🗑️ ${b.litter.count}/${TY.binFull}` : '🗑️');
+      if (!b.bin.zone.contains(p)) continue;
+      atBin = b.bin.mouth;
+      const junk = me.stack.items.find((it) => !it.flying && it.type !== 'seedbag' && it.type !== 'leaf');
+      dumping = !!junk;
+      this.every(b.bin, dt, !!junk && trash.open(), iv, () => {
+        const it = junk && me.stack.popType(junk.type);
+        if (!it) return;
+        this.flyers.fly(it.mesh, () => b.bin.mouth, () => it.mesh.removeFromParent(), 0.25, 1);
+        this.addCash(trash.pay(b.bin.mouth, this.camera));
+        this.sfx.trash();
+      });
+      this.every(b.litter, dt, !junk && me.canTake('leaf') && b.litter.count > 0, iv, () => {
+        if (this.flyers.transfer(b.litter, me.stack)) this.sfx.pickup();
+      });
+    }
+    trash.wait(dt, dumping, atBin ?? p, this.camera);
+
+    // ♻️ The recycler: drop things on IN; 3 nectar -> 1 jet fuel on OUT, anything else -> cash
+    const rc = this.recycler;
+    if (rc.open) {
+      rc.spin.rotation.y += dt * (rc.input.count ? 6 : 0.6);
+      const mine = me.stack.items.find((it) => !it.flying && it.type !== 'seedbag' && it.type !== 'fuel');
+      this.every(rc.inZone, dt, rc.inZone.contains(p) && !!mine && !rc.input.full, iv, () => {
+        if (mine && this.flyers.transferType(me.stack, rc.input, mine.type)) this.sfx.drop();
+      });
+      this.every(rc.outZone, dt, rc.outZone.contains(p) && me.canTake('fuel') && rc.output.count > 0, iv, () => {
+        if (this.flyers.transfer(rc.output, me.stack)) this.sfx.pickup();
+      });
+      rc.t += dt;
+      const top = rc.input.items[rc.input.items.length - 1];
+      const blocked = top?.type === 'nectar' && rc.nectar >= TY.recycleNectar - 1 && rc.output.full;
+      if (rc.t >= TY.recycleEvery && rc.input.canPop() && !blocked) {
+        rc.t = 0;
+        const it = rc.input.pop()!;
+        const at = new THREE.Vector3(AT.recycler.x, 2.5, AT.recycler.z);
+        this.flyers.fly(it.mesh, () => at, () => it.mesh.removeFromParent(), 0.25, 0.8);
+        if (it.type === 'nectar') {
+          if (++rc.nectar >= TY.recycleNectar) {
+            rc.nectar = 0;
+            this.flyers.grow(rc.output.addInstant('fuel').mesh, 0.25);
+          }
+        } else this.bill(TY.recyclePay, at);
+      }
+    }
+
+    // ⬆️ the STAFF OFFICE pad: step on it to open the upgrades
     const onStaff = this.staffZone.contains(p);
     if (onStaff && !this.staffWasIn && !this.staffOpen) this.openStaff();
     this.staffWasIn = onStaff;
@@ -1516,7 +1722,7 @@ export class Airfield {
       if (g.open) this.flyers.grow(plane.model.root);
       shown(plane.model.root, g.open);
     }
-    const fuelled = g.fuel.count >= TY.fuelPerFlight;
+    const fuelled = this.fuelUnits(g) >= TY.fuelPerFlight;
     const nose = g.door;
     // Call more passengers while there are free seats (and the fuel to go)
     const free = plane.freeSeats - g.boarding.length;
@@ -1543,8 +1749,10 @@ export class Airfield {
     if (ready && fuelled && bagsOk && settled) {
       g.boardT = 0;
       // The nectar flies into the plane, and the bags go into the hold
-      for (let n = 0; n < TY.fuelPerFlight; n++) {
-        const it = g.fuel.pop();
+      // (one drop of ♻️ jet fuel if there is one, else the nectar)
+      const jet = g.fuel.popType('fuel');
+      for (let n = 0; n < (jet ? 1 : TY.fuelPerFlight); n++) {
+        const it = jet ?? g.fuel.pop();
         if (!it) break;
         this.flyers.fly(it.mesh, () => plane.pos.clone().setY(1.5), () => it.mesh.removeFromParent(), 0.3, 1);
       }
@@ -1610,9 +1818,11 @@ export class Airfield {
       { x: AT.nest.x, z: AT.nest.z, icon: '🐜', label: 'Colony' },
       { x: AT.tower.x, z: AT.tower.z, icon: '🗼' },
       ...this.flowers.filter((f) => f.piece.root.visible).map((f) => ({ x: f.zone.x, z: f.zone.z, icon: '🌼', alert: f.stack.full })),
-      ...this.gates.flatMap((g, i) => (g.open ? [{ x: g.fuelZone.x, z: g.fuelZone.z, icon: '⛽', label: `Gate ${i + 1}`, alert: g.fuel.count < TY.fuelPerFlight }] : [])),
+      ...this.gates.flatMap((g, i) => (g.open ? [{ x: g.fuelZone.x, z: g.fuelZone.z, icon: '⛽', label: `Gate ${i + 1}`, alert: this.fuelUnits(g) < TY.fuelPerFlight }] : [])),
       ...this.gates.filter((g) => g.open && g.plane.inSight).map((g) => ({ x: g.plane.pos.x, z: g.plane.pos.z, icon: FLEET.find((f) => f.kind === g.plane.model.root.userData.planeType)?.icon ?? '🐞' })),
-      { x: AT.staffPad.x, z: AT.staffPad.z, icon: '⬆️', label: 'Staff' },
+      { x: this.staffAt.x, z: this.staffAt.z, icon: '⬆️', label: 'Staff' },
+      ...this.bins.map((b) => ({ x: b.bin.zone.x, z: b.bin.zone.z, icon: '🗑️', alert: b.litter.count >= TY.binFull })),
+      ...(this.recycler.open ? [{ x: AT.recycler.x, z: AT.recycler.z, icon: '♻️', alert: this.recycler.output.full }] : []),
       ...this.events.markers(),
       { x: this.cashPad.zone.x, z: this.cashPad.zone.z, icon: '💵', alert: this.cashPad.stack.count > 0 },
       { x: this.bagDropZone.x, z: this.bagDropZone.z, icon: '🧳', label: 'Bags', alert: this.bagDrop.count >= TY.bagDropMax - 2 },
@@ -1654,7 +1864,7 @@ export class Airfield {
         title: '🛫 Your airline is flying!',
         html: `<p>Ants now fuel the planes, check passengers in and load the bags. Keep growing: a
           <b>Banker ant</b>, a second <b>nectar flower</b>, <b>Gates 2, 3 and 4</b>, new 🗺️ <b>routes</b>, bigger planes,
-          a 🎁 <b>Gift Shop</b> and a 👑 <b>VIP Lounge</b>. The ⬆️ <b>STAFF</b> pad by the nest upgrades your ants.</p>
+          a 🎁 <b>Gift Shop</b> and a 👑 <b>VIP Lounge</b>. The ⬆️ <b>STAFF OFFICE</b> in the terminal upgrades your ants.</p>
           <p>📅 <b>Daily goals</b> start now: finish each day's goals quickly for ⭐⭐⭐ and a cash bonus. Tap the
           📅 bar under the airfield's name to see them. Tap a ✈️ chip at the bottom (or a plane) for its flight card.</p>`,
         button: '✈️ Let\'s fly',
@@ -1665,8 +1875,8 @@ export class Airfield {
         {
           text: () => `⛽ Fuel the ladybug: drop nectar on Gate 1's FUEL pad`,
           target: () => t.at(g0.fuelZone),
-          done: () => g0.fuel.count >= TY.fuelPerFlight || this.st.flights > 0,
-          progress: () => Math.min(1, g0.fuel.count / TY.fuelPerFlight),
+          done: () => this.fuelUnits(g0) >= TY.fuelPerFlight || this.st.flights > 0,
+          progress: () => Math.min(1, this.fuelUnits(g0) / TY.fuelPerFlight),
         },
         { text: () => '🎫 Go behind the CHECK-IN counter in the 🐚 terminal', target: () => t.at(this.deskZone), done: () => this.st.passengers > 0 },
         {

@@ -148,9 +148,9 @@ export class Goals {
     const parts = (Object.keys(d.g) as GoalKind[]).map((k) => {
       const have = d.c[k] ?? 0;
       const need = d.g[k]!;
-      return k === 'earned' ? `💵 $${have}/${need}` : `${GOAL_INFO[k].icon} ${have}/${need}`;
+      return k === 'earned' ? `💵 ${have}/${need}` : `${GOAL_INFO[k].icon} ${have}/${need}`;
     });
-    return `📅 DAY ${d.n} · ${parts.join(' · ')} · ${this.starsNow(d)}`;
+    return `📅 ${d.n} · ${parts.join(' · ')} · ${this.starsNow(d)}`;
   }
 
   /** The panel's insides (rebuilt each time it opens, and while it's open). */

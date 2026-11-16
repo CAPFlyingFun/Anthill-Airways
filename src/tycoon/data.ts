@@ -81,6 +81,14 @@ export const TY = {
   vipTicket: 3,
   loungeFee: 10,
   loungeSecs: 2.5,
+  /** ♻️ The Recycler (v0.71): nectar in for one drop of JET FUEL (worth a whole flight on a FUEL pad), what it
+   *  pays for anything else (crumbs, sweets, litter), and how fast it works. 🗑️ A bin shows FULL at `binFull`
+   *  wrappers and holds `binMax` before they're lost. */
+  recycleNectar: 3,
+  recyclePay: 3,
+  recycleEvery: 0.7,
+  binFull: 8,
+  binMax: 12,
   /** XP. */
   xpCheckIn: 3,
   xpFuel: 1,
@@ -112,8 +120,17 @@ export const AT = {
   tower: { x: 62, z: -30 },
   /** 🧳 The BAG DROP: bags slide out of the terminal here (just outside its airside doorway). */
   bagDrop: { x: 0, z: 1 },
-  /** ⬆️ The STAFF pad (upgrades for every ant job), by the colony's nest. */
-  staffPad: { x: 38, z: 40 },
+  /** ⬆️ The STAFF OFFICE (upgrades for every ant job): inside the terminal, left of the check-in ant (in the
+   *  terminal's own space; v0.71: it was a pad out by the nest). */
+  staffLocal: { x: -3.5, z: -5.75 },
+  /** 🗑️ The trash bins: by the flowers, outside the terminal's front door, by the gates. */
+  bins: [
+    { x: 22, z: 19 },
+    { x: -13, z: 34 },
+    { x: 2, z: -10 },
+  ],
+  /** ♻️ The Recycler: on the open ground east of the terminal's front door (clear of the tall flowers). */
+  recycler: { x: 6, z: 28 },
   /** 🎁 The Pollen Gift Shop's counter, inside the terminal (in its own space: right of the line). */
   shopLocal: { x: 10, z: 5 },
   /** 👑 The VIP Lounge: a leaf sofa on a red carpet, between the terminal and Gates 1-2. */
@@ -163,6 +180,9 @@ export const TY_UNLOCKS: UnlockDef[] = [
   { id: 'ty-gate4', name: 'Gate 4 + Plane', icon: '✈️', cost: 1800, pos: [38, -4], requires: ['ty-gate3'], level: 7 },
   { id: 'ty-runner3', name: 'Fuel Runner 3', icon: '⛽', cost: 700, pos: [32, 32], requires: ['ty-gate4'] },
   { id: 'ty-bags2', name: 'Baggage Ant 2', icon: '🧳', cost: 320, pos: [-6, 2], requires: ['ty-gate2', 'ty-bags'] },
+  // ---- v0.71: ♻️ the recycler and the 🧹 janitor ----
+  { id: 'ty-recycler', name: 'Recycler (nectar → jet fuel)', icon: '♻️', cost: 500, pos: [14, 31], requires: ['ty-cafe'], level: 4 },
+  { id: 'ty-janitor', name: 'Janitor Ant', icon: '🧹', cost: 350, pos: [14, 24], requires: ['ty-recycler'] },
   // ---- v0.70: 🗺️ routes, ✈️ fleet, 🎁 the gift shop, 👑 the VIP lounge ----
   { id: 'ty-route-picnic', name: 'Route: 🧺 Picnic Table (fare ×1.5)', icon: '🗺️', cost: 450, pos: [-40, 44], requires: ['ty-banker'], level: 4 },
   { id: 'ty-route-log', name: 'Route: 🪵 Fallen Log Town (×2)', icon: '🗺️', cost: 1100, pos: [-32, 50], requires: ['ty-route-picnic'], level: 6 },

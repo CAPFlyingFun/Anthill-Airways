@@ -1,9 +1,9 @@
 // ============================================================================
 // staff.ts — ⬆️ STAFF UPGRADES (v0.70, after AirportPRG's staff levels).
 //
-// Stand on the ⬆️ STAFF pad by the colony's nest: the upgrade panel opens with one row per job you've hired. Each
+// Stand on the ⬆️ STAFF OFFICE pad inside the terminal (left of the check-in ant): the upgrade panel opens with one row per job you've hired. Each
 // job goes up to Lv 10, each level dearer than the last:
-//   ⛽ Fuel Runners · 🧳 Baggage ants · 🍪 Café crew  — walk & work faster (+12% a level), carry more (+1 every 2)
+//   ⛽ Fuel Runners · 🧳 Baggage ants · 🍪 Café crew · 🧹 Janitor — walk & work faster (+12% a level), carry more (+1 every 2)
 //   🎫 Check-in ant                                  — checks passengers in faster (+15% a level)
 //   🎁 Gift shop                                     — restocks faster (+15% a level) and sells dearer (+$1 every 2)
 //   🏦 Banker                                        — grabs the cash faster (+20% a level)
@@ -12,7 +12,7 @@
 // ============================================================================
 import type { UpPanelModel, UpRowModel } from '../ui/hud';
 
-export type StaffId = 'fuel' | 'bags' | 'cafe' | 'checkin' | 'shop' | 'banker' | 'you';
+export type StaffId = 'fuel' | 'bags' | 'cafe' | 'janitor' | 'checkin' | 'shop' | 'banker' | 'you';
 
 export interface StaffDef {
   id: StaffId;
@@ -34,6 +34,7 @@ export const STAFF: StaffDef[] = [
   { id: 'cafe', icon: '🍪', name: 'Café crew', needs: 'ty-crumbs', base: 140 },
   { id: 'shop', icon: '🎁', name: 'Gift shop', needs: 'ty-shop', base: 160 },
   { id: 'banker', icon: '🏦', name: 'Banker', needs: 'ty-banker', base: 150 },
+  { id: 'janitor', icon: '🧹', name: 'Janitor ant', needs: 'ty-janitor', base: 120 },
   { id: 'you', icon: '🎒', name: 'Your backpack', needs: null, base: 70 },
 ];
 
@@ -65,6 +66,7 @@ function effect(id: StaffId, lv: number) {
     case 'fuel':
     case 'bags':
     case 'cafe':
+    case 'janitor':
       return `${x(staffFx.speed(lv))} speed · +${staffFx.carry(lv)} carry`;
     case 'checkin':
       return `${x(staffFx.quick(lv))} check-in speed`;

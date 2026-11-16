@@ -56,7 +56,12 @@ const HOWTO_HTML = `
       doing. 🎯 on the card points the camera at it until you walk. 📋 is the whole flight board.</li>
     <li>📅 <b>Daily goals</b> (the bar under the airfield's name): finish each day's goals quickly for ⭐⭐⭐
       and a cash bonus.</li>
-    <li>⬆️ Step on the <b>STAFF</b> pad by the nest to upgrade your ants' jobs (faster, carry more) and your backpack.</li>
+    <li>⬆️ Step on the <b>STAFF OFFICE</b> pad inside the terminal (left of the check-in ant) to upgrade your ants'
+      jobs (faster, carry more) and your backpack.</li>
+    <li>🗑️ Carrying something you don't need? Stand on a <b>trash bin</b> to toss it for a little cash. The
+      ♻️ <b>Recycler</b> (a tile) turns 3 nectar into a drop of <b>jet fuel</b> that fuels a whole flight, and pays for
+      everything else. Once it's open, passengers put wrappers in the bins: carry them to the recycler, or hire the
+      🧹 <b>Janitor ant</b>.</li>
     <li>🗺️ <b>Route</b> tiles open longer routes that pay higher fares. The <b>fleet</b> tiles swap every plane for a
       bigger one: 🐝 bees, 🪽 dragonflies, 🦋 butterflies.</li>
     <li>🎁 The <b>Gift Shop</b> sells pollen sweets to passengers; the 👑 <b>VIP Lounge</b> brings golden VIPs who pay ×3.</li>
