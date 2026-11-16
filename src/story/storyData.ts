@@ -36,6 +36,10 @@ export const P = {
   bench: { x: -10, z: 17.4 },
   logs: { x: -20, z: 13 },
   nest: { x: -16, z: 24.5 },
+  stones: { x: 9.5, z: 7.4 },                 // 🪨 on the stream bank
+  saplings: { x: -15, z: 7.5 },               // 🌿 young trees to knock branches off
+  ferns: { x: 18, z: 22 },                    // 🌱 plant fiber
+  workshop: { x: 1.6, z: 20.3 },              // 🪓 where you bring Rae what she needs (in front of her crate)
   berries: { x: 13, z: 12 },
   stream: { z: 4, half: 1.6 },
   /** The trail: from the camp, north to the research camp. */
@@ -69,6 +73,20 @@ export const T = {
   dinoFeed: 2,         // berries for the little dino
   lift: 2.4,           // seconds holding the fallen tree up
   antLogSecs: 7,       // offline: one log brought every ... (up to benchMax)
+  // 🪓 v0.65: tools, ARK style
+  stonePile: 4,        // stones on the stream bank
+  stoneRegrow: 4,
+  stoneUses: 8,        // branches a stone knocks loose before it goes dull and cracks
+  branchSecs: 1.1,     // one branch every ... (with a stone)
+  fiberPile: 6,
+  fiberRegrow: 3,
+  hatchet: { stone: 1, branch: 1, fiber: 2 }, // what Rae needs to lash a hatchet together
+  carryCap: { stone: 2, branch: 2, fiber: 3, berry: 2 } as Record<string, number>, // (you only pick up this many: no full hands of branches)
+  spares: { stone: 3, branch: 3, fiber: 4 },  // what Rae keeps for the next hatchet (drop leftovers on her pad)
+  hatchetSecs: 5,      // Rae making it
+  hatchetUses: 30,     // logs it chops before it breaks
+  chopSecs: 0.8,       // one log every ... (with a hatchet)
+  antChewSecs: 5,      // once your ant works: it chews a log loose from the fallen trees every ...
 };
 
 /** 📱 The phone call. */
@@ -122,7 +140,16 @@ export const RETURN: Line[] = [
   { who: 'you', text: "...I'm looking at the plane." },
   { who: 'rae', text: "Fuel isn't the problem anymore. That wing's matchwood, and the radio mast went with it." },
   { who: 'rae', text: 'Your ant farm was in the back. The case broke open. The ants made it, though: they ran for the tail.' },
-  { who: 'rae', text: 'Sun goes down in a few hours. We need a fire, and a workbench so we can fix anything at all. Wood first.' },
+  { who: 'rae', text: 'Sun goes down in a few hours. We need a fire and a workbench, so: wood. And there is no axe on board.' },
+  { who: 'rae', text: 'So we make one. Find a sharp stone by the stream, knock a branch off a sapling with it, and pull some fiber from the ferns.' },
+  { who: 'rae', text: "Bring them to me. I can't walk, but I can still tie a knot." },
+];
+
+/** 🪓 Rae makes the hatchet. */
+export const HATCHET: Line[] = [
+  { who: 'rae', text: 'One hatchet. Slightly wonky, fully functional. Go chop us some logs at the fallen trees, west of camp.' },
+  { who: 'you', text: 'Stones wear out. I am guessing hatchets do too?' },
+  { who: 'rae', text: 'Everything does, out here. When it breaks, bring me the same again and I will make another.' },
 ];
 
 export const FIRE: Line[] = [
@@ -136,7 +163,7 @@ export const ANTS: Line[] = [
 ];
 
 export const RUNNER: Line[] = [
-  { who: 'note', text: 'One ant scurries off to the fallen trees... and comes back dragging a log ten times its size.' },
+  { who: 'note', text: 'One ant scurries off to the fallen trees, chews a chunk of deadwood loose... and drags back a log ten times its size.' },
   { who: 'you', text: "No way. You're helping?" },
   { who: 'rae', text: 'Ants work for sugar. Smart ants work for berries. Now: a radio mast. The workbench can make one.' },
 ];

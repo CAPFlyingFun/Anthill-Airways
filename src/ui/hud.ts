@@ -575,7 +575,7 @@ export class Hud {
   private invOpen = false;
   private invTimer = 0;
   private invBound = false;
-  private static ICONS: Record<string, string> = { clothes: '👕', antfarm: '🐜', log: '🪵', berry: '🍓', mast: '📡', radio: '📻', bread: '🥖', parcel: '📦', extinguisher: '🧯', medicine: '💊', medkit: '🩹', luggage: '🧳', meal: '🍔', part: '🔩', fuel: '⛽', crumb: '🍞', snack: '🍪', leaf: '🍃', wrap: '🌯', sugar: '🧊', candy: '🍬', cash: '💵', bag: '🧳', snackbox: '🍱', fruit: '🍈', smoothie: '🥤', meat: '🍖', egg: '🥚', ticket: '🎟️', obsidian: '🪨', gem: '💎', magma: '🔥', crystal: '🔶', laundry: '🧺', towel: '🧻', grocery: '🥬', tray: '🍽️', beans: '🫘', coffee: '☕', shopbag: '🛍️' };
+  private static ICONS: Record<string, string> = { stone: '🪨', branch: '🌿', fiber: '🌱', clothes: '👕', antfarm: '🐜', log: '🪵', berry: '🍓', mast: '📡', radio: '📻', bread: '🥖', parcel: '📦', extinguisher: '🧯', medicine: '💊', medkit: '🩹', luggage: '🧳', meal: '🍔', part: '🔩', fuel: '⛽', crumb: '🍞', snack: '🍪', leaf: '🍃', wrap: '🌯', sugar: '🧊', candy: '🍬', cash: '💵', bag: '🧳', snackbox: '🍱', fruit: '🍈', smoothie: '🥤', meat: '🍖', egg: '🥚', ticket: '🎟️', obsidian: '🪨', gem: '💎', magma: '🔥', crystal: '🔶', laundry: '🧺', towel: '🧻', grocery: '🥬', tray: '🍽️', beans: '🫘', coffee: '☕', shopbag: '🛍️' };
 
   /** What you're carrying: the 🎒 badge ("5/8", red when full) + the slots behind it. */
   setInventory(counts: Map<string, number>, used: number, max: number) {

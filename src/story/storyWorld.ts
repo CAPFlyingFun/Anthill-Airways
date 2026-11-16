@@ -207,6 +207,13 @@ export class StoryWorld {
   private fuelDrop: Bin;
   private logs: Pile;
   private berries: Pile;
+  // 🪓 tools: stones, saplings (branches), ferns (fiber), and Rae's workshop
+  private stones: Pile;
+  private fiber: Pile;
+  private saplingZone: Zone;
+  private workshop: Bin;
+  private workshopSign = new TextSprite(0.5, '#ffd166');
+  private told = new Set<string>(); // (one-time tips: "you need a stone", "you need a hatchet")
   private campfire: Bin;
   private fireObj = new THREE.Group();
   private flames: THREE.Mesh[] = [];
@@ -289,9 +296,17 @@ export class StoryWorld {
     this.fuel = new Pile(I, P.fuelShed.x - 0.5, P.fuelShed.z + 2.6, 'fuel', 2, 2, 0, this.flyers, '#ffe07a', 2);
     this.fuelDrop = new Bin(I, P.fuelDrop.x, P.fuelDrop.z, 2, 2.4, '⛽ FUEL', '#ffe07a');
     // 🪵 the fallen trees, 🍓 the berry bush
-    this.logs = new Pile(I, P.logs.x, P.logs.z, 'log', T.logPile, T.logPile, T.logRegrow, this.flyers, '#ffe07a', 2);
+    // (v0.65: no neat ready-made pile any more: logs are chopped with a hatchet, and later chewed loose by your ants)
+    this.logs = new Pile(I, P.logs.x, P.logs.z, 'log', 0, T.logPile, 0, this.flyers, '#ffe07a', 2);
+    this.stones = new Pile(I, P.stones.x, P.stones.z, 'stone', T.stonePile, T.stonePile, T.stoneRegrow, this.flyers, '#ffe07a', 2);
+    this.fiber = new Pile(I, P.ferns.x, P.ferns.z, 'fiber', T.fiberPile, T.fiberPile, T.fiberRegrow, this.flyers, '#ffe07a', 3);
+    this.saplingZone = new Zone(P.saplings.x, P.saplings.z, 1.8, 1.8);
+    this.workshop = new Bin(I, P.workshop.x, P.workshop.z, T.spares.stone + T.spares.branch + T.spares.fiber, 2.4, '', '#ffd23f', 0.1, 3);
+    this.workshopSign.sprite.position.set(0, 2.4, 0);
+    this.workshop.group.add(this.workshopSign.sprite);
     this.berries = new Pile(I, P.berries.x, P.berries.z, 'berry', T.berryPile, T.berryPile, T.berryRegrow, this.flyers, '#ffe07a', 3);
     this.decorPiles();
+    this.decorTools();
     // 🔥 the campfire and 🛠️ the workbench (plots until they're built)
     this.campfire = new Bin(I, P.campfire.x, P.campfire.z, T.campfire, 3, '', '#ffd23f');
     this.benchPlot = new Bin(I, P.bench.x, P.bench.z, T.bench, 3, '', '#ffd23f');
@@ -326,6 +341,7 @@ export class StoryWorld {
     this.trapLog.rotation.y = 0.6;
     I.add(this.trapLog);
     this.liftZone = new Zone(P.trap.x + 3.4, P.trap.z, 1.6, 1.8);
+    this.solid(P.trap.x, P.trap.z, 2.6, 1.2, this.trapLog);
     // 🦖 the rex (only during the cutscene)
     this.rex = makeRex(14, false, { skin: 0x4b5a3a, belly: 0x9a8a62, stripe: 0x2f3a24, eye: 0xffc93c });
     setShown(this.rex.root, false);
@@ -341,7 +357,7 @@ export class StoryWorld {
     this.player = new Player(this.scene, { model: me, spot: handsSpot(me) });
     this.restore();
     this.needsEl.className = 'needs hidden';
-    this.needsEl.innerHTML = `<div class="need water"><span>💧</span><i><b></b></i></div><div class="need health hidden"><span>❤️</span><i><b></b></i></div>`;
+    this.needsEl.innerHTML = `<div class="need water"><span>💧</span><i><b></b></i></div><div class="need health hidden"><span>❤️</span><i><b></b></i></div><div class="need tool hidden"><span>🪓</span><i><b></b></i></div>`;
     document.querySelector('#hud .tr')?.prepend(this.needsEl);
     this.tutorial = new Tutorial(this, hud, save, storySteps(this));
     this.camera.position.copy(this.player.pos).add(this.camOffset);
@@ -357,6 +373,7 @@ export class StoryWorld {
       v: STORY_V, hero: null, area: 'home', x: HOME_X + P.spawnHome.x, z: P.spawnHome.z, ry: Math.PI, water: 100, health: 100, carry: [],
       flags: {}, plots: {}, bench: { logs: 0, t: 0, made: 0 }, fed: { ants: 0, dino: 0, fuel: 0 },
       dino: { state: 'hidden', x: P.trap.x, z: P.trap.z, carrying: false }, pages: [],
+      tools: { stoneHp: T.stoneUses, hatchet: 0, raeT: 0 },
     };
     save.story = { ...fresh, ...(save.story ?? {}) };
     return save.story;
@@ -381,6 +398,9 @@ export class StoryWorld {
     st.carry = this.player.stack.items.map((it) => it.type);
     st.plots.campfire = this.campfire.count();
     st.plots.bench = this.benchPlot.count();
+    st.plots['ws-stone'] = this.workshop.count('stone');
+    st.plots['ws-branch'] = this.workshop.count('branch');
+    st.plots['ws-fiber'] = this.workshop.count('fiber');
     st.bench.logs = this.benchIn.count('log');
     st.bench.made = this.benchOut.count('mast');
     st.fed.ants = Math.max(st.fed.ants, this.nest.count('berry'));
@@ -408,6 +428,9 @@ export class StoryWorld {
     if (f.landed) this.parkPlane();
     else this.plane.root.visible = false;
     for (let i = 0; i < Math.min(2, f.fuelTaken ?? 0); i++) this.fuel.stack.pop()?.mesh.removeFromParent();
+    for (const [t, n] of Object.entries({ stone: st.plots['ws-stone'] ?? 0, branch: st.plots['ws-branch'] ?? 0, fiber: st.plots['ws-fiber'] ?? 0 })) {
+      for (let i = 0; i < n; i++) this.workshop.stack.addInstant(t as ItemType);
+    }
     if (f.crash) this.wreck(true);
     this.showCamp(!!f.back);
     for (let i = 0; i < st.fed.fuel; i++) this.fuelDrop.stack.addInstant('fuel');
@@ -633,6 +656,7 @@ export class StoryWorld {
     if (Math.abs(z - P.stream.z) < P.stream.half + 1.2) return true;
     if (Math.hypot(x - P.logs.x, z - P.logs.z) < 6 || Math.hypot(x - P.berries.x, z - P.berries.z) < 5) return true;
     if (Math.hypot(x - P.trap.x, z - P.trap.z) < 7) return true;
+    for (const q of [P.stones, P.saplings, P.ferns]) if (Math.hypot(x - q.x, z - q.z) < 5.5) return true;
     return false;
   }
 
@@ -662,6 +686,7 @@ export class StoryWorld {
         this.islandG.add(crown);
       }
       this.treeSpots.push({ x, z, r: 1.6 });
+      this.solid(x, z, 0.55, 0.55); // (its trunk: you can't walk through it)
       n++;
     }
     // Bushes along the trail's edges (the jungle crowding in)
@@ -679,6 +704,78 @@ export class StoryWorld {
       this.islandG.add(b);
       n++;
     }
+  }
+
+  /** A solid box (half sizes hx, hz) you can't walk through; `obj` = only while that's shown. */
+  private solid(x: number, z: number, hx: number, hz: number, obj?: THREE.Object3D) {
+    this.blockersIsland.push({ minX: x - hx, maxX: x + hx, minZ: z - hz, maxZ: z + hz, obj });
+  }
+
+  /** 🪨 stones on the stream bank, 🌿 saplings to knock branches off, 🌱 ferns for fiber. */
+  private decorTools() {
+    const I = this.islandG;
+    const rock = mat(0x8c8f93, 0.9);
+    for (const [dx, dz, k] of [[-1.9, -1.2, 0.7], [1.8, -1.4, 0.55], [2.1, 1.1, 0.8], [-1.6, 1.5, 0.5]]) {
+      const r = new THREE.Mesh(new THREE.DodecahedronGeometry(k), rock);
+      r.position.set(P.stones.x + dx, k * 0.5, P.stones.z + dz);
+      r.scale.y = 0.6;
+      r.castShadow = true;
+      I.add(r);
+      this.solid(P.stones.x + dx, P.stones.z + dz, k * 0.7, k * 0.7);
+    }
+    const ts = new TextSprite(0.5, '#ffe7b0');
+    ts.setText('🪨 STONES');
+    ts.sprite.position.set(P.stones.x, 2.2, P.stones.z - 1.6);
+    I.add(ts.sprite);
+    // Saplings: thin young trees, low branches sticking out
+    const bark = mat(0x7a5232, 0.9);
+    const leaves = mat(0x4f9a3c, 0.85);
+    for (const [dx, dz] of [[-1.6, -2.2], [1.5, -2.4], [0, -3.4]]) {
+      const x = P.saplings.x + dx;
+      const z = P.saplings.z + dz;
+      const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.18, 3.6, 7), bark);
+      trunk.position.set(x, 1.8, z);
+      trunk.castShadow = true;
+      I.add(trunk);
+      for (let i = 0; i < 4; i++) {
+        const br = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.06, 1.2, 5), bark);
+        const a = i * 1.7 + dx;
+        br.position.set(x + Math.cos(a) * 0.45, 1.2 + i * 0.5, z + Math.sin(a) * 0.45);
+        br.rotation.set(Math.sin(a) * 0.9, 0, -Math.cos(a) * 0.9);
+        I.add(br);
+        const lf = new THREE.Mesh(new THREE.SphereGeometry(0.35, 8, 6), leaves);
+        lf.position.set(x + Math.cos(a) * 0.9, 1.5 + i * 0.5, z + Math.sin(a) * 0.9);
+        I.add(lf);
+      }
+      const crown = new THREE.Mesh(new THREE.SphereGeometry(1, 10, 8), leaves);
+      crown.position.set(x, 3.8, z);
+      crown.scale.set(1, 0.8, 1);
+      crown.castShadow = true;
+      I.add(crown);
+      this.solid(x, z, 0.3, 0.3);
+    }
+    const tsa = new TextSprite(0.5, '#ffe7b0');
+    tsa.setText('🌿 SAPLINGS: USE A STONE');
+    tsa.sprite.position.set(P.saplings.x, 4.4, P.saplings.z - 2.2);
+    I.add(tsa.sprite);
+    const pad = makePad(3.6, 3.6, '', '#ffe07a');
+    pad.position.set(P.saplings.x, 0.04, P.saplings.z);
+    I.add(pad);
+    // Ferns: fans of long green leaves
+    const fern = new THREE.MeshStandardMaterial({ color: 0x3f8f3a, roughness: 0.85, side: THREE.DoubleSide });
+    for (const [dx, dz, k] of [[-1.8, -2.4, 1.1], [1.6, -2.6, 1], [0, -3.4, 1.3]]) {
+      for (let i = 0; i < 9; i++) {
+        const leaf = new THREE.Mesh(new THREE.PlaneGeometry(0.35, 1.6 * k), fern);
+        const a = (i / 9) * Math.PI * 2;
+        leaf.position.set(P.ferns.x + dx + Math.cos(a) * 0.45 * k, 0.6 * k, P.ferns.z + dz + Math.sin(a) * 0.45 * k);
+        leaf.rotation.set(Math.sin(a) * 0.8, -a, Math.cos(a) * 0.8, 'YXZ');
+        I.add(leaf);
+      }
+    }
+    const tf = new TextSprite(0.5, '#ffe7b0');
+    tf.setText('🌱 FERNS: FIBER');
+    tf.sprite.position.set(P.ferns.x, 2.6, P.ferns.z - 3);
+    I.add(tf.sprite);
   }
 
   private buildResearchCamp() {
@@ -720,8 +817,10 @@ export class StoryWorld {
       drum.position.set(P.fuelShed.x + dx, 0.65, P.fuelShed.z - 0.6);
       drum.castShadow = true;
       I.add(drum);
+      this.solid(P.fuelShed.x + dx, P.fuelShed.z - 0.6, 0.55, 0.55);
     }
     I.add(box(1.4, 0.8, 1.2, mat(0x6b5a3a, 0.9), P.radioShed.x, 0.4, P.radioShed.z - 0.3));
+    this.solid(P.radioShed.x, P.radioShed.z - 0.3, 0.7, 0.6);
     this.shedModule = new Stack(this.islandG, (_i, _t, out) => out.set(P.radioShed.x, 1.05, P.radioShed.z - 0.3), 1);
     // The table with the notebook, a toppled chair, the camp's sign
     const tb = P.table;
@@ -754,8 +853,10 @@ export class StoryWorld {
       t.castShadow = true;
       I.add(t);
     }
+    // (the fallen trunks are solid)
+    this.solid(P.logs.x + 0.2, P.logs.z - 3.9, 3.6, 1.1);
     const tl = new TextSprite(0.55, '#ffe7b0');
-    tl.setText('🪵 FALLEN TREES');
+    tl.setText('🪵 FALLEN TREES: CHOP WITH A HATCHET');
     tl.sprite.position.set(P.logs.x, 2.6, P.logs.z - 3);
     I.add(tl.sprite);
     const bush = mat(0x2f7a35, 0.85);
@@ -772,6 +873,7 @@ export class StoryWorld {
         I.add(bb);
       }
     }
+    this.solid(P.berries.x, P.berries.z - 3.2, 2.4, 1.2);
     const tb = new TextSprite(0.55, '#ffe7b0');
     tb.setText('🍓 BERRY BUSH');
     tb.sprite.position.set(P.berries.x, 3.2, P.berries.z - 3);
@@ -825,7 +927,7 @@ export class StoryWorld {
       smoke.push(puff);
     }
     this.plane = { root, pitch, body, props: built.spinners, wing, broken, mast, smoke };
-    this.blockersIsland.push({ minX: P.plane.x - 8.6, maxX: P.plane.x + 6.2, minZ: P.plane.z - 1.2, maxZ: P.plane.z + 1.2 });
+    this.blockersIsland.push({ minX: P.plane.x - 8.6, maxX: P.plane.x + 6.2, minZ: P.plane.z - 1.2, maxZ: P.plane.z + 1.2, obj: root });
   }
 
   private parkPlane() {
@@ -858,6 +960,7 @@ export class StoryWorld {
       this.wreckBits.add(g);
     }
     this.wreckBits.visible = true;
+    this.blockWreck();
     this.nestObj.visible = true;
     if (this.st.dino.state === 'hidden') {
       this.st.dino.state = 'trapped';
@@ -869,6 +972,23 @@ export class StoryWorld {
   }
 
   private mastLight: THREE.Mesh | null = null;
+  /** The broken wing lying on the ground is solid (its box, worked out from where it really is). */
+  private wreckBlocked = false;
+  private blockWreck() {
+    if (this.wreckBlocked) return;
+    this.wreckBlocked = true;
+    this.plane.root.updateMatrixWorld(true);
+    const box3 = new THREE.Box3();
+    for (const piece of this.plane.broken.children) {
+      box3.setFromObject(piece);
+      if (box3.max.y > 1.6) continue; // (the half still on the plane is up high: you walk under it)
+      const c = box3.getCenter(new THREE.Vector3());
+      const sz = box3.getSize(new THREE.Vector3());
+      if (sz.x < 0.6 && sz.z < 0.6) continue; // (little bits of debris: step over them)
+      this.solid(c.x, c.z, sz.x / 2, sz.z / 2, piece);
+    }
+  }
+
   private raiseMast(instant = true) {
     this.plane.mast.visible = true;
     if (!instant) {
@@ -881,13 +1001,25 @@ export class StoryWorld {
   // ✈️ Rae: standing by the engine; then sitting on a crate (hurt)
   // --------------------------------------------------------------------------
   private raeSeated = false;
+  private raeBlocked = false;
   private raeSit() {
     const m = this.rae;
     this.raeSeated = true;
     m.root.position.set(P.raeHurt.x, 0, P.raeHurt.z);
-    m.root.rotation.y = Math.PI * 0.85; // (facing the camp)
+    const ry = Math.PI * 0.85; // (facing the camp)
+    m.root.rotation.y = ry;
+    // The crate goes BEHIND her, so she sits on its front edge with her knees over it (v0.65)
+    const back = 0.5;
+    this.raeCrate.position.set(P.raeHurt.x - Math.sin(ry) * back, 0.375, P.raeHurt.z - Math.cos(ry) * back);
+    this.raeCrate.rotation.y = ry;
     this.raeCrate.visible = true;
     sitPose(m, 0.75);
+    if (!this.raeBlocked) {
+      this.raeBlocked = true;
+      const cx = (P.raeHurt.x + this.raeCrate.position.x) / 2;
+      const cz = (P.raeHurt.z + this.raeCrate.position.z) / 2;
+      this.solid(cx, cz, 0.85, 0.85, this.raeCrate);
+    }
   }
 
   // --------------------------------------------------------------------------
@@ -917,6 +1049,7 @@ export class StoryWorld {
     g.add(this.fireLight);
     g.visible = false;
     this.islandG.add(g);
+    this.solid(P.campfire.x, P.campfire.z, 1.1, 1.1, g);
   }
 
   private buildBench() {
@@ -932,6 +1065,7 @@ export class StoryWorld {
     g.add(this.benchSign.sprite);
     g.visible = false;
     this.islandG.add(g);
+    this.solid(P.bench.x, P.bench.z, 2.15, 0.95, g);
   }
 
   private buildNest() {
@@ -946,10 +1080,11 @@ export class StoryWorld {
     g.add(hole);
     // little ants running around it (a few dark dots going round)
     for (let i = 0; i < 6; i++) {
-      const ant = box(0.18, 0.08, 0.1, mat(0x3a1a0c, 0.6), 0, 0.05, 0);
+      const ant = box(0.18, 0.08, 0.1, mat(0x1a1512, 0.5), 0, 0.05, 0); // (carpenter ants: black)
       ant.userData.ant = i;
       g.add(ant);
     }
+    this.solid(P.nest.x, P.nest.z - 2.2, 1.1, 1.1, g);
     const t = new TextSprite(0.5, '#ffd166');
     t.setText('🐜 ANT NEST');
     t.sprite.position.set(0, 2.4, 0);
@@ -981,6 +1116,7 @@ export class StoryWorld {
   private showCamp(on: boolean) {
     const f = this.st.flags;
     this.fuelDrop.show(on);
+    this.workshop.show(on);
     this.campfire.show(on && !f.campfire);
     this.benchPlot.show(on && !!f.campfire && !f.bench);
     this.benchIn.show(!!f.bench);
@@ -995,7 +1131,9 @@ export class StoryWorld {
     if (this.runner) return;
     const route: Route = { src: this.logs.stack, srcZone: this.logs.zone, dst: this.benchIn.stack, dstZone: this.benchIn.zone };
     this.runner = new Worker(this.scene, P.nest.x, P.nest.z - 1, () => route, { color: 0xffd166 }, 1.1);
-    titleTag(this.runner.model, '🐜 RUNNER', 0.5);
+    this.logs.regrow = T.antChewSecs; // (the ants chew deadwood loose: the fallen trees refill a little at a time)
+    titleTag(this.runner.model, '🐜 CARPENTER ANT', 0.5);
+    carpenterAnt(this.runner.model);
     this.nest.show(false);
   }
 
@@ -1172,6 +1310,9 @@ export class StoryWorld {
     // The world keeps going (piles regrow, the ant works, the fire flickers, the dino follows you)
     this.logs.update(dt);
     this.berries.update(dt);
+    this.stones.update(dt);
+    this.fiber.update(dt);
+    this.updateWorkshop(dt);
     this.runner?.update(dt, this.flyers);
     this.updateBench(dt);
     this.animateScenery(dt);
@@ -1202,9 +1343,21 @@ export class StoryWorld {
     // ⛽ the fuel shed (two cans), and leaving them by the plane
     take(this.fuel, this.fuel.zone, this.fuel.stack, 'fuel', true, () => (f.fuelTaken = (f.fuelTaken ?? 0) + 1));
     drop(this.fuelDrop, this.fuelDrop.zone, this.fuelDrop.stack, 'fuel', !!f.back, () => (st.fed.fuel += 1));
-    // 🪵 logs, 🍓 berries
+    // 🪨 stones, 🌱 fiber; 🌿 branches knocked off the saplings with a stone; 🪓 the hatchet from Rae
+    const under = (t: ItemType) => this.carrying(t) < (T.carryCap[t] ?? 99);
+    take(this.stones, this.stones.zone, this.stones.stack, 'stone', !!f.back && under('stone'));
+    take(this.fiber, this.fiber.zone, this.fiber.stack, 'fiber', !!f.back && under('fiber'));
+    this.knockBranches(dt, !!f.back);
+    // (Rae keeps spares too, up to a few of each: your hands don't stay full of leftovers, and the next
+    // hatchet is ready to make when this one breaks. Counting ones still in the air, so nothing overfills.)
+    for (const t of ['stone', 'branch', 'fiber'] as const) {
+      const inBin = this.workshop.stack.items.filter((it) => it.type === t).length;
+      drop(this.workshop, this.workshop.zone, this.workshop.stack, t, !!f.back && inBin < T.spares[t]);
+    }
+    // 🪵 logs: ones lying there (your ants chewed them loose), else chop them with your hatchet
     take(this.logs, this.logs.zone, this.logs.stack, 'log', !!f.back);
-    take(this.berries, this.berries.zone, this.berries.stack, 'berry', !!f.back);
+    this.chop(dt, !!f.back);
+    take(this.berries, this.berries.zone, this.berries.stack, 'berry', !!f.back && this.carrying('berry') < (T.carryCap.berry ?? 99));
     // 🔥 the fire pit, 🛠️ the workbench plot, then the workbench itself
     drop(this.campfire, this.campfire.zone, this.campfire.stack, 'log', !!f.back && !f.campfire);
     drop(this.benchPlot, this.benchPlot.zone, this.benchPlot.stack, 'log', !!f.campfire && !f.bench);
@@ -1596,6 +1749,130 @@ export class StoryWorld {
     const h = this.needsEl.querySelector<HTMLElement>('.health')!;
     h.classList.toggle('hidden', st.health >= 99.5);
     h.querySelector<HTMLElement>('b')!.style.width = `${Math.round(st.health)}%`;
+    // 🪓 / 🪨 how worn your tool is (the hatchet if you have one, else the stone you're holding)
+    const tool = this.needsEl.querySelector<HTMLElement>('.tool')!;
+    const hatchet = st.tools.hatchet > 0;
+    const stone = !hatchet && this.player.stack.has('stone');
+    tool.classList.toggle('hidden', !hatchet && !stone);
+    if (hatchet || stone) {
+      tool.querySelector('span')!.textContent = hatchet ? '🪓' : '🪨';
+      tool.querySelector<HTMLElement>('b')!.style.width = `${Math.round(100 * (hatchet ? st.tools.hatchet / T.hatchetUses : st.tools.stoneHp / T.stoneUses))}%`;
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // 🪓 Tools, ARK style: a stone knocks branches loose (and wears out); Rae lashes stone + branch + fiber into a
+  // hatchet; the hatchet chops logs (and wears out too)
+  // --------------------------------------------------------------------------
+  private tip(key: string, title: string, text: string) {
+    if (this.told.has(key)) return;
+    this.told.add(key);
+    this.hud.banner(title, text, 3200);
+  }
+
+  /** Standing at the saplings with a stone: a branch every so often (the stone wears down). */
+  private knockBranches(dt: number, ok: boolean) {
+    const me = this.player;
+    const tools = this.st.tools;
+    const there = ok && this.saplingZone.contains(me.pos);
+    if (there && !me.stack.has('stone')) this.tip('need-stone', '🪨 You need a stone', 'Pick up a sharp stone on the stream bank, then knock branches loose with it.');
+    const enough = this.carrying('branch') >= (T.carryCap.branch ?? 2);
+    this.every(this.saplingZone, dt, there && !enough && me.stack.has('stone') && me.canTake('branch'), T.branchSecs / this.progress.workMult, () => {
+      this.flyers.grow(me.stack.addInstant('branch').mesh, 0.25);
+      this.sfx.drop();
+      this.progress.addXp(CONFIG.xp.pickup);
+      this.hud.floatAt(v3(me.pos.x, 3.2, me.pos.z), this.camera, '+1 🌿', '');
+      tools.stoneHp -= 1;
+      if (tools.stoneHp <= 0) {
+        me.stack.popType('stone')?.mesh.removeFromParent();
+        tools.stoneHp = T.stoneUses;
+        this.sfx.trash();
+        this.hud.banner('🪨 Your stone went dull and cracked', me.stack.has('stone') ? 'Good thing you brought another.' : 'Grab another on the stream bank.', 2800);
+      }
+    });
+  }
+
+  /** At the fallen trees with a hatchet: chop a log every so often (the hatchet wears). */
+  private chop(dt: number, ok: boolean) {
+    const me = this.player;
+    const tools = this.st.tools;
+    const there = ok && this.logs.zone.contains(me.pos); // (you chop even while the ants' loose logs lie there)
+    if (there && tools.hatchet <= 0) this.tip('need-hatchet', '🪓 You need a hatchet', 'These trunks are too thick to break by hand. Rae can make you a hatchet.');
+    this.every(this.logs.stack, dt, there && tools.hatchet > 0 && me.canTake('log'), T.chopSecs / this.progress.workMult, () => {
+      this.flyers.grow(me.stack.addInstant('log').mesh, 0.25);
+      this.sfx.drop();
+      this.progress.addXp(CONFIG.xp.pickup);
+      this.hud.floatAt(v3(me.pos.x, 3.2, me.pos.z), this.camera, '+1 🪵', '');
+      tools.hatchet -= 1;
+      if (tools.hatchet <= 0) {
+        tools.hatchet = 0;
+        this.sfx.trash();
+        this.hud.banner('🪓 Your hatchet broke!', 'Bring Rae another stone, branch and 2 fiber for a new one.', 3400);
+      }
+    });
+  }
+
+  /** Rae's workshop: once it has a stone, a branch and 2 fiber, she makes a hatchet (her hands busy). */
+  private updateWorkshop(dt: number) {
+    const st = this.st;
+    const tools = st.tools;
+    if (!st.flags.back) return;
+    const R = T.hatchet;
+    const have = (t: 'stone' | 'branch' | 'fiber') => this.workshop.count(t);
+    if (tools.raeT === 0 && tools.hatchet <= 0 && have('stone') >= R.stone && have('branch') >= R.branch && have('fiber') >= R.fiber) {
+      tools.raeT = 0.001;
+    }
+    if (tools.raeT > 0) {
+      tools.raeT += dt;
+      this.raeWork(this.t);
+      this.workshopSign.setText(`🪓 RAE IS MAKING A HATCHET ${Math.min(99, Math.floor((tools.raeT / T.hatchetSecs) * 100))}%`);
+      if (tools.raeT >= T.hatchetSecs) {
+        tools.raeT = 0;
+        for (const t of ['stone', 'branch', 'fiber'] as const) this.workshop.consume(R[t], t);
+        tools.hatchet = T.hatchetUses;
+        sitPose(this.rae, 0.75);
+        this.sfx.unlocked();
+        this.progress.addXp(25);
+        this.hud.floatAt(v3(P.workshop.x, 3, P.workshop.z), this.camera, '🪓 HATCHET!', 'big gold');
+        if (!st.flags.hatchet) {
+          st.flags.hatchet = 1;
+          this.run(() => this.say(D.HATCHET));
+        }
+      }
+      return;
+    }
+    this.workshopSign.setText(
+      tools.hatchet > 0
+        ? `🪓 RAE'S SPARES: 🪨 ${have('stone')} 🌿 ${have('branch')} 🌱 ${have('fiber')}`
+        : `🪓 HATCHET: 🪨 ${have('stone')}/${R.stone} 🌿 ${have('branch')}/${R.branch} 🌱 ${have('fiber')}/${R.fiber}`,
+    );
+  }
+
+  /** Rae's workshop has enough of this for the hatchet already. */
+  workshopHas(t: 'stone' | 'branch' | 'fiber') {
+    return this.workshop.count(t) >= T.hatchet[t];
+  }
+
+  /** How far Rae's hatchet is (for the quest card): materials in, then her making it. */
+  hatchetProgress() {
+    const R = T.hatchet;
+    const t = this.st.tools;
+    if (t.raeT > 0) return 0.6 + 0.4 * (t.raeT / T.hatchetSecs);
+    const n = Math.min(R.stone, this.workshop.count('stone')) + Math.min(R.branch, this.workshop.count('branch')) + Math.min(R.fiber, this.workshop.count('fiber'));
+    return (n / (R.stone + R.branch + R.fiber)) * 0.6;
+  }
+
+  /** Rae's hands busy (lashing the hatchet together) while she sits. */
+  private raeWork(t: number) {
+    const b = this.rae.biped;
+    if (!b) return;
+    const q = new THREE.Quaternion();
+    b.limbs.forEach((limb, i) => {
+      if (!limb.arm) return;
+      q.setFromAxisAngle(limb.hip.axis, -0.75 + Math.sin(t * 9 + i * 1.7) * 0.25);
+      limb.hip.bone.quaternion.copy(limb.hip.base).multiply(q);
+      if (limb.mid) limb.mid.bone.quaternion.copy(limb.mid.base).multiply(q.setFromAxisAngle(limb.mid.axis, -0.9 + Math.sin(t * 9 + i) * 0.2));
+    });
   }
 
   // --------------------------------------------------------------------------
@@ -1832,6 +2109,7 @@ export class StoryWorld {
     ];
     if (f.back) {
       markers.push({ x: P.logs.x, z: P.logs.z, icon: '🪵', label: 'Fallen trees' }, { x: P.berries.x, z: P.berries.z, icon: '🍓', label: 'Berries' });
+      markers.push({ x: P.stones.x, z: P.stones.z, icon: '🪨', label: 'Stones' }, { x: P.saplings.x, z: P.saplings.z, icon: '🌿', label: 'Saplings' }, { x: P.ferns.x, z: P.ferns.z, icon: '🌱', label: 'Ferns' });
       markers.push({ x: P.campfire.x, z: P.campfire.z, icon: '🔥', label: f.campfire ? 'Campfire' : 'Fire pit' });
       if (f.campfire) markers.push({ x: P.bench.x, z: P.bench.z, icon: '🛠️', label: 'Workbench' });
     }
@@ -1851,6 +2129,29 @@ export class StoryWorld {
       target: st ? { x: st.x, z: st.z } : null,
     };
   }
+}
+
+// ============================================================================
+// 🐜 Carpenter ant: the same ant model, tinted near-black (carpenter ants chew wood: v0.65, Joshua's idea).
+// Each mesh gets its own darkened copy of its material, so the other ants keep their colours.
+// ============================================================================
+function carpenterAnt(m: CreatureModel) {
+  // No hard hat (it's a wild ant, not a crew member): the hat is the plain dome the Worker put on its body
+  for (const c of [...m.bob.children]) {
+    const g = (c as THREE.Mesh).geometry;
+    if ((c as THREE.Mesh).isMesh && !(c as THREE.SkinnedMesh).isSkinnedMesh && (g?.type === 'SphereGeometry' || g?.type === 'CylinderGeometry')) c.removeFromParent();
+  }
+  m.root.traverse((o) => {
+    const mesh = o as THREE.Mesh;
+    if (!mesh.isMesh || o.userData.label) return;
+    const tint = (src: THREE.Material) => {
+      const c = src.clone() as THREE.MeshStandardMaterial;
+      if (c.color) c.color.multiplyScalar(0.12).lerp(new THREE.Color(0x141110), 0.55); // (near-black, a hint of brown)
+      if ('roughness' in c) c.roughness = Math.min(1, (c.roughness ?? 0.6) * 0.8); // (a little shine on the black)
+      return c;
+    };
+    mesh.material = Array.isArray(mesh.material) ? mesh.material.map(tint) : tint(mesh.material);
+  });
 }
 
 // ============================================================================
@@ -1962,8 +2263,32 @@ function storySteps(w: StoryWorld): TutorialScript {
         progress: () => st().fed.fuel / 2,
         done: () => st().fed.fuel >= 2 || has('fuel') === 0,
       },
+      // 🪓 the first tools (ARK style)
       {
-        text: () => `🪵 Gather ${T.campfire} logs at the fallen trees (west of camp)`,
+        text: () => '🪨 Pick up 2 sharp stones on the stream bank',
+        target: () => at(P.stones.x, P.stones.z),
+        progress: () => has('stone') / 2,
+        done: () => has('stone') >= 2 || !!f().hatchet || w.workshopHas('stone'),
+      },
+      {
+        text: () => '🌿 Knock a branch off the saplings with a stone (west of camp)',
+        target: () => at(P.saplings.x, P.saplings.z),
+        done: () => has('branch') >= 1 || !!f().hatchet || w.workshopHas('branch'),
+      },
+      {
+        text: () => `🌱 Pull ${T.hatchet.fiber} bunches of fiber from the ferns (east of camp)`,
+        target: () => at(P.ferns.x, P.ferns.z),
+        progress: () => has('fiber') / T.hatchet.fiber,
+        done: () => has('fiber') >= T.hatchet.fiber || !!f().hatchet || w.workshopHas('fiber'),
+      },
+      {
+        text: () => '🪓 Bring Rae a stone, a branch and 2 fiber: she\'ll make you a hatchet',
+        target: () => at(P.workshop.x, P.workshop.z),
+        progress: () => w.hatchetProgress(),
+        done: () => !!f().hatchet,
+      },
+      {
+        text: () => `🪵 Chop ${T.campfire} logs at the fallen trees with your hatchet (west of camp)`,
         target: () => at(P.logs.x, P.logs.z),
         progress: () => has('log') / T.campfire,
         done: () => has('log') >= T.campfire || !!f().campfire,

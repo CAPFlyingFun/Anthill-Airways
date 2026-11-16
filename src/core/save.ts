@@ -74,6 +74,8 @@ export interface StorySave {
   dino: { state: 'hidden' | 'trapped' | 'free' | 'trust'; x: number; z: number; carrying: boolean };
   /** Logbook pages found (their numbers). */
   pages: number[];
+  /** 🪓 Tools: uses left on the stone you're using, the hatchet's uses left (0 = none), Rae's crafting (seconds in). */
+  tools: { stoneHp: number; hatchet: number; raeT: number };
 }
 
 /** 🏝️ Anthill Island: what the backyard remembers between sessions. */

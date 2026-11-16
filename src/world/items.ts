@@ -33,10 +33,12 @@ export type ItemType = 'crumb' | 'snack' | 'leaf' | 'wrap' | 'sugar' | 'candy' |
   | 'bread' | 'parcel' | 'extinguisher' | 'medicine' | 'medkit' | 'luggage'
   // 🦖 The story (v0.63): packing at home (clothes, your ant farm), and on the island: logs, berries,
   // the radio mast you build at the workbench and the radio's spare power module
-  | 'clothes' | 'antfarm' | 'log' | 'berry' | 'mast' | 'radio';
+  | 'clothes' | 'antfarm' | 'log' | 'berry' | 'mast' | 'radio'
+  // 🪓 v0.65: ARK-style first tools: a sharp stone, a branch, plant fiber (Rae lashes them into a hatchet)
+  | 'stone' | 'branch' | 'fiber';
 
 /** Height of one item when stacked. */
-export const ITEM_H: Record<ItemType, number> = { clothes: 0.24, antfarm: 0.5, log: 0.34, berry: 0.3, mast: 1.0, radio: 0.5, bread: 0.2, parcel: 0.3, extinguisher: 0.5, medicine: 0.3, medkit: 0.3, luggage: 0.46, meal: 0.42, part: 0.3, fuel: 0.44, crumb: 0.3, snack: 0.32, leaf: 0.14, wrap: 0.32, sugar: 0.4, candy: 0.3, cash: 0.11, bag: 0.48, snackbox: 0.36, fruit: 0.4, smoothie: 0.5, meat: 0.32, egg: 0.42, ticket: 0.1, obsidian: 0.36, gem: 0.4, magma: 0.4, crystal: 0.52, laundry: 0.4, towel: 0.2, grocery: 0.42, tray: 0.36, beans: 0.38, coffee: 0.4, shopbag: 0.5 };
+export const ITEM_H: Record<ItemType, number> = { clothes: 0.24, antfarm: 0.5, log: 0.34, berry: 0.3, mast: 1.0, radio: 0.5, stone: 0.26, branch: 0.14, fiber: 0.16, bread: 0.2, parcel: 0.3, extinguisher: 0.5, medicine: 0.3, medkit: 0.3, luggage: 0.46, meal: 0.42, part: 0.3, fuel: 0.44, crumb: 0.3, snack: 0.32, leaf: 0.14, wrap: 0.32, sugar: 0.4, candy: 0.3, cash: 0.11, bag: 0.48, snackbox: 0.36, fruit: 0.4, smoothie: 0.5, meat: 0.32, egg: 0.42, ticket: 0.1, obsidian: 0.36, gem: 0.4, magma: 0.4, crystal: 0.52, laundry: 0.4, towel: 0.2, grocery: 0.42, tray: 0.36, beans: 0.38, coffee: 0.4, shopbag: 0.5 };
 
 // Shared geometry + materials: every crumb reuses the same ones (fast).
 const geo = {
@@ -94,6 +96,9 @@ const geo = {
   antfarm: new THREE.BoxGeometry(0.62, 0.46, 0.16),                          // your ant farm (a thin glass case)
   log: new THREE.CylinderGeometry(0.16, 0.17, 0.7, 9).rotateZ(Math.PI / 2), // a log, lying across your arms
   berry: new THREE.SphereGeometry(0.075, 8, 6),                              // one berry of a bunch
+  stone: new THREE.DodecahedronGeometry(0.16),
+  branch: new THREE.CylinderGeometry(0.035, 0.05, 0.8, 6).rotateZ(Math.PI / 2),
+  strand: new THREE.CylinderGeometry(0.015, 0.015, 0.6, 4).rotateZ(Math.PI / 2),
   mastBase: new THREE.CylinderGeometry(0.2, 0.2, 0.04, 8),
   mastLeg: new THREE.CylinderGeometry(0.018, 0.022, 1, 5),                  // a radio mast: a lattice section
   mastBrace: new THREE.CylinderGeometry(0.01, 0.01, 1, 4),
@@ -160,12 +165,15 @@ const mat = {
   berry: new THREE.MeshStandardMaterial({ color: 0xc2185b, roughness: 0.4 }),
   metal: new THREE.MeshStandardMaterial({ color: 0x9aa3ab, roughness: 0.35, metalness: 0.6 }),
   radio: new THREE.MeshStandardMaterial({ color: 0x4d5b3a, roughness: 0.7 }),
+  stone: new THREE.MeshStandardMaterial({ color: 0x8c8f93, roughness: 0.85, flatShading: true }),
+  fiber: new THREE.MeshStandardMaterial({ color: 0x8fbf4a, roughness: 0.9 }),
+  twine: new THREE.MeshStandardMaterial({ color: 0xc9a86a, roughness: 0.9 }),
   dish: new THREE.MeshStandardMaterial({ color: 0xeeeeee, roughness: 0.4, side: THREE.DoubleSide }),
   amber: new THREE.MeshStandardMaterial({ color: 0xffb703, roughness: 0.3, emissive: 0xff8800, emissiveIntensity: 0.6 }),
 };
 
 /** Cash value of each sellable item (counter price; gate runs pay the same per item). */
-export const ITEM_VALUE: Record<ItemType, number> = { clothes: 0, antfarm: 0, log: 0, berry: 0, mast: 0, radio: 0, bread: 2000, parcel: 4500, extinguisher: 20000, medicine: 34000, medkit: 40000, luggage: 125000, meal: 1300, part: 600, fuel: 90, crumb: 2, snack: 5, leaf: 3, wrap: 14, sugar: 10, candy: 40, cash: 0, bag: 15, snackbox: 25, fruit: 0, smoothie: 60, meat: 0, egg: 80, ticket: 50, obsidian: 0, gem: 150, magma: 0, crystal: 450, laundry: 0, towel: 0, grocery: 0, tray: 220, beans: 2, coffee: 20, shopbag: 50 };
+export const ITEM_VALUE: Record<ItemType, number> = { stone: 0, branch: 0, fiber: 0, clothes: 0, antfarm: 0, log: 0, berry: 0, mast: 0, radio: 0, bread: 2000, parcel: 4500, extinguisher: 20000, medicine: 34000, medkit: 40000, luggage: 125000, meal: 1300, part: 600, fuel: 90, crumb: 2, snack: 5, leaf: 3, wrap: 14, sugar: 10, candy: 40, cash: 0, bag: 15, snackbox: 25, fruit: 0, smoothie: 60, meat: 0, egg: 80, ticket: 50, obsidian: 0, gem: 150, magma: 0, crystal: 450, laundry: 0, towel: 0, grocery: 0, tray: 220, beans: 2, coffee: 20, shopbag: 50 };
 
 /** Build the 3D mesh for one item. Box faces order: +x, -x, +y(top), -y, +z, -z */
 export function makeItem(type: ItemType): THREE.Mesh {
@@ -344,6 +352,33 @@ export function makeItem(type: ItemType): THREE.Mesh {
       b.position.set(Math.cos(i * 1.05) * 0.1, 0.08 + (i % 2) * 0.06, Math.sin(i * 1.05) * 0.1);
       m.add(b);
     }
+  } else if (type === 'stone') {
+    // A sharp grey stone (flat-shaded, a little squashed)
+    m = new THREE.Mesh(geo.stone, mat.stone);
+    m.scale.set(1.2, 0.8, 1);
+    m.rotation.set(Math.random(), Math.random(), 0);
+  } else if (type === 'branch') {
+    // A branch with a twig and a couple of leaves still on it
+    m = new THREE.Mesh(geo.branch, mat.bark);
+    const twig = new THREE.Mesh(geo.branch, mat.bark);
+    twig.scale.set(0.4, 0.6, 0.6);
+    twig.rotation.y = 0.7;
+    twig.position.set(0.15, 0, 0.1);
+    const leaf = new THREE.Mesh(geo.leaf, mat.leaf);
+    leaf.scale.setScalar(0.5);
+    leaf.position.set(0.32, 0.03, 0.18);
+    m.add(twig, leaf);
+  } else if (type === 'fiber') {
+    // A bundle of green plant fiber, tied in the middle
+    m = new THREE.Mesh(geo.strand, mat.fiber);
+    for (let i = 0; i < 6; i++) {
+      const s2 = new THREE.Mesh(geo.strand, mat.fiber);
+      s2.position.set(0, (i % 3) * 0.03, (i - 2.5) * 0.03);
+      s2.rotation.y = (i - 2.5) * 0.06;
+      m.add(s2);
+    }
+    const tie = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.06, 8).rotateZ(Math.PI / 2), mat.twine);
+    m.add(tie);
   } else if (type === 'mast') {
     // A radio mast, carried upright: a three-legged lattice section with a little white dish and a red light
     // (v0.63: the first version, a pole carried sideways, looked like a sword)
