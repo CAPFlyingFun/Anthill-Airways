@@ -39,7 +39,9 @@ export const P = {
   stones: { x: 9.5, z: 7.4 },                 // 🪨 on the stream bank
   saplings: { x: -15, z: 7.5 },               // 🌿 young trees to knock branches off
   ferns: { x: 18, z: 22 },                    // 🌱 plant fiber
-  workshop: { x: 1.6, z: 20.3 },              // 🪓 where you bring Rae what she needs (in front of her crate)
+  workshop: { x: 1.6, z: 20.3 },
+  chest: { x: -5.5, z: 14 },                  // 📦 v0.67: where the storage chest goes
+  hammock: { x: 11, z: 22.5 },                // 🛏️ v0.67: where the hammock goes              // 🪓 where you bring Rae what she needs (in front of her crate)
   berries: { x: 13, z: 12 },
   stream: { z: 4, half: 1.6 },
   /** The trail: from the camp, north to the research camp. */
@@ -87,6 +89,14 @@ export const T = {
   hatchetUses: 30,     // logs it chops before it breaks
   chopSecs: 0.8,       // one log every ... (with a hatchet)
   antChewSecs: 5,      // once your ant works: it chews a log loose from the fallen trees every ...
+  // 🔨 v0.67: crafting
+  pickUses: 40,        // stones a stone pick mines before it breaks
+  mineSecs: 0.7,       // one stone every ... (with a pick)
+  canteenSips: 3,      // sips a full waterskin holds
+  sipWater: 30,        // % water per sip
+  autoSipAt: 25,       // the waterskin gives you a sip on its own below this
+  chestCap: 40,        // spaces in the storage chest
+  hammockHeal: 12,     // ❤️ % a second while you rest in the hammock
 };
 
 /** 📱 The phone call. */

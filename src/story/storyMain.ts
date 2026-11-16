@@ -94,8 +94,10 @@ export async function startStory({ app, renderer, save, hud, sfx, input, progres
   const look = lookFor(world.heroId, world.heroWant);
   let avatar = look ? Avatar.make(look.file, avaSlot) : null;
   avaSlot.classList.toggle('live', !!avatar);
+  hud.onBag = () => world.openBag();
   progress.onLevelUp = (level) => {
     avatar?.nod();
+    world.onLevel(level); // (🔓 new recipes)
     sfx.levelUp();
     hud.banner(`LEVEL UP! Lv ${level}`, 'Tap your level (top left) to spend your point', 2600);
     writeSave(save);

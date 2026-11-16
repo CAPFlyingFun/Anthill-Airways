@@ -573,6 +573,8 @@ export class Hud {
   // ---- 🎒 Backpack: a button with a count badge; tap it for the slots (ARK style) ----
   private invKey = '';
   private invOpen = false;
+  /** 🦖 The story opens its own backpack panel (🎒 Items | 🔨 Craft) instead of the little list. */
+  onBag: (() => void) | null = null;
   private invTimer = 0;
   private invBound = false;
   private static ICONS: Record<string, string> = { stone: '🪨', branch: '🌿', fiber: '🌱', clothes: '👕', antfarm: '🐜', log: '🪵', berry: '🍓', mast: '📡', radio: '📻', bread: '🥖', parcel: '📦', extinguisher: '🧯', medicine: '💊', medkit: '🩹', luggage: '🧳', meal: '🍔', part: '🔩', fuel: '⛽', crumb: '🍞', snack: '🍪', leaf: '🍃', wrap: '🌯', sugar: '🧊', candy: '🍬', cash: '💵', bag: '🧳', snackbox: '🍱', fruit: '🍈', smoothie: '🥤', meat: '🍖', egg: '🥚', ticket: '🎟️', obsidian: '🪨', gem: '💎', magma: '🔥', crystal: '🔶', laundry: '🧺', towel: '🧻', grocery: '🥬', tray: '🍽️', beans: '🫘', coffee: '☕', shopbag: '🛍️' };
@@ -581,7 +583,7 @@ export class Hud {
   setInventory(counts: Map<string, number>, used: number, max: number, tools: { icon: string; label: string; wear: number }[] = []) {
     if (!this.invBound) {
       this.invBound = true;
-      $('bagBtn').addEventListener('click', () => this.showBag(!this.invOpen));
+      $('bagBtn').addEventListener('click', () => (this.onBag ? this.onBag() : this.showBag(!this.invOpen)));
       $('inv').addEventListener('click', () => this.showBag(false)); // (a tap on the list closes it)
     }
     const key = [...counts].map(([t, n]) => `${t}${n}`).join() + `|${used}/${max}|` + tools.map((x) => `${x.label}${Math.round(x.wear * 20)}`).join();

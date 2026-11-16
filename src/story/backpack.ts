@@ -60,9 +60,9 @@ export class Inventory {
 // ----------------------------------------------------------------------------
 // ⚒️ Tools
 // ----------------------------------------------------------------------------
-export type ToolKind = 'hatchet' | 'stone';
-export const TOOL_ICON: Record<ToolKind, string> = { hatchet: '🪓', stone: '🪨' };
-export const TOOL_NAME: Record<ToolKind, string> = { hatchet: 'Hatchet', stone: 'Stone' };
+export type ToolKind = 'hatchet' | 'stone' | 'pick' | 'canteen';
+export const TOOL_ICON: Record<ToolKind, string> = { hatchet: '🪓', stone: '🪨', pick: '⛏️', canteen: '🫗' };
+export const TOOL_NAME: Record<ToolKind, string> = { hatchet: 'Hatchet', stone: 'Stone', pick: 'Stone pick', canteen: 'Waterskin' };
 
 export interface HotbarSlot {
   kind: ToolKind;
@@ -153,6 +153,32 @@ function hatchetMesh() {
   g.add(handle, head, lash);
   return g;
 }
+/** A stone pick (a pointed stone head across the top of the handle). */
+function pickMesh() {
+  const g = new THREE.Group();
+  const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.045, 0.9, 7), wood);
+  handle.position.y = 0.32;
+  const head = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.62, 6), flint);
+  head.rotation.x = Math.PI / 2;
+  head.position.set(0, 0.7, 0.12);
+  const back = new THREE.Mesh(new THREE.DodecahedronGeometry(0.08), flint);
+  back.position.set(0, 0.7, -0.1);
+  const lash = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.055, 0.12, 8), twine);
+  lash.position.y = 0.68;
+  g.add(handle, head, back, lash);
+  return g;
+}
+/** A waterskin (a leather-ish bottle with a cork). */
+function canteenMesh() {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.SphereGeometry(0.16, 10, 8), new THREE.MeshStandardMaterial({ color: 0x9c6b3e, roughness: 0.8 }));
+  body.scale.set(1, 1.25, 0.7);
+  body.position.y = 0.18;
+  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.05, 0.12, 8), twine);
+  neck.position.y = 0.4;
+  g.add(body, neck);
+  return g;
+}
 function stoneMesh() {
   const s = new THREE.Mesh(new THREE.DodecahedronGeometry(0.13), flint);
   s.scale.set(1.2, 0.8, 1);
@@ -161,7 +187,7 @@ function stoneMesh() {
 
 export class HandTool {
   group = new THREE.Group();
-  private meshes: Record<ToolKind, THREE.Object3D> = { hatchet: hatchetMesh(), stone: stoneMesh() };
+  private meshes: Record<ToolKind, THREE.Object3D> = { hatchet: hatchetMesh(), stone: stoneMesh(), pick: pickMesh(), canteen: canteenMesh() };
   private arm: { shoulder: Joint; elbow: Joint | null; hand: THREE.Object3D } | null = null;
   private model: CreatureModel | null = null;
   kind: ToolKind | null = null;
@@ -321,18 +347,26 @@ export class BackBundle {
 }
 
 // ----------------------------------------------------------------------------
-// 📦 The two-column storage panel (the workbench now, chests later)
+// 📦 A panel with tabs (v0.67): the workbench (📦 Storage | 🛠️ Craft), your backpack (🎒 Items | 🔨 Craft),
+// the storage chest (📦 Storage). Each tab draws its own HTML and wires its own buttons; the panel redraws
+// itself a few times a second while it's open (so crafting progress bars move).
 // ----------------------------------------------------------------------------
-export interface StoreSide {
-  title: string;
-  items: { type: ItemType; icon: string; n: number; label?: string }[];
+export interface PanelTab {
+  label: string;
+  html: () => string;
+  /** Wire the buttons; call `redraw()` after anything changes. */
+  bind?: (root: HTMLElement, redraw: () => void) => void;
+  /** Update live bits (a progress bar) in place, without rebuilding the buttons. */
+  tick?: (root: HTMLElement) => void;
 }
-export class StorePanel {
+export class TabsPanel {
   el = document.createElement('div');
   private open_ = false;
-  /** (re-read both sides after every move) */
-  private get: (() => [StoreSide, StoreSide]) | null = null;
-  private move: ((from: 0 | 1, t: ItemType, all: boolean) => void) | null = null;
+  private tabs: PanelTab[] = [];
+  private tab = 0;
+  private title = '';
+  private timer = 0;
+  private lastHtml = '';
   constructor() {
     this.el.className = 'store hidden';
     this.el.addEventListener('pointerdown', (e) => e.stopPropagation());
@@ -341,42 +375,83 @@ export class StorePanel {
   get open() {
     return this.open_;
   }
-  show(get: () => [StoreSide, StoreSide], move: (from: 0 | 1, t: ItemType, all: boolean) => void) {
-    this.get = get;
-    this.move = move;
+  show(title: string, tabs: PanelTab[], start = 0) {
+    this.title = title;
+    this.tabs = tabs;
+    this.tab = Math.min(start, tabs.length - 1);
     this.open_ = true;
     this.el.classList.remove('hidden');
+    this.lastHtml = '';
     this.render();
+    clearInterval(this.timer);
+    this.timer = window.setInterval(() => this.render(), 250);
   }
   close() {
     this.open_ = false;
     this.el.classList.add('hidden');
+    clearInterval(this.timer);
   }
   render() {
-    if (!this.get) return;
-    const sides = this.get();
-    const col = (s: StoreSide, i: 0 | 1) => `
-      <div class="store-col">
-        <h4>${s.title}</h4>
-        ${s.items.length ? s.items.map((it) => `<button class="store-item" data-side="${i}" data-type="${it.type}">${it.icon}<b>${it.n}</b>${it.label ? `<small>${it.label}</small>` : ''}</button>`).join('') : '<p class="store-empty">Empty</p>'}
-        ${s.items.length ? `<button class="store-all" data-side="${i}">${i === 0 ? 'Move all →' : '← Take all'}</button>` : ''}
-      </div>`;
-    this.el.innerHTML = `<div class="store-box"><div class="store-cols">${col(sides[0], 0)}<div class="store-mid">⇄</div>${col(sides[1], 1)}</div><button class="store-close big-btn">Close</button></div>`;
-    this.el.querySelectorAll<HTMLButtonElement>('.store-item').forEach((b) =>
+    if (!this.open_) return;
+    const t = this.tabs[this.tab];
+    const tabBar = this.tabs.length > 1 ? `<div class="store-tabs">${this.tabs.map((x, i) => `<button class="store-tab${i === this.tab ? ' on' : ''}" data-tab="${i}">${x.label}</button>`).join('')}</div>` : '';
+    const html = `<div class="store-box"><h3 class="store-title">${this.title}</h3>${tabBar}<div class="store-body">${t.html()}</div><button class="store-close big-btn">Close</button></div>`;
+    if (html === this.lastHtml) {
+      t.tick?.(this.el.querySelector('.store-body') as HTMLElement);
+      return; // (nothing changed: keep the buttons as they are, so taps aren't lost)
+    }
+    this.lastHtml = html;
+    this.el.innerHTML = html;
+    this.el.querySelectorAll<HTMLButtonElement>('.store-tab').forEach((b) =>
       b.addEventListener('click', () => {
-        this.move?.(Number(b.dataset.side) as 0 | 1, b.dataset.type as ItemType, false);
-        this.render();
-      }),
-    );
-    this.el.querySelectorAll<HTMLButtonElement>('.store-all').forEach((b) =>
-      b.addEventListener('click', () => {
-        const side = Number(b.dataset.side) as 0 | 1;
-        for (const it of this.get!()[side].items) this.move?.(side, it.type, true);
+        this.tab = Number(b.dataset.tab);
+        this.lastHtml = '';
         this.render();
       }),
     );
     this.el.querySelector('.store-close')!.addEventListener('click', () => this.close());
+    t.bind?.(this.el.querySelector('.store-body') as HTMLElement, () => {
+      this.lastHtml = '';
+      this.render();
+    });
+    t.tick?.(this.el.querySelector('.store-body') as HTMLElement);
   }
+}
+
+/** The two-column storage tab: yours | theirs. Tap an item to move one; "Move all" moves everything. */
+export interface StoreSide {
+  title: string;
+  items: { type: ItemType; icon: string; n: number; label?: string }[];
+}
+export function storeTab(get: () => [StoreSide, StoreSide], move: (from: 0 | 1, t: ItemType, all: boolean) => void): PanelTab {
+  return {
+    label: '📦 Storage',
+    html: () => {
+      const sides = get();
+      const col = (s: StoreSide, i: 0 | 1) => `
+        <div class="store-col">
+          <h4>${s.title}</h4>
+          ${s.items.length ? s.items.map((it) => `<button class="store-item" data-side="${i}" data-type="${it.type}">${it.icon}<b>${it.n}</b>${it.label ? `<small>${it.label}</small>` : ''}</button>`).join('') : '<p class="store-empty">Empty</p>'}
+          ${s.items.length ? `<button class="store-all" data-side="${i}">${i === 0 ? 'Move all →' : '← Take all'}</button>` : ''}
+        </div>`;
+      return `<div class="store-cols">${col(sides[0], 0)}<div class="store-mid">⇄</div>${col(sides[1], 1)}</div>`;
+    },
+    bind: (root, redraw) => {
+      root.querySelectorAll<HTMLButtonElement>('.store-item').forEach((b) =>
+        b.addEventListener('click', () => {
+          move(Number(b.dataset.side) as 0 | 1, b.dataset.type as ItemType, false);
+          redraw();
+        }),
+      );
+      root.querySelectorAll<HTMLButtonElement>('.store-all').forEach((b) =>
+        b.addEventListener('click', () => {
+          const side = Number(b.dataset.side) as 0 | 1;
+          for (const it of get()[side].items) move(side, it.type, true);
+          redraw();
+        }),
+      );
+    },
+  };
 }
 
 // ----------------------------------------------------------------------------

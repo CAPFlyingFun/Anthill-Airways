@@ -1050,6 +1050,11 @@ body.in-cut .hotbar, body.in-cut .use-btn { visibility: hidden; }
 .store-all { padding: 6px; border-radius: 10px; border: 1.5px solid var(--navy); background: #e7f0ff; font-weight: 800; font-size: 12px; }
 .store-empty { margin: 4px 0; font-size: 13px; opacity: 0.6; }
 .store-close { margin-top: 10px; width: 100%; }
+/* (v0.67: the Close button sits inside the panel, and the list scrolls, so it fits in landscape too) */
+.store .store-box { display: flex; flex-direction: column; max-height: 100%; }
+.store .store-body { flex: 1 1 auto; min-height: 0; }
+.store .big-btn.store-close { position: static; left: auto; bottom: auto; transform: none; animation: none; flex: 0 0 auto; font-size: 18px; padding: 10px; }
+.store .big-btn.store-close:active { transform: translateY(3px); }
 
 /* 🎒 tools at the top of the backpack panel */
 .inv-tools { display: flex; flex-direction: column; gap: 4px; width: 100%; margin-bottom: 6px; }
@@ -1079,3 +1084,34 @@ body.in-cut .hotbar, body.in-cut .use-btn { visibility: hidden; }
 .hero-btn { width: 100%; margin: 4px 0 8px; }
 /* (cards and panels like your stats sit above the story's hotbar) */
 .overlay { z-index: 9; }
+
+/* ---- 🔨 v0.67: tabs and crafting in the story's panels ---- */
+.store-title { margin: 0 0 8px; font-size: 17px; text-align: center; }
+.store-tabs { display: flex; gap: 6px; margin-bottom: 8px; }
+.store-tab { flex: 1; padding: 8px; border-radius: 10px; border: 1.5px solid #c9b48a; background: #f3e6cc; font-weight: 800; font-size: 13px; color: #5a4126; }
+.store-tab.on { background: #ffd166; border-color: var(--navy); color: #2a2017; }
+.store-body { max-height: 56vh; overflow-y: auto; }
+.craft-note { margin: 0 0 8px; font-size: 12px; background: #fff3d6; padding: 6px 8px; border-radius: 8px; }
+.craft-list { display: flex; flex-direction: column; gap: 6px; }
+.craft-row { display: flex; align-items: center; gap: 8px; padding: 8px; border-radius: 12px; background: #fff; border: 1.5px solid #e2d3b0; }
+.craft-row.locked { opacity: 0.55; filter: grayscale(0.6); }
+.craft-icon { font-size: 28px; width: 36px; text-align: center; }
+.craft-info { flex: 1; min-width: 0; }
+.craft-info b { display: block; font-size: 14px; }
+.craft-info small { display: block; font-size: 11px; opacity: 0.75; line-height: 1.25; }
+.craft-needs { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.need-chip { font-size: 11px; font-weight: 800; padding: 2px 6px; border-radius: 8px; background: #ffe1e1; color: #a12a2a; }
+.need-chip.ok { background: #dff5df; color: #2a7a2a; }
+.craft-btn { padding: 8px 10px; border-radius: 10px; border: 2px solid var(--navy); background: linear-gradient(#ffd166, #f4a640); font-weight: 900; font-size: 12px; white-space: nowrap; box-shadow: 0 2px 0 var(--navy); }
+.craft-btn:disabled { background: #ddd; color: #888; border-color: #aaa; box-shadow: none; }
+.craft-lock, .craft-done { font-size: 11px; font-weight: 800; white-space: nowrap; }
+.craft-done { color: #2a7a2a; }
+.craft-queue { display: flex; gap: 6px; margin-bottom: 8px; padding: 6px; background: #e7f0ff; border-radius: 10px; }
+.cq-item { display: flex; flex-direction: column; align-items: center; gap: 3px; font-size: 22px; width: 44px; }
+.cq-item i { display: block; width: 100%; height: 5px; background: rgba(0, 0, 0, 0.15); border-radius: 3px; overflow: hidden; }
+.cq-item u { display: block; height: 100%; background: #2bb0ea; text-decoration: none; }
+.bag-grid { display: flex; flex-wrap: wrap; gap: 6px; }
+.bag-grid .inv-slot { background: #fff; border: 1.5px solid #e2d3b0; color: #2a2017; }
+.bag-cap { text-align: right; font-size: 12px; font-weight: 800; margin: 6px 0 0; }
+.store-box .inv-tool span { color: #2a2017; }
+.store-box .inv-tool i { background: rgba(0, 0, 0, 0.12); }

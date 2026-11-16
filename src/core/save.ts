@@ -75,7 +75,10 @@ export interface StorySave {
   /** Logbook pages found (their numbers). */
   pages: number[];
   /** 🪓 Tools: uses left on the stone you're using, the hatchet's uses left (0 = none), Rae's crafting (seconds in). */
-  tools: { stoneHp: number; hatchet: number; raeT: number };
+  tools: { stoneHp: number; hatchet: number; raeT: number; pick?: number; canteen?: number };
+  /** 🔨 v0.67: crafting queues (the backpack's, the workbench's) and what's in the storage chest. */
+  craft?: { pack: { id: string; t: number }[]; bench: { id: string; t: number }[] };
+  chest?: Record<string, number>;
   /** 🎒 v0.66: the backpack (counts per item), the 5 hotbar slots (tool kinds), the slot in your hand (-1 none). */
   inv?: Record<string, number>;
   hotbar?: (string | null)[];
