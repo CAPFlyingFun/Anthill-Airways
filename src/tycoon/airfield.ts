@@ -34,7 +34,7 @@ import { TUTORIAL_DONE, Tutorial, type TutorialScript } from '../world/tutorial'
 import type { MapRect, MapView } from '../ui/minimap';
 import { AT, CLEARINGS, TY, TYCOON_SAVE_V, TY_UNLOCKS, walkable } from './data';
 import { SURFACE, artBaggageCart, artBackdrop, artBug, artDewTank, artFuelFlower, artHangar, artScatter, artGate, artGround, artLawn, artRunway, artSign, artTaxiway, artTerminal, artTower, artWindsock, type ArtLawn, type ArtPiece } from './art';
-import { Plane } from './plane';
+import { DESTINATIONS, Plane } from './plane';
 import { Passengers, type Pax } from './passengers';
 import { mat, mesh, PAL } from './kit';
 
@@ -60,6 +60,19 @@ interface Gate {
   boardT: number;
   open: boolean;
   label: TextSprite;
+}
+
+/** One line of the ✈️ flight board. */
+export interface FlightRow {
+  kind: 'dep' | 'arr';
+  /** "AA 104" (or '' while nothing's booked yet). */
+  no: string;
+  place: string;
+  gate: number;
+  status: string;
+  /** Seconds to go (null = no clock: waiting on you, or done). */
+  eta: number | null;
+  tone: 'go' | 'warn' | 'info' | 'done';
 }
 
 const SIZE = 760;
@@ -95,6 +108,7 @@ export class Airfield {
   private cashPad: CashPad;
   private deskZone: Zone;
   private checkInAnt: CreatureModel | null = null;
+  private deskSign!: TextSprite;
   private timers = new Map<object, number>();
   private camOffset = new THREE.Vector3(0, 22, 20);
   private thirdFov = 56;
@@ -200,12 +214,13 @@ export class Airfield {
       Math.hypot(x - AT.nest.x, z - AT.nest.z) < 16 ||
       AT.gates.some((g) => Math.abs(x - g.x) < 12 && z > g.z - 30 && z < g.z + 8) ||
       AT.flowers.some((f) => Math.hypot(x - f.x, z - f.z) < 10) ||
-      TY_UNLOCKS.some((u) => Math.hypot(x - u.pos[0], z - u.pos[1]) < 5) ||
+      TY_UNLOCKS.some((u) => Math.hypot(x - u.pos[0], z - u.pos[1]) < 8) ||
       !CLEARINGS.some((c) => Math.hypot(x - c.x, z - c.z) < c.r - 4);
     const area = { x: 0, z: 0, w: 240, d: 190 };
     artScatter(s, 'pebbles', area, 46, busy, 3);
     artScatter(s, 'leaves', area, 30, busy, 4);
-    artScatter(s, 'twigs', area, 10, busy, 5);
+    // (twigs are long: only out by the edge, where they can't lie across a tile or a path)
+    artScatter(s, 'twigs', area, 8, (x, z) => busy(x, z) || Math.hypot(x, z - 10) < 70, 5);
   }
 
   /** 🐜 The colony's nest: a mound of dug-out soil with the entrance on top. */
@@ -304,6 +319,7 @@ export class Airfield {
     this.scene.add(desk);
     this.blockers.push({ minX: deskAt.x - 0.9, maxX: deskAt.x + 0.9, minZ: deskAt.z - 2.1, maxZ: deskAt.z + 2.1 });
     const sign = new TextSprite(1.3, '#ffffff');
+    this.deskSign = sign;
     sign.setText('🎫 CHECK-IN');
     sign.sprite.position.copy(deskAt).setY(5);
     this.scene.add(sign.sprite);
@@ -353,7 +369,9 @@ export class Airfield {
     for (let n = 0; n < (this.st.fuel[i] ?? 0); n++) fuel.addInstant('nectar');
     const label = new TextSprite(1.2, '#ffffff');
     label.setText(`GATE ${i + 1}`);
-    label.sprite.position.copy(stand).add(new THREE.Vector3(0, 8, 0));
+    label.sprite.position.copy(stand).add(new THREE.Vector3(0, 2.4, 9)); // (just in front of the stand: never under the quest card)
+    (label.sprite.material as THREE.SpriteMaterial).depthTest = false; // (always readable: never hidden behind the plane)
+    label.sprite.renderOrder = 5;
     this.scene.add(label.sprite);
     const door = this.worldSpot(piece, 'door', stand.clone().add(new THREE.Vector3(-3, 0, 0)));
     const gate: Gate = { door, piece, fuel, fuelZone: new Zone(fuelAt.x, fuelAt.z, 1.5, 1.5), plane, riders: [], boarding: [], boardT: 0, open, label };
@@ -367,6 +385,9 @@ export class Airfield {
       if (this.near(plane.pos, 40)) this.hud.floatAt(plane.pos.clone().setY(plane.pos.y + 3), this.camera, '🛫 Take-off!', 'big');
     };
     plane.onRoute = () => {
+      // (its next trip: the flight that will bring it home)
+      plane.inbound = this.newFlight(DESTINATIONS);
+      plane.outbound = null;
       // The travellers have flown off to their destination
       for (const p of gate.riders) {
         p.model.root.removeFromParent();
@@ -382,6 +403,7 @@ export class Airfield {
       for (const p of gate.riders) plane.seat(p.model.root);
     };
     plane.onArrived = () => {
+      plane.inbound = null;
       // Everyone off: they pay their landing fee and walk away into the lawn
       plane.unseat(this.scene);
       for (const p of gate.riders) {
@@ -402,7 +424,7 @@ export class Airfield {
     this.place(artDewTank(), AT.flowers[1].x + 22, AT.flowers[1].z - 10, -0.4);
     this.place(artBaggageCart(), AT.gates[0].x + 12, AT.gates[0].z + 4, 0.6);
     this.place(artSign('ANTHILL AIRWAYS'), AT.terminal.x - 30, AT.terminal.z + 24, 0.5);
-    this.place(artSign('GATES', 'up'), AT.terminal.x + 26, AT.terminal.z - 2, -0.3);
+    this.place(artSign('GATES', 'up'), AT.terminal.x - 26, AT.terminal.z - 12, 0.3);
   }
 
   // --------------------------------------------------------------------------
@@ -500,6 +522,77 @@ export class Airfield {
     it.mesh.position.copy(from).setY(2);
     this.scene.add(it.mesh);
     this.flyers.pushInto(it, pad, 0.45);
+  }
+
+  /** Book a flight number and a place. */
+  private newFlight(places: string[]) {
+    this.st.seq ??= 101;
+    return { no: this.st.seq++, place: places[Math.floor(Math.random() * places.length)] };
+  }
+
+  // --------------------------------------------------------------------------
+  // ✈️ The flight board: what each gate's plane is doing, and when the next thing happens
+  // --------------------------------------------------------------------------
+  flightBoard(): FlightRow[] {
+    const rows: FlightRow[] = [];
+    this.gates.forEach((g, i) => {
+      if (!g.open) return;
+      const p = g.plane;
+      const gate = i + 1;
+      const waiting = this.pax.atGate[i].length + g.boarding.length;
+      if (p.parked) {
+        const fuelled = g.fuel.count >= TY.fuelPerFlight;
+        const no = p.outbound ? `AA ${p.outbound.no}` : '';
+        const place = p.outbound?.place ?? 'Next flight';
+        if (!fuelled) rows.push({ kind: 'dep', no, place, gate, status: `NEEDS NECTAR ⛽ ${g.fuel.count}/${TY.fuelPerFlight}`, eta: null, tone: 'warn' });
+        else if (p.aboard > 0) {
+          const full = p.freeSeats === 0 && !g.boarding.length;
+          const eta = full ? 0 : Math.max(0, TY.boardWait - g.boardT);
+          rows.push({ kind: 'dep', no, place, gate, status: `BOARDING ${p.aboard}/${p.model.seats.length}`, eta, tone: 'go' });
+        } else if (waiting > 0) rows.push({ kind: 'dep', no, place, gate, status: 'BOARDING SOON', eta: null, tone: 'go' });
+        else rows.push({ kind: 'dep', no, place, gate, status: 'WAITING FOR PASSENGERS', eta: null, tone: 'info' });
+      } else if (p.state === 'taxiOut' || p.state === 'takeoff') {
+        const f = p.outbound;
+        rows.push({ kind: 'dep', no: f ? `AA ${f.no}` : '', place: f?.place ?? '', gate, status: p.state === 'taxiOut' ? 'TAXIING' : 'TAKING OFF', eta: p.etaTakeoff(), tone: 'go' });
+      } else {
+        const f = p.inbound;
+        const status = p.state === 'route' ? 'ON TIME' : p.state === 'landing' ? 'LANDING' : 'TAXIING TO GATE';
+        rows.push({ kind: 'arr', no: f ? `AA ${f.no}` : '', place: f?.place ?? '', gate, status, eta: p.etaGate(), tone: p.state === 'route' ? 'info' : 'go' });
+      }
+      // (a full gate holds up check-in: say so)
+      if (waiting >= 6 && !p.parked) rows.push({ kind: 'dep', no: '', place: `Gate ${gate} is full`, gate, status: `${waiting} WAITING`, eta: p.etaGate(), tone: 'warn' });
+    });
+    return rows;
+  }
+
+  /** The little chip under the zone name: the most useful next thing (a problem first, else the soonest). */
+  nextChip(): string | null {
+    const rows = this.flightBoard();
+    const warn = rows.find((r) => r.tone === 'warn' && r.status.startsWith('NEEDS'));
+    if (warn) return `⛽ Gate ${warn.gate} needs nectar`;
+    const timed = rows.filter((r) => r.eta !== null).sort((a, b) => (a.eta ?? 0) - (b.eta ?? 0))[0];
+    if (timed) return `${timed.kind === 'dep' ? '🛫' : '🛬'} ${timed.no ? `${timed.no} · ` : ''}Gate ${timed.gate} · ${clockText(timed.eta)}`;
+    return rows.length ? `✈️ Gate ${rows[0].gate}: ${rows[0].status.toLowerCase()}` : null;
+  }
+
+  /** Each gate's sign shows its plane's next event; the check-in sign says when the gates are full. */
+  private statusT = 0;
+  private updateSigns(dt: number) {
+    this.statusT -= dt;
+    if (this.statusT > 0) return;
+    this.statusT = 0.5;
+    const rows = this.flightBoard();
+    this.gates.forEach((g, i) => {
+      if (!g.open) return;
+      const r = rows.find((r) => r.gate === i + 1 && r.place !== `Gate ${i + 1} is full`);
+      let text = `GATE ${i + 1}`;
+      if (r?.status.startsWith('NEEDS')) text += ' · ⛽ NEEDS NECTAR';
+      else if (r?.kind === 'dep' && r.eta !== null) text += ` · 🛫 ${clockText(r.eta)}`;
+      else if (r?.kind === 'arr' && r.eta !== null) text += ` · 🛬 ${clockText(r.eta)}`;
+      g.label.setText(text);
+    });
+    const full = this.gates.every((g, i) => !g.open || this.pax.atGate[i].length >= 6);
+    this.deskSign.setText(full ? '🎫 GATES FULL · WAIT FOR A PLANE' : '🎫 CHECK-IN');
   }
 
   private paxRemove(p: Pax) {
@@ -627,6 +720,7 @@ export class Airfield {
     this.flyers.update(dt);
     this.updateCamera(dt);
     this.updateRoofs();
+    this.updateSigns(dt);
     this.tutorial.update(dt, true);
   }
 
@@ -639,6 +733,7 @@ export class Airfield {
     // Call more passengers while there are free seats (and the fuel to go)
     const free = plane.freeSeats - g.boarding.length;
     if (fuelled && free > 0 && this.pax.atGate[this.gates.indexOf(g)].length) {
+      plane.outbound ??= this.newFlight(DESTINATIONS);
       g.boarding.push(...this.pax.callToBoard(this.gates.indexOf(g), free, nose));
     }
     for (let i = g.boarding.length - 1; i >= 0; i--) {
@@ -771,4 +866,10 @@ export class Airfield {
   get learning() {
     return this.save.tutorial < TUTORIAL_DONE;
   }
+}
+
+/** 0:07, 1:12 */
+export function clockText(secs: number | null) {
+  const s = Math.max(0, Math.ceil(secs ?? 0));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }

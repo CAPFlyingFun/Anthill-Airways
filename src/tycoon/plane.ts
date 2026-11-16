@@ -22,10 +22,22 @@ import { AT, TY } from './data';
 
 export type PlaneState = 'parked' | 'taxiOut' | 'takeoff' | 'route' | 'landing' | 'taxiIn';
 
+/** Where the flights go (and come from): the places the plan's routes will open, one day. */
+export const DESTINATIONS = ['🌼 Flower Field', '🪵 Fallen Log Town', '🐚 Tide Pool', '🧺 Picnic Table', '🦎 Lizard Rock', '🍄 Mushroom Ring'];
+
+/** A flight: its number and where it's going (a departure) or coming from (an arrival). */
+export interface Flight {
+  no: number;
+  place: string;
+}
+
 const v3 = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
 
 export class Plane {
   state: PlaneState = 'parked';
+  /** 🛫 The flight it's about to fly (set when boarding starts) and 🛬 the one it's flying in (set once out on the route). */
+  outbound: Flight | null = null;
+  inbound: Flight | null = null;
   /** Passengers riding on its back (models parented to its seats). */
   riders: (THREE.Object3D | null)[];
   /** x on taxi and route speed (the 🗼 Control Tower). */
@@ -205,6 +217,50 @@ export class Plane {
     }
   }
   private wasUp = false;
+
+  // --------------------------------------------------------------------------
+  // ⏱️ Timing, for the flight board (estimates, in game seconds)
+  // --------------------------------------------------------------------------
+  /** Path still to go (units). */
+  private left() {
+    let d = 0;
+    let prev = this.pos;
+    for (const p of this.path) {
+      d += prev.distanceTo(p);
+      prev = p;
+    }
+    return d;
+  }
+  /** Seconds until it leaves the ground (null: not heading out). */
+  etaTakeoff(): number | null {
+    if (this.state === 'taxiOut') return this.left() / (TY.taxiSpeed * this.boost) + 3;
+    if (this.state === 'takeoff') return this.wasUp ? 0 : Math.max(0, (this.rwStart + 40 - this.pos.x) / Math.max(this.speed, 8));
+    return null;
+  }
+  /** Seconds until it's parked at its gate again (null: it's parked). */
+  etaGate(): number | null {
+    const taxiIn = (Math.abs(this.exitX() - this.home.x) + Math.abs(AT.runway.z - AT.taxiZ) + Math.abs(AT.taxiZ - this.home.z)) / (TY.taxiSpeed * this.boost);
+    const approach = 230 / (TY.cruiseSpeed * this.boost) + 2;
+    switch (this.state) {
+      case 'taxiOut':
+      case 'takeoff':
+        return (this.etaTakeoff() ?? 0) + 4 + TY.routeSecs / this.boost + approach + taxiIn;
+      case 'route':
+        return this.routeT + approach + taxiIn;
+      case 'landing':
+        return this.left() / Math.max(this.speed, TY.taxiSpeed) + taxiIn;
+      case 'taxiIn':
+        return this.left() / (TY.taxiSpeed * this.boost);
+      default:
+        return null;
+    }
+  }
+  /** Seconds until it touches down (null: not in the air). */
+  etaLanding(): number | null {
+    if (this.state === 'route') return this.routeT + 230 / (TY.cruiseSpeed * this.boost) + 2;
+    if (this.state === 'landing') return this.pos.y > this.ground(this.pos.x, this.pos.z) + 0.05 ? this.left() / Math.max(this.speed, 8) * 0.7 : 0;
+    return null;
+  }
 
   /** Where landing planes turn off the runway (east of the gates). */
   private exitX() {

@@ -90,6 +90,17 @@ html, body {
 .board-detail { color: #ffd166; font-size: 12px; font-weight: 700; padding: 0 6px 8px 42px; }
 .board-tip { font-size: 13px; margin: 10px 0 6px; }
 @keyframes blink { 50% { opacity: 0.45; } }
+/* 🐜✈️ Airport Tycoon's flight board (v0.68.1): flight · place · gate · status */
+.fl-sec { color: #8fd3ff; font-weight: 900; font-size: 12px; letter-spacing: 2px; padding: 10px 6px 4px; }
+.fl-none { color: #8a9099; font-size: 12px; font-weight: 700; padding: 4px 6px 8px; }
+.board-row.fl { gap: 6px; padding: 7px 4px; }
+.board-row.fl .no { color: #ffd166; font-weight: 900; font-size: 12px; width: 50px; flex: none; font-variant-numeric: tabular-nums; }
+.board-row.fl .nm { font-size: 12px; text-transform: uppercase; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.board-row.fl .gt { color: #f3f3f3; font-weight: 900; font-size: 12px; width: 24px; flex: none; text-align: center; }
+.board-row.fl .st { font-size: 10px; text-align: right; font-variant-numeric: tabular-nums; max-width: 46%; }
+.board-row.fl.go .st { background: #ffd166; color: #15181d; }
+.board-row.fl.warn .st { background: #8b2a2a; color: #ffd0d0; animation: blink 1.2s steps(2) infinite; }
+.board-row.fl.info .st { background: #2b3038; color: #c9ced6; }
 
 .pill {
   background: var(--pill);

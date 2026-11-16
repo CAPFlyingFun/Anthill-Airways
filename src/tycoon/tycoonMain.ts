@@ -21,7 +21,7 @@ import { pace } from '../core/pace';
 import { GAME_SPEED, OFFLINE } from '../data/config';
 import { Updater, versionLabel } from '../core/updater';
 import { Minimap } from '../ui/minimap';
-import { Airfield } from './airfield';
+import { Airfield, clockText, type FlightRow } from './airfield';
 
 export interface TycoonContext {
   app: HTMLElement;
@@ -69,6 +69,35 @@ export async function startTycoon({ app, renderer, save, hud, sfx, input, progre
 
   // 🗺️ The minimap
   const map = new Minimap(document.getElementById('mapSlot')!, Airfield.MAP_BOUNDS, () => field.mapView(), 40);
+
+  // ✈️ The flight board: a chip under the zone name with the next departure / arrival (or a gate that needs
+  // nectar); tap it for the whole board, which keeps ticking while it's open.
+  const boardPanel = document.getElementById('departures')!;
+  const boardRows = document.getElementById('boardRows')!;
+  const rowHtml = (r: FlightRow) =>
+    `<div class="board-row fl ${r.tone}"><div class="no">${r.no || '—'}</div><div class="nm">${r.place}</div><div class="gt">G${r.gate}</div>` +
+    `<div class="st">${r.status}${r.eta !== null ? ` · ${clockText(r.eta)}` : ''}</div></div>`;
+  const drawBoard = () => {
+    const rows = field.flightBoard();
+    const dep = rows.filter((r) => r.kind === 'dep');
+    const arr = rows.filter((r) => r.kind === 'arr');
+    boardRows.innerHTML =
+      `<div class="fl-sec">🛫 DEPARTURES</div>${dep.map(rowHtml).join('') || '<div class="fl-none">No departures right now</div>'}` +
+      `<div class="fl-sec">🛬 ARRIVALS</div>${arr.map(rowHtml).join('') || '<div class="fl-none">Nothing in the air</div>'}`;
+  };
+  let boardTimer = 0;
+  document.getElementById('nextBtn')!.addEventListener('click', () => {
+    boardPanel.querySelector('.board-title')!.textContent = '✈️ ANTHILL AIRWAYS';
+    boardPanel.querySelector('.board-tip')!.innerHTML =
+      'A plane goes when it has <b>⛽ nectar</b> on its gate\'s FUEL pad and passengers aboard (it waits a few seconds for more). ' +
+      'Check passengers in at <b>🎫 CHECK-IN</b>: each gate holds 6 waiting.';
+    drawBoard();
+    boardPanel.classList.remove('hidden');
+    window.clearInterval(boardTimer);
+    boardTimer = window.setInterval(() => (boardPanel.classList.contains('hidden') ? window.clearInterval(boardTimer) : drawBoard()), 500);
+  });
+  document.getElementById('closeBoard')!.addEventListener('click', () => boardPanel.classList.add('hidden'));
+  window.setInterval(() => hud.setNext(field.nextChip()), 500);
 
   // 3) First-person / third-person view
   const viewBtn = document.getElementById('viewBtn')!;

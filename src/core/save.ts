@@ -60,6 +60,8 @@ export interface TycoonSave {
   /** Lifetime counts (📊 stats). */
   flights: number;
   passengers: number;
+  /** The next flight number (AA 101, AA 102…). */
+  seq?: number;
   /** Where you were standing. */
   x: number;
   z: number;
