@@ -105,7 +105,7 @@ hud.initSettings({
   onReset: () => {
     const campaign = save.campaign; // (a reset slot keeps its game: 🏝️ Anthill Island stays Anthill Island)
     clearSave();
-    if (campaign === 'anthill' || campaign === 'story') seedSlot(activeSlot(), { campaign });
+    if (campaign === 'anthill' || campaign === 'story' || campaign === 'tycoon') seedSlot(activeSlot(), { campaign });
     window.location.reload();
   },
   onOpen: () => showSlots(),
@@ -117,7 +117,7 @@ function showSlots() {
   hud.renderSlots(
     SLOTS.map((n) => ({ n, here: n === here, info: slotSummary(n) })),
     (n) => {
-      const go = (campaign?: 'anthill' | 'story') => {
+      const go = (campaign?: 'anthill' | 'story' | 'tycoon') => {
         switchSlot(save, n as Slot); // pauses this slot (no offline income while away)
         if (campaign) seedSlot(n as Slot, { campaign }); // a brand-new 🏝️ Anthill Island (or 🦖 story) game
         window.location.reload();
@@ -129,6 +129,8 @@ function showSlots() {
         `💾 New game in slot ${n}`,
         `<p>Which game do you want to start?</p>
          <ul>
+           <li>🐜✈️ <b>Airport Tycoon</b> <i>(new!)</i>: your fire ant colony runs an airport at insect size. Ladybugs
+           are the planes, nectar is the fuel, and the lawn is a forest. Just the first airfield for now.</li>
            <li>🏝️ <b>Anthill Island</b> <i>(test version)</i>: the new one-island game. You raise an ant farm in your
            backyard and the ants become your workers. Just the backyard and the first café for now.</li>
            <li>🦖 <b>Story: Chapter 1</b> <i>(test version)</i>: the remake. A phone call from an old friend, an island
@@ -136,7 +138,8 @@ function showSlots() {
            <li>🐜 <b>Anthill Airways</b>: the full game, from the ant colony to the Grand Resort.</li>
          </ul>`,
         [
-          { label: '🦖 Story: Chapter 1 (test)', cls: 'big-btn', onClick: () => go('story') },
+          { label: '🐜✈️ Airport Tycoon (new)', cls: 'big-btn', onClick: () => go('tycoon') },
+          { label: '🦖 Story: Chapter 1 (test)', cls: 'menu-btn', onClick: () => go('story') },
           { label: '🏝️ Anthill Island (test)', cls: 'menu-btn', onClick: () => go('anthill') },
           { label: '🐜 Anthill Airways', cls: 'menu-btn', onClick: () => go() },
           { label: 'Cancel', cls: 'menu-btn' },
@@ -185,6 +188,8 @@ async function start() {
   if (save.campaign === 'anthill') return startHome({ app, renderer, save, hud, sfx, input, progress, queenProgress, away: awayAtLaunch });
   // 🦖 A story slot plays the remake (story/storyMain.ts). Its code only downloads when it's opened.
   if (save.campaign === 'story') return (await import('./story/storyMain')).startStory({ app, renderer, save, hud, sfx, input, progress, queenProgress, away: awayAtLaunch });
+  // 🐜✈️ An Airport Tycoon slot (tycoon/tycoonMain.ts). Its code only downloads when it's opened.
+  if (save.campaign === 'tycoon') return (await import('./tycoon/tycoonMain')).startTycoon({ app, renderer, save, hud, sfx, input, progress, queenProgress, away: awayAtLaunch });
 
   // 1) Load the real bug models (shows the loading bar).
   await loadModels((done, total) => hud.setLoading(done / total));

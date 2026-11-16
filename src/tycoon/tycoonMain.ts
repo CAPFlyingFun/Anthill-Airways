@@ -1,0 +1,293 @@
+// ============================================================================
+// tycoonMain.ts — starts 🐜✈️ AIRPORT TYCOON (v0.68), the insect-scale airport run by your fire ant colony.
+//
+// A save slot whose campaign is 'tycoon' plays this (Settings → 💾 a new slot → 🐜✈️ Airport Tycoon). main.ts
+// sets up what every game shares (renderer, HUD, sounds, input, the save, Settings) and hands over here; the
+// world itself is tycoon/airfield.ts. This file wires it to the HUD and runs the main loop (the same shape as
+// homeMain.ts: saving, offline earnings, auto quality, the minimap, first/third person).
+// ============================================================================
+import * as THREE from 'three';
+import type { Hud } from '../ui/hud';
+import type { Sfx } from '../core/audio';
+import type { Input } from '../core/input';
+import { SaveData, writeSave } from '../core/save';
+import type { Progress, QueenProgress } from '../core/progress';
+import { loadModels } from '../actors/creatures';
+import { lod } from '../core/lod';
+import { tickClock } from '../core/clock';
+import { income } from '../core/income';
+import { bump } from '../core/totals';
+import { pace } from '../core/pace';
+import { GAME_SPEED, OFFLINE } from '../data/config';
+import { Updater, versionLabel } from '../core/updater';
+import { Minimap } from '../ui/minimap';
+import { Airfield } from './airfield';
+
+export interface TycoonContext {
+  app: HTMLElement;
+  renderer: THREE.WebGLRenderer;
+  save: SaveData;
+  hud: Hud;
+  sfx: Sfx;
+  input: Input;
+  progress: Progress;
+  queenProgress: QueenProgress;
+  /** Seconds since this slot was last saved: 💤 offline earnings. */
+  away: number;
+}
+
+const HOWTO_TITLE = '🐜✈️ How to play: Airport Tycoon';
+const HOWTO_HTML = `
+  <p>Your fire ant colony runs an airport at insect size. Everything is real size: the lawn is a forest,
+  a pebble is a boulder, and a ladybug is your first plane.</p>
+  <ul>
+    <li>🌼 <b>Nectar is the fuel.</b> Stand at a flower to pick drops up, then stand on a gate's <b>FUEL</b> pad.</li>
+    <li>🎫 <b>Passengers</b> walk in from the lawn. Stand on <b>CHECK-IN</b> to check them in: each one pays a ticket.</li>
+    <li>🐞 A fuelled plane boards its passengers, taxis to the runway, takes off and flies its route.
+      When it lands, the arriving passengers pay a landing fee.</li>
+    <li>💵 Walk over the <b>cash pad</b> to collect. Spend it on the <b>glowing tiles</b>: ants who fuel the planes,
+      check passengers in and collect the cash for you.</li>
+    <li>👁️ The eye button switches to first person: see the airport through your ant's eyes.</li>
+  </ul>`;
+
+export async function startTycoon({ app, renderer, save, hud, sfx, input, progress, queenProgress, away }: TycoonContext) {
+  // 1) Your colony's ants are the real 3D models (every other creature is built from code)
+  await loadModels((d, t) => hud.setLoading(d / t));
+  const field = new Airfield(hud, sfx, save, progress);
+
+  // 2) The HUD: one world (no switching, route board or shrine yet)
+  hud.setNext(null);
+  document.getElementById('modeBtn')?.classList.add('hidden');
+  hud.initStats(progress, queenProgress, ['luck', 'tough']);
+  hud.initShrine(progress, () => false);
+  progress.onChange = () => hud.renderLevel();
+  progress.onLevelUp = (level) => {
+    sfx.levelUp();
+    hud.banner(`LEVEL UP! Lv ${level}`, 'Tap your level (top left) to spend your point', 2600);
+    writeSave(save);
+  };
+
+  // 🗺️ The minimap
+  const map = new Minimap(document.getElementById('mapSlot')!, Airfield.MAP_BOUNDS, () => field.mapView(), 40);
+
+  // 3) First-person / third-person view
+  const viewBtn = document.getElementById('viewBtn')!;
+  const applyView = () => {
+    const fp = save.view === 'first';
+    field.player.setFirstPerson(fp);
+    viewBtn.classList.toggle('on', fp);
+    viewBtn.textContent = fp ? '🎥' : '👁️';
+    viewBtn.setAttribute('aria-label', fp ? 'Switch to third-person view' : 'Switch to first-person view');
+  };
+  viewBtn.addEventListener('click', () => {
+    save.view = save.view === 'first' ? 'third' : 'first';
+    applyView();
+    if (save.view === 'first') hud.banner('👁️ First person', 'Left side: walk · Right side: drag to look', 2600);
+    writeSave(save);
+  });
+  applyView();
+
+  // 4) ⚙️ Settings → 📖 How to play
+  document.getElementById('howtoBtn')!.addEventListener('click', () => {
+    document.getElementById('settings')!.classList.add('hidden');
+    hud.showGuide(HOWTO_TITLE, HOWTO_HTML, [
+      {
+        label: '🔁 Replay the tutorial',
+        cls: 'menu-btn',
+        onClick: () => {
+          field.tutorial.replay();
+          writeSave(save);
+          hud.banner('🎓 Tutorial restarted', 'Follow the yellow arrow 🔽', 4000);
+        },
+      },
+      { label: 'Close', cls: 'big-btn' },
+    ]);
+  });
+
+  // 5) Full-screen canvas
+  let lastW = 0;
+  let lastH = 0;
+  const resize = () => {
+    lastW = app.clientWidth;
+    lastH = app.clientHeight;
+    renderer.setSize(lastW, lastH, false);
+    field.resize(lastW, lastH);
+  };
+  window.addEventListener('resize', resize);
+  window.visualViewport?.addEventListener('resize', resize);
+  window.addEventListener('orientationchange', () => setTimeout(resize, 250));
+  resize();
+
+  // 6) Save every few seconds and when the app is hidden (coming back pays for the time away)
+  window.setInterval(() => writeSave(save), 5000);
+  let hiddenAt = 0;
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      writeSave(save);
+      hiddenAt = Date.now();
+    } else if (hiddenAt) {
+      void offerOffline((Date.now() - hiddenAt) / 1000);
+      hiddenAt = 0;
+    }
+  });
+
+  // 7) The +$/min idle rate (only cash the Banker ant collects), and 💤 offline earnings from it
+  let prevCash = save.cash;
+  let winEarned = 0;
+  let winT = 0;
+  hud.setRate(save.rate * 60);
+  const trackIncome = (dt: number) => {
+    bump('played', dt);
+    const gained = save.cash - prevCash;
+    if (gained > 0) bump('earned', gained);
+    prevCash = save.cash;
+    winEarned += income.auto;
+    income.auto = 0;
+    winT += dt;
+    if (winT >= 10) {
+      save.rate = save.rate * 0.85 + (winEarned / winT) * 0.15;
+      if (save.rate < 0.02) save.rate = 0;
+      hud.setRate(save.rate * 60);
+      winEarned = 0;
+      winT = 0;
+    }
+  };
+  let welcomeOpen = false;
+  const offerOffline = async (secs: number): Promise<void> => {
+    if (welcomeOpen || secs < OFFLINE.minAwaySecs) return;
+    const counted = Math.min(secs, progress.offlineHours * 3600);
+    const share = progress.offlineShare;
+    const amount = Math.floor(save.rate * counted * share);
+    if (amount < 1) return; // (no Banker ant yet: nothing earns while you're away)
+    welcomeOpen = true;
+    await hud.showWelcome(secs, counted, share, amount, { run: false, who: 'Your ants' });
+    welcomeOpen = false;
+    sfx.welcome();
+    field.addCash(amount);
+    prevCash = save.cash;
+    writeSave(save);
+  };
+  window.setTimeout(() => void offerOffline(away), 900);
+
+  // 8) 📊 Lifetime stats
+  hud.initTotals(() => {
+    const n = (k: string) => save.totals[k] ?? 0;
+    const money = (v: number) => `$${Math.round(v).toLocaleString()}`;
+    const secs = n('played');
+    const t = save.tycoon!;
+    return [
+      'AIRPORT TYCOON',
+      { icon: '💵', label: 'Cash earned', value: money(n('earned')) },
+      { icon: '⏱️', label: 'Time played', value: `${Math.floor(secs / 3600)}h ${Math.floor((secs % 3600) / 60)}m` },
+      { icon: '⭐', label: 'Your level', value: String(save.level) },
+      { icon: '🛫', label: 'Flights', value: t.flights.toLocaleString() },
+      { icon: '🎫', label: 'Passengers checked in', value: t.passengers.toLocaleString() },
+      { icon: '🐜', label: 'Ants working', value: String(field.workers.length + field.bankers.length + (save.unlocked.includes('ty-checkin') ? 1 : 0)) },
+      { icon: '💤', label: 'Idle income now', value: `${money(save.rate * 60)}/min` },
+    ];
+  });
+
+  // 9) 🐢 / 🐇 Movement speed (Settings slider, saved on this device)
+  try {
+    pace.move = THREE.MathUtils.clamp(Number(localStorage.getItem(GAME_SPEED.key)) || 1, GAME_SPEED.min, GAME_SPEED.max);
+  } catch {
+    /* ignore */
+  }
+  hud.initSpeed(pace.move, (v) => {
+    pace.move = v;
+    try {
+      localStorage.setItem(GAME_SPEED.key, String(v));
+    } catch {
+      /* ignore */
+    }
+  });
+
+  // 10) Auto-update
+  const updater = new Updater({
+    canReload: () => !welcomeOpen,
+    beforeReload: () => writeSave(save),
+    onStatus: (t) => hud.setUpdateStatus(t),
+    confirm: (version) => hud.showUpdate(version, 10),
+  });
+  hud.initVersion(versionLabel(), () => updater.check(true));
+
+  // 11) Auto quality: if it can't keep up, step down (shadows first, then pixels)
+  const dpr = Math.min(window.devicePixelRatio, 2);
+  const QUALITY = [
+    { pixelRatio: dpr, shadow: 2048 },
+    { pixelRatio: dpr, shadow: 1024 },
+    { pixelRatio: Math.min(dpr, 1.75), shadow: 1024 },
+    { pixelRatio: Math.min(dpr, 1.5), shadow: 512 },
+  ];
+  let quality = 0;
+  let frameSum = 0;
+  let frameCount = 0;
+  let qualityWait = 4;
+  const watchQuality = (rawMs: number) => {
+    if (document.hidden || rawMs > 250) return;
+    qualityWait -= rawMs / 1000;
+    if (qualityWait > 0) return;
+    frameSum += rawMs;
+    if (++frameCount < 90) return;
+    const avg = frameSum / frameCount;
+    frameSum = frameCount = 0;
+    if (avg > 25 && quality < QUALITY.length - 1) {
+      quality++;
+      renderer.setPixelRatio(QUALITY[quality].pixelRatio);
+      field.setShadowSize(QUALITY[quality].shadow);
+      resize();
+      qualityWait = 3;
+    }
+  };
+
+  // 12) The main loop. `?speed=4` fast-forwards (testing).
+  const testSpeed = Math.min(10, Number(new URLSearchParams(location.search).get('speed')) || 1);
+  // 🧪 Testing only: ?sim=1 runs without drawing (fast headless playthroughs)
+  if (import.meta.env.DEV && new URLSearchParams(location.search).get('sim') === '1') renderer.render = () => {};
+  let gameTime = 0;
+  const steps = (dt: number) => {
+    const n = Math.max(1, Math.ceil(dt / 0.05 - 1e-6));
+    return Array.from({ length: n }, () => dt / n);
+  };
+  hud.hideLoading();
+  let last = performance.now();
+  const errors = new Set<string>();
+  const frame = (now: number) => {
+    requestAnimationFrame(frame);
+    try {
+      tick(now);
+    } catch (e) {
+      const msg = e instanceof Error ? `${e.message}\n${e.stack ?? ''}` : String(e);
+      if (!errors.has(msg)) {
+        errors.add(msg);
+        console.error('Airport Tycoon frame error:', msg);
+      }
+    }
+  };
+  const tick = (now: number) => {
+    const rawMs = Math.max(0, now - last);
+    last = now;
+    const dt = Math.min(0.05, rawMs / 1000) * testSpeed;
+    gameTime += dt;
+    tickClock(rawMs / 1000, Math.min(0.05, rawMs / 1000));
+    watchQuality(rawMs);
+    sfx.setMusic('colony');
+    trackIncome(Math.min(1, rawMs / 1000));
+    if (app.clientWidth !== lastW || app.clientHeight !== lastH) resize();
+    input.splitLook = save.view === 'first';
+    input.update();
+    const look = input.takeLook();
+    field.player.look(look.dx, look.dy);
+    for (const step of steps(dt)) field.update(step, input.move);
+    lod.update(field.scene, field.camera, field.focus);
+    renderer.render(field.scene, field.camera);
+    map.update(Math.min(0.1, rawMs / 1000));
+  };
+  requestAnimationFrame(frame);
+
+  // Handy for testing in the browser console (and the headless tests)
+  (window as unknown as { game: unknown }).game = {
+    field, save, progress, renderer, map,
+    get time() { return gameTime; },
+  };
+}

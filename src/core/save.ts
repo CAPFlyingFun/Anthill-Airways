@@ -41,11 +41,28 @@ export interface SaveData {
   contracts: Record<string, number>;       // 📦 usual load per run type (sets contract goals)
   /** Which game this slot plays: the classic Anthill Airways (default), or 🏝️ Anthill
    *  Island (the new one-island campaign, a test version for now: see world/homeWorld.ts). */
-  campaign?: 'classic' | 'anthill' | 'story';
+  campaign?: 'classic' | 'anthill' | 'story' | 'tycoon';
   /** 🏝️ Anthill Island's own progress (orders, the delivery crate, materials...). */
   home?: HomeSave;
   /** 🦖 The story remake's progress (v0.63: Chapter 1, a test): see story/storyWorld.ts. */
   story?: StorySave;
+  /** 🐜✈️ The insect airport tycoon's progress (v0.68): see tycoon/airfield.ts. */
+  tycoon?: TycoonSave;
+}
+
+/** 🐜✈️ The airport tycoon: what's stocked and flying. (Unlocks use save.unlocked / save.paid, like the colony.) */
+export interface TycoonSave {
+  v: number;
+  /** Nectar drops loaded into each gate's fuel pad. */
+  fuel: number[];
+  /** Nectar waiting on each fuel flower. */
+  flowers: number[];
+  /** Lifetime counts (📊 stats). */
+  flights: number;
+  passengers: number;
+  /** Where you were standing. */
+  x: number;
+  z: number;
 }
 
 /** 🦖 The story: where you are and what's happened. (The current objective is save.tutorial.) */
@@ -149,6 +166,7 @@ export function slotSummary(slot: Slot) {
     const d = { ...newSave(), ...JSON.parse(raw) } as SaveData;
     if (d.campaign === 'anthill') return { level: d.level, cash: d.cash, act: '🏝️ Anthill Island (test)', lastSeen: d.lastSeen };
     if (d.campaign === 'story') return { level: d.level, cash: d.cash, act: '🦖 Story: Chapter 1 (test)', lastSeen: d.lastSeen };
+    if (d.campaign === 'tycoon') return { level: d.level, cash: d.cash, act: '🐜✈️ Airport Tycoon (new)', lastSeen: d.lastSeen };
     const act = d.unlocked.includes('h5-open') ? '🏨 Act 5' : d.unlocked.includes('i3-volcano') ? '🌋 Act 4' : d.unlocked.includes('a2-island') ? '🏝️ Act 3' : d.unlocked.includes('expand3') ? '✈️ Act 2' : '🐜 Act 1';
     return { level: d.level, cash: d.cash, act: d.eruptions ? `${act} · 🌋×${d.eruptions}` : act, lastSeen: d.lastSeen };
   } catch {

@@ -9,6 +9,14 @@ An idle arcade tycoon (walk around, stack stuff on your back, unlock new land) w
 ▶️ **Play:** https://capflyingfun.github.io/Anthill-Airways/
 On iPhone: open in Safari → Share → **Add to Home Screen** to install it as an app (works offline).
 
+## 🐜✈️ Airport Tycoon (new, v0.68)
+The new direction: an **insect-scale airport tycoon run by your fire ant colony**. Start it from ⚙️ Settings → 💾 an empty
+save slot → 🐜✈️ Airport Tycoon. Everything is real size (1 unit = 2 mm): the lawn is a forest, a ladybug is your first
+plane and flower nectar is the fuel. Your colony's ants are the real 3D models; every other bug, plant and airport piece
+is built from code (`src/tycoon/`: `bugs/`, `flora/`, `airport/`, with the game in `airfield.ts`). The first airfield:
+nectar → fuel → check-in → board → fly → land, with ants to hire for each job.
+Art lab (dev only): `npx vite`, then `/Anthill-Airways/lab/?show=bugs|flora|airport`.
+
 ## 🏝️ Anthill Island (test version, v0.33)
 
 The new one-island game from the design doc, playable in its own save slot: **⚙️ Settings → Save slots →
