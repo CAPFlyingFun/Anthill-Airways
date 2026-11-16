@@ -4,6 +4,8 @@
 // You give it the path as a list of (x, z) points (THREE.Vector2: x = world x, y = world z). It lays a dirt
 // strip along every segment, rounds every corner with a disc, edges it with gravel (skipping stones that would
 // sit inside another part of the path) and drops a pale seed every 5 units for the dashed centerline.
+// v0.69: `keepClear(x, z)` says where OTHER paths (or the runway) cross it: no edging stones there (junctions are
+// open, like a real airfield), and `noDash(x, z)` where the seed centerline stops (it doesn't run onto the runway).
 //
 // Size: `width` 7 by default (14 mm: a bee is ~6.5 long, so two ladybugs fit side by side). Surface at y = 0.5.
 // Triangles: ~ 450 per segment/corner + ~80 per gravel stone (about 6,500 for a 100-unit path). Meshes: 5.
@@ -18,7 +20,14 @@ export const TAXIWAY_TOP = 0.5;
 const taxiMat = mat(0x978d7f, { rough: 0.95 });
 const seedMat = mat(0xf0e0b0, { rough: 0.6 });
 
-export function makeTaxiway(points: THREE.Vector2[], width = 7, seed = 11): Piece {
+export interface TaxiwayOpts {
+  /** No edging stone at (x, z): another path or the runway meets this one there. */
+  keepClear?: (x: number, z: number) => boolean;
+  /** No centerline seed at (x, z) (e.g. on the runway). */
+  noDash?: (x: number, z: number) => boolean;
+}
+
+export function makeTaxiway(points: THREE.Vector2[], width = 7, seed = 11, opts: TaxiwayOpts = {}): Piece {
   const r = rng(seed);
   const root = new THREE.Group();
   const hw = width / 2;
@@ -43,14 +52,16 @@ export function makeTaxiway(points: THREE.Vector2[], width = 7, seed = 11): Piec
     for (const side of [-1, 1]) {
       const x = s.x + side * s.tz * (hw + 0.2);
       const z = s.z - side * s.tx * (hw + 0.2);
-      if (distToPath(x, z, points) >= hw + 0.05) edge.push({ x, z });
+      if (distToPath(x, z, points) >= hw + 0.05 && !opts.keepClear?.(x, z)) edge.push({ x, z });
     }
   }
   root.add(edgingStones(edge, r, TAXIWAY_TOP - 0.2));
 
   // 3) dashed centerline: pale seeds laid along the path
   const seedGeo = cached('taxi-seed', () => capsuleGeometry(2.4, 0.38, 5).clone().rotateX(Math.PI / 2));
-  const dashes: Item[] = pathSamples(points, 5.2, 1.5).map((s) => ({ x: s.x, y: TAXIWAY_TOP + 0.2, z: s.z, ry: Math.atan2(s.tx, s.tz), sy: 0.55 }));
+  const dashes: Item[] = pathSamples(points, 5.2, 1.5)
+    .filter((s) => !opts.noDash?.(s.x, s.z))
+    .map((s) => ({ x: s.x, y: TAXIWAY_TOP + 0.2, z: s.z, ry: Math.atan2(s.tx, s.tz), sy: 0.55 }));
   root.add(scatter(seedGeo, seedMat, dashes, { cast: false }));
 
   const first = points[0];

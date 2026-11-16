@@ -12,6 +12,7 @@ import { makeBug, type BugKind } from './bugs';
 export type { BugKind } from './bugs';
 import { buildBackdrop, buildGround, Lawn, scatter } from './flora';
 import { makeBaggageCart, makeControlTower, makeDewTank, makeFuelFlower, makeGate, makeHangar, makeRunway, makeSign, makeTaxiway, makeTerminal, makeWindsock, RUNWAY_TOP, TAXIWAY_TOP } from './airport';
+import type { TaxiwayOpts } from './airport/taxiway';
 
 /** How high the runway's and taxiways' surfaces sit (things on them stand on top). */
 export const SURFACE = { runway: RUNWAY_TOP, taxiway: TAXIWAY_TOP };
@@ -64,8 +65,10 @@ function piece(): ArtPiece {
 }
 
 /** 🛫 The runway, running along x (the kit builds it along z: it's turned a quarter here). */
-export function artRunway(length: number, width: number): ArtPiece {
-  const rw = makeRunway({ length, width, seed: 7 });
+/** The runway (along x once placed). `keepClear(x, z)` (relative to its centre) = where taxiways join: left open. */
+export function artRunway(length: number, width: number, keepClear?: (x: number, z: number) => boolean): ArtPiece {
+  // (its own space runs along z: local (x, z) is (z, -x) here)
+  const rw = makeRunway({ length, width, seed: 7, scuffs: false, keepClear: keepClear && ((lx, lz) => keepClear(lz, -lx)) });
   const p = piece();
   rw.root.rotation.y = Math.PI / 2;
   p.root.add(rw.root);
@@ -76,8 +79,8 @@ export function artRunway(length: number, width: number): ArtPiece {
 }
 
 /** A taxiway along `points` (x = world x, y = world z): place it at the origin. */
-export function artTaxiway(points: THREE.Vector2[], width: number): ArtPiece {
-  return makeTaxiway(points, width, 3);
+export function artTaxiway(points: THREE.Vector2[], width: number, opts?: TaxiwayOpts): ArtPiece {
+  return makeTaxiway(points, width, 3, opts);
 }
 
 /** 🐚 The scallop-shell terminal (mouth toward +z). */

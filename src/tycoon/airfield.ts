@@ -42,6 +42,7 @@ import { SURFACE, artBaggageCart, artBackdrop, artBug, artDewTank, artFuelFlower
 import { DESTINATIONS, Plane } from './plane';
 import { Passengers, type Cafe, type Pax } from './passengers';
 import { mat, mesh, PAL } from './kit';
+import { distToPath } from './airport/common';
 import { Goals, type GoalKind } from './goals';
 import type { PlaneInfo } from './flightUi';
 
@@ -78,6 +79,38 @@ interface Gate {
 
 /** Where a gate's own link joins the runway: just west of its stand (planes enter and leave there). */
 const linkX = (gateX: number) => gateX - 12;
+
+/** A taxiway: its centre points (x, world z) and half its width. */
+interface PathDef {
+  pts: THREE.Vector2[];
+  hw: number;
+  /** Which gate's spur / link it is (-1: the main taxiway). */
+  gate: number;
+}
+/** Every taxiway on the airfield: the main one along the gates, then each gate's spur and runway link. */
+function airfieldPaths(): PathDef[] {
+  const rw = AT.runway;
+  const V = (x: number, z: number) => new THREE.Vector2(x, z);
+  const west = rw.x - rw.length / 2 + 6;
+  const east = AT.gates[AT.gates.length - 1].x + 8;
+  return [
+    { pts: [V(west, rw.z), V(west, AT.taxiZ), V(east, AT.taxiZ)], hw: 3.5, gate: -1 },
+    ...AT.gates.flatMap((g, i) => [
+      { pts: [V(g.x, AT.taxiZ), V(g.x, g.z - 6)], hw: 3, gate: i },
+      { pts: [V(linkX(g.x), AT.taxiZ), V(linkX(g.x), rw.z)], hw: 3, gate: i },
+    ]),
+  ];
+}
+const PATHS = airfieldPaths();
+/** On the runway (or within `pad` of it)? */
+function onRunway(x: number, z: number, pad = 0) {
+  const rw = AT.runway;
+  return Math.abs(x - rw.x) < rw.length / 2 + pad && Math.abs(z - rw.z) < rw.width / 2 + pad;
+}
+/** On one of `paths` (or within `pad` of it)? */
+function onPaths(x: number, z: number, paths: PathDef[], pad = 0) {
+  return paths.some((p) => distToPath(x, z, p.pts) < p.hw + pad);
+}
 
 /** One line of the ✈️ flight board. */
 export interface FlightRow {
@@ -292,8 +325,9 @@ export class Airfield {
       TY_UNLOCKS.some((u) => Math.hypot(x - u.pos[0], z - u.pos[1]) < 8) ||
       !CLEARINGS.some((c) => Math.hypot(x - c.x, z - c.z) < c.r - 4);
     const area = { x: 0, z: 0, w: 240, d: 190 };
-    artScatter(s, 'pebbles', area, 46, busy, 3);
-    artScatter(s, 'leaves', area, 30, busy, 4);
+    // (and off every taxiway: no stones lying out on a path; a fallen leaf is big, so it stays well clear)
+    artScatter(s, 'pebbles', area, 46, (x, z) => busy(x, z) || onPaths(x, z, PATHS, 3), 3);
+    artScatter(s, 'leaves', area, 30, (x, z) => busy(x, z) || onPaths(x, z, PATHS, 10) || onRunway(x, z, 10), 4);
     // (twigs are long: only out by the edge, where they can't lie across a tile or a path)
     artScatter(s, 'twigs', area, 8, (x, z) => busy(x, z) || Math.hypot(x, z - 10) < 70, 5);
   }
@@ -373,17 +407,29 @@ export class Airfield {
     return s ? p.root.localToWorld(s.clone()) : fallback.clone();
   }
 
+  /**
+   * The runway, the taxiway along the north of the gates (joining the runway's west end), and for each gate a spur
+   * up to its stand and its own short link onto the runway (planes take off and turn off there: quick turnarounds).
+   * Only the BORDERS are edged with stones: wherever two paths meet (or a link meets the runway) the junction is
+   * left open, like a real airfield (v0.69). The runway and the main taxiway leave openings only for gates that
+   * are open, so they're rebuilt when a gate is bought (buildPaved).
+   */
   private buildRunway() {
     const rw = AT.runway;
-    this.place(artRunway(rw.length, rw.width), rw.x, rw.z);
-    // The taxiway along the north of the gates (joining the runway's west end), and for each gate a spur up to
-    // its stand and its own short link onto the runway (planes take off and turn off there: quick turnarounds)
-    const west = rw.x - rw.length / 2 + 6;
-    const east = AT.gates[AT.gates.length - 1].x + 8;
-    this.place(artTaxiway([new THREE.Vector2(west, rw.z), new THREE.Vector2(west, AT.taxiZ), new THREE.Vector2(east, AT.taxiZ)], 7), 0, 0);
+    this.buildPaved();
+    PATHS.filter((p) => p.gate >= 0).forEach((path) => {
+      const others = PATHS.filter((p) => p !== path);
+      const piece = this.place(
+        artTaxiway(path.pts, path.hw * 2, {
+          keepClear: (x, z) => onRunway(x, z, 1) || onPaths(x, z, others, 1),
+          noDash: (x, z) => onRunway(x, z, 0.5),
+        }),
+        0,
+        0,
+      );
+      (this.gateRoads[path.gate] ??= []).push(piece.root);
+    });
     AT.gates.forEach((g, i) => {
-      const spur = this.place(artTaxiway([new THREE.Vector2(g.x, AT.taxiZ), new THREE.Vector2(g.x, g.z - 6)], 6), 0, 0);
-      const link = this.place(artTaxiway([new THREE.Vector2(linkX(g.x), AT.taxiZ), new THREE.Vector2(linkX(g.x), rw.z)], 6), 0, 0);
       // 🗼 the HOLD line across the link: two solid + two dashed yellow petal stripes (planes wait behind it)
       const hold = new THREE.Group();
       const yellow = mat(0xffd24a, { rough: 0.6 });
@@ -397,7 +443,7 @@ export class Airfield {
         }
       }
       this.scene.add(hold);
-      this.gateRoads[i] = [spur.root, link.root, hold];
+      this.gateRoads[i].push(hold);
     });
   }
 
@@ -419,6 +465,29 @@ export class Airfield {
   }
   /** Each gate's spur + runway link (hidden until the gate is bought). */
   private gateRoads: THREE.Object3D[][] = [];
+
+  /** The runway + the main taxiway, and which gates' junctions they were built open for. */
+  private paved: ArtPiece[] = [];
+  private pavedFor = '';
+  /** (Re)build the runway and the main taxiway with an opening at each OPEN gate's link and spur. */
+  private buildPaved() {
+    const open = AT.gates.map((_, i) => i === 0 || this.owns(`ty-gate${i + 1}`));
+    const key = open.map((o) => (o ? 1 : 0)).join('');
+    if (key === this.pavedFor) return;
+    this.pavedFor = key;
+    for (const p of this.paved) p.root.removeFromParent();
+    const rw = AT.runway;
+    const main = PATHS[0];
+    const joining = PATHS.filter((p) => p.gate >= 0 && open[p.gate]);
+    const runway = artRunway(rw.length, rw.width, (x, z) => onPaths(x + rw.x, z + rw.z, [main, ...joining], 1));
+    runway.root.position.set(rw.x, 0, rw.z);
+    const taxi = artTaxiway(main.pts, main.hw * 2, {
+      keepClear: (x, z) => onRunway(x, z, 1) || onPaths(x, z, joining, 1),
+      noDash: (x, z) => onRunway(x, z, 0.5),
+    });
+    this.paved = [runway, taxi];
+    for (const p of this.paved) this.scene.add(p.root);
+  }
 
   /**
    * 🐚 The terminal: the main LOBBY (v0.68.3). Passengers come in through the front door, line up along the red
@@ -702,6 +771,7 @@ export class Airfield {
     } else if (id === 'ty-gate2' || id === 'ty-gate3' || id === 'ty-gate4') {
       const n = Number(id.slice(-1)) - 1;
       const g = this.gates[n];
+      this.buildPaved(); // (open the runway's and the taxiway's borders where this gate's paths join them)
       g.open = true;
       for (const o of [g.piece.root, g.plane.model.root, g.piece.root.userData.pad as THREE.Object3D, g.label.sprite, ...(g.piece.root.userData.link as THREE.Object3D[]), ...(g.piece.root.userData.bags as THREE.Object3D[])]) o.visible = true;
       this.pax.gates = this.gates.filter((x) => x.open).length;
@@ -993,6 +1063,7 @@ export class Airfield {
     if (this.checkInAnt) animateCreature(this.checkInAnt, dt, 0);
     if (this.towerAnt) animateCreature(this.towerAnt, dt, 0);
     for (const piece of this.pieces) piece.update?.(dt);
+    for (const piece of this.paved) piece.update?.(dt);
     this.lawn.update(dt, this.camera);
 
     const iv = CONFIG.player.pickupInterval / prog.workMult;

@@ -23,6 +23,10 @@ export interface RunwayOpts {
   seed?: number;
   /** tiny glowing mushrooms along both edges (default on) */
   lights?: boolean;
+  /** little crumbs scuffed over the dirt (default on; v0.69: the airfield keeps its runway clean) */
+  scuffs?: boolean;
+  /** v0.69: where taxiways join it (local x, z): no edging stones or edge lights there, so each junction is open */
+  keepClear?: (x: number, z: number) => boolean;
 }
 export interface RunwayPiece extends Piece {
   length: number;
@@ -89,7 +93,7 @@ export function makeRunway(o: RunwayOpts = {}): RunwayPiece {
 
   // 2) tiny pebbles / crumbs scuffed over the surface so it reads as dirt, not paint
   const crumbs: Item[] = [];
-  for (let i = 0; i < Math.round(length * 0.9); i++) {
+  for (let i = 0; i < (o.scuffs === false ? 0 : Math.round(length * 0.9)); i++) {
     const s = r.range(0.35, 0.8);
     crumbs.push({
       x: r.range(-width / 2 + 1.5, width / 2 - 1.5),
@@ -102,12 +106,15 @@ export function makeRunway(o: RunwayOpts = {}): RunwayPiece {
       color: r.pick([0x7a7167, 0xa89e8f, 0x6d655b, 0xb9ae9d]),
     });
   }
-  root.add(scatter(crumbGeometry(), whiteMat, crumbs, { receive: true }));
+  if (crumbs.length) root.add(scatter(crumbGeometry(), whiteMat, crumbs, { receive: true }));
 
   // 3) gravel edging along both long sides
   const edge: { x: number; z: number }[] = [];
   for (const side of [-1, 1]) {
-    for (let z = -length / 2 + 1; z <= length / 2 - 1; z += 2.4) edge.push({ x: side * (width / 2 + 0.3), z });
+    for (let z = -length / 2 + 1; z <= length / 2 - 1; z += 2.4) {
+      const x = side * (width / 2 + 0.3);
+      if (!o.keepClear?.(x, z)) edge.push({ x, z });
+    }
   }
   root.add(edgingStones(edge, r, RUNWAY_TOP - 0.2));
 
@@ -143,7 +150,10 @@ export function makeRunway(o: RunwayOpts = {}): RunwayPiece {
   if (o.lights !== false) {
     const lamps: { x: number; y: number; z: number; s?: number }[] = [];
     for (const side of [-1, 1]) {
-      for (let z = -length / 2 + 6; z <= length / 2 - 5; z += 14) lamps.push({ x: side * (width / 2 + 2.2), y: 0, z });
+      for (let z = -length / 2 + 6; z <= length / 2 - 5; z += 14) {
+        const x = side * (width / 2 + 2.2);
+        if (!o.keepClear?.(x, z)) lamps.push({ x, y: 0, z });
+      }
     }
     root.add(fungusRow(lamps, 1.5, 1.8));
   }
