@@ -67,6 +67,8 @@ export interface TycoonSave {
   landings?: number;
   /** 📅 The daily goals (v0.69): see tycoon/goals.ts. */
   day?: DaySave;
+  /** ⬆️ Staff upgrade levels, by job (v0.70): see tycoon/staff.ts. */
+  staff?: Record<string, number>;
   /** Where you were standing. */
   x: number;
   z: number;

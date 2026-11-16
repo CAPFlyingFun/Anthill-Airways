@@ -27,13 +27,15 @@ import { AT, TY } from './data';
 
 export type PlaneState = 'parked' | 'taxiOut' | 'hold' | 'lineUp' | 'takeoff' | 'route' | 'holding' | 'landing' | 'taxiIn';
 
-/** Where the flights go (and come from): the places the plan's routes will open, one day. */
-export const DESTINATIONS = ['🌼 Flower Field', '🪵 Fallen Log Town', '🐚 Tide Pool', '🧺 Picnic Table', '🦎 Lizard Rock', '🍄 Mushroom Ring'];
+/** (Where the flights go: the 🗺️ routes in fleet.ts.) */
 
 /** A flight: its number and where it's going (a departure) or coming from (an arrival). */
 export interface Flight {
   no: number;
   place: string;
+  /** 🗺️ Its route's fare (× the ticket) and the extra seconds it takes (v0.70: tycoon/fleet.ts). */
+  fare?: number;
+  extra?: number;
 }
 
 const v3 = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
@@ -60,8 +62,9 @@ export class Plane {
   onRoute: () => void = () => {};
   onApproach: () => void = () => {};
   onArrived: () => void = () => {};
-  /** Seconds left out on the route. */
+  /** Seconds left out on the route (and how long this trip's route is). */
   private routeT = 0;
+  private routeTotal = 1;
   private path: THREE.Vector3[] = [];
   private speed = 0;
   private tmp = new THREE.Vector3();
@@ -118,7 +121,7 @@ export class Plane {
   }
   /** How far through the route it is (0..1), for the flight card's ring. */
   get routeFrac() {
-    return this.state === 'route' ? THREE.MathUtils.clamp(1 - this.routeT / (TY.routeSecs / this.boost), 0, 1) : 0;
+    return this.state === 'route' ? THREE.MathUtils.clamp(1 - this.routeT / this.routeTotal, 0, 1) : 0;
   }
 
   /** On its stand, facing the terminal (+z). */
@@ -264,7 +267,8 @@ export class Plane {
         }
         if (done) {
           this.state = 'route';
-          this.routeT = TY.routeSecs / this.boost;
+          // (a longer route keeps it away longer: 🗺️ fleet.ts)
+          this.routeT = this.routeTotal = (TY.routeSecs + (this.outbound?.extra ?? 0)) / this.boost;
           this.setInSight(false);
           this.onRoute();
         }
@@ -372,7 +376,7 @@ export class Plane {
       case 'taxiOut':
       case 'lineUp':
       case 'takeoff':
-        return (this.etaTakeoff() ?? 0) + 4 + TY.routeSecs / this.boost + this.approachSecs + taxiIn;
+        return (this.etaTakeoff() ?? 0) + 4 + (TY.routeSecs + (this.outbound?.extra ?? 0)) / this.boost + this.approachSecs + taxiIn;
       case 'route':
         return this.routeT + this.approachSecs + taxiIn;
       case 'landing':

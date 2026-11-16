@@ -13,6 +13,7 @@ import * as THREE from 'three';
 import { animateCreature, faceToward } from '../actors/models';
 import { artBug, type ArtBug } from './art';
 import { TY } from './data';
+import { TextSprite } from '../world/labels';
 
 export type PaxState = 'arriving' | 'queue' | 'toGate' | 'waiting' | 'boarding' | 'seated' | 'leaving';
 
@@ -28,9 +29,12 @@ export class Pax {
   gate = -1;
   /** Waypoints still to walk through before its target (into the terminal, out to the gates). */
   via: THREE.Vector3[] = [];
-  /** 🍪 Stopping at the café on the way to the gate? (and how long it's waited there) */
-  cafeStop = false;
-  cafeT = 0;
+  /** Stops still to make on the way to the gate (🍪 café, 🎁 gift shop, 👑 VIP lounge), and how long it's
+   *  waited at the current one. */
+  stops: Stop[] = [];
+  stopT = 0;
+  /** 👑 A VIP (v0.70): pays more, relaxes in the lounge, boards first. */
+  vip = false;
   constructor(public model: ArtBug) {}
   get pos() {
     return this.model.root.position;
@@ -52,13 +56,18 @@ export interface FlowSpots {
   outbound: THREE.Vector3[];
 }
 
-/** 🍪 The Nectar Café (once it's open): where passengers stand to buy, and the buying. */
-export interface Cafe {
+/**
+ * A place passengers stop at between check-in and the gate (v0.70; the 🍪 café was the first): where they stand,
+ * who stops (`who`), whether there's something for them (`has`), and what happens (`buy`: the airfield pays the
+ * cash pad). They give up after `maxWait` seconds if there's nothing.
+ */
+export interface Stop {
+  key: string;
   spot: THREE.Vector3;
-  /** A snack ready on the counter? */
-  has(): boolean;
-  /** Hand one over (the airfield pays the cash pad). */
-  buy(p: Pax): void;
+  who: (p: Pax) => boolean;
+  has: (p: Pax) => boolean;
+  buy: (p: Pax) => void;
+  maxWait: number;
 }
 
 export class Passengers {
@@ -72,8 +81,12 @@ export class Passengers {
   serving = false;
   /** How many gates are open (gate 2 is bought later). */
   gates = 1;
-  /** 🍪 The café (null until it's bought). */
-  cafe: Cafe | null = null;
+  /** 🍪🎁👑 The stops that are open, in the order passengers visit them. */
+  stops: Stop[] = [];
+  /** 👑 The share of new travellers who are VIPs (0 until the lounge opens). */
+  vipChance = 0;
+  /** x check-in speed (⬆️ staff). */
+  checkMult = 1;
   /** Called when a passenger finishes checking in (the airfield pays + gives XP). */
   onCheckIn: (p: Pax) => void = () => {};
   private arriveT = 2;
@@ -105,6 +118,24 @@ export class Passengers {
     return out;
   }
 
+  /** 👑 Make `p` a VIP: a golden aphid with a crown over its head. */
+  private makeVip(p: Pax) {
+    p.vip = true;
+    p.model.root.traverse((o) => {
+      const m = (o as THREE.Mesh).material as THREE.MeshStandardMaterial | undefined;
+      if (m && 'color' in m && (o as THREE.Mesh).isMesh) {
+        const gold = m.clone();
+        gold.color.lerp(new THREE.Color(0xffc93a), 0.9);
+        gold.metalness = 0.4;
+        (o as THREE.Mesh).material = gold;
+      }
+    });
+    const crown = new TextSprite(1.15, '#ffd166');
+    crown.setText('👑');
+    crown.sprite.position.y = 2.6;
+    p.model.root.add(crown.sprite);
+  }
+
   /** Climbed down off a plane: walk away into the lawn. */
   leave(p: Pax) {
     p.state = 'leaving';
@@ -115,8 +146,8 @@ export class Passengers {
   /** The next passengers to board at gate `g` (up to `n`), walking out to `to`. */
   callToBoard(g: number, n: number, to: THREE.Vector3) {
     const q = this.atGate[g];
-    // (only those already waiting at the gate: not ones still at the café or on their way)
-    const called = q.filter((p) => p.state === 'waiting').slice(0, n);
+    // (only those already waiting at the gate: not ones still at the café or on their way; 👑 VIPs first)
+    const called = q.filter((p) => p.state === 'waiting').sort((a, b) => Number(b.vip) - Number(a.vip)).slice(0, n);
     for (const p of called) q.splice(q.indexOf(p), 1);
     for (const p of called) {
       p.state = 'boarding';
@@ -146,6 +177,7 @@ export class Passengers {
       const p = this.spawn(this.spots.edge);
       p.state = 'queue';
       p.via = this.spots.inbound.map((v) => v.clone());
+      if (Math.random() < this.vipChance) this.makeVip(p);
       this.line.push(p);
     }
 
@@ -157,17 +189,17 @@ export class Passengers {
     const front = this.line[0];
     const gate = this.freeGate();
     if (front && !front.via.length && this.serving && gate >= 0 && front.pos.distanceTo(front.target) < 1.2) {
-      this.checkT += dt;
+      this.checkT += dt * this.checkMult;
       if (this.checkT >= TY.checkInSecs) {
         this.checkT = 0;
         this.line.shift();
         front.gate = gate;
         front.state = 'toGate';
         front.there = false; // (it was standing at the desk: on its way now)
-        // a snack at the café first (if there is one), then out through the airside doorway to the gate
-        front.cafeStop = !!this.cafe;
-        front.cafeT = 0;
-        front.via = front.cafeStop ? [] : this.spots.outbound.map((v) => v.clone());
+        // its stops first (the café, the shop, the lounge for a VIP), then out through the airside doorway
+        front.stops = this.stops.filter((s) => s.who(front));
+        front.stopT = 0;
+        front.via = front.stops.length ? [] : this.spots.outbound.map((v) => v.clone());
         this.atGate[gate].push(front);
         this.onCheckIn(front);
       }
@@ -175,25 +207,25 @@ export class Passengers {
       this.checkT = Math.min(this.checkT, TY.checkInSecs * 0.5);
     }
     this.atGate.forEach((q, g) => q.forEach((p, i) => {
-      if (p.state === 'toGate' && p.cafeStop) {
-        // 🍪 at the café counter: buy a snack (or give up after a while if there are none)
-        const cafe = this.cafe;
-        if (!cafe) p.cafeStop = false;
-        else {
-          p.target.copy(cafe.spot).add(this.tmp.set(((p.model.root.id % 5) - 2) * 0.9, 0, 0));
-          if (p.there) {
-            p.cafeT += dt;
-            if (cafe.has()) {
-              cafe.buy(p);
-              p.cafeStop = false;
-            } else if (p.cafeT > TY.cafeWait) p.cafeStop = false;
-            if (!p.cafeStop) {
-              p.via = this.spots.outbound.map((v) => v.clone());
-              p.there = false;
-            }
+      if (p.state === 'toGate' && p.stops.length) {
+        // 🍪🎁👑 at a stop: buy (or relax), or give up after a while if there's nothing; then the next one
+        const s = p.stops[0];
+        p.target.copy(s.spot).add(this.tmp.set(((p.model.root.id % 5) - 2) * 0.9, 0, 0));
+        if (p.there) {
+          p.stopT += dt;
+          let done = false;
+          if (s.has(p)) {
+            s.buy(p);
+            done = true;
+          } else if (p.stopT > s.maxWait) done = true;
+          if (done) {
+            p.stops.shift();
+            p.stopT = 0;
+            p.there = false;
+            if (!p.stops.length) p.via = this.spots.outbound.map((v) => v.clone());
           }
-          return;
         }
+        return;
       }
       if (p.state === 'toGate' && this.followVia(p)) return;
       this.gateSpot(g, i, p.target);

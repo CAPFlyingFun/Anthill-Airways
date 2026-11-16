@@ -1244,3 +1244,12 @@ body.in-cut .hotbar, body.in-cut .use-btn { visibility: hidden; }
 
 /* 📅 The daily-goals bar (Airport Tycoon's use of the chip under the zone name): room for all its goals */
 .next-chip.goal-bar { max-width: calc(100vw - 118px - var(--safe-l) - var(--safe-r)); }
+
+/* 🌧️ Airport Tycoon's dew shower (v0.70): the storm's rain, but light and bright (a soft morning shower) */
+.storm.dew {
+  background:
+    repeating-linear-gradient(105deg, rgba(220, 235, 255, 0.0) 0 22px, rgba(220, 235, 255, 0.35) 22px 23.5px, rgba(220, 235, 255, 0.0) 23.5px 61px),
+    repeating-linear-gradient(100deg, rgba(220, 235, 255, 0.0) 0 37px, rgba(220, 235, 255, 0.22) 37px 38px, rgba(220, 235, 255, 0.0) 38px 83px),
+    rgba(160, 190, 220, 0.12);
+  background-size: 140px 300px, 190px 420px, auto;
+}

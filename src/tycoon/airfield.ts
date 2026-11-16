@@ -39,8 +39,11 @@ import { TUTORIAL_DONE, Tutorial, type TutorialScript } from '../world/tutorial'
 import type { MapRect, MapView } from '../ui/minimap';
 import { AT, CLEARINGS, TY, TYCOON_SAVE_V, TY_UNLOCKS, walkable } from './data';
 import { SURFACE, artBaggageCart, artBackdrop, artBug, artDewTank, artFuelFlower, artHangar, artScatter, artGate, artGround, artLawn, artRunway, artSign, artTaxiway, artTerminal, artTower, artWindsock, type ArtLawn, type ArtPiece } from './art';
-import { DESTINATIONS, Plane } from './plane';
-import { Passengers, type Cafe, type Pax } from './passengers';
+import { Plane } from './plane';
+import { Passengers, type Pax, type Stop } from './passengers';
+import { FLEET, bestPlane, openRoutes, routeOf } from './fleet';
+import { STAFF, buyStaff, staffFx, staffPanel, type StaffId } from './staff';
+import { Events } from './events';
 import { mat, mesh, PAL } from './kit';
 import { distToPath } from './airport/common';
 import { Goals, type GoalKind } from './goals';
@@ -152,6 +155,8 @@ export class Airfield {
   tutorial: Tutorial;
   /** 📅 The daily goals (start once the tutorial's done). */
   goals: Goals;
+  /** 🦎🌧️🪶 Events & visitors (v0.70). */
+  events!: Events;
   /** 🎯 The gate whose plane the camera is watching (null = you). Moving cancels it. */
   watch: number | null = null;
   /** The selected plane's gate (its flight card is open; a ring glows under it). */
@@ -229,8 +234,9 @@ export class Airfield {
       this.groundY,
     );
     this.pax.gates = this.gates.filter((g) => g.open).length;
-    this.pax.onCheckIn = () => {
-      this.bill(TY.ticket, desk.front);
+    this.pax.onCheckIn = (p) => {
+      // (👑 a VIP pays more for the same seat)
+      this.bill(TY.ticket * (p.vip ? TY.vipTicket : 1), desk.front);
       this.st.passengers++;
       bump('sold');
       this.progress.addXp(TY.xpCheckIn);
@@ -247,6 +253,23 @@ export class Airfield {
 
     this.buildDecor();
     this.buildCafe(desk.cafe);
+    this.buildShop(desk.shop);
+    this.buildLounge();
+    this.buildStaffPad();
+    this.events = new Events({
+      scene: this.scene,
+      camera: this.camera,
+      hud,
+      sfx,
+      player: () => this.player.pos,
+      reward: (cash, xp, at, text) => {
+        this.addCash(cash);
+        this.progress.addXp(xp);
+        this.goals.add('earned', cash);
+        this.hud.floatAt(at, this.camera, `${text} +$${cash}`, 'big gold');
+      },
+      level: () => this.save.level,
+    });
 
     // The glowing tiles
     for (const def of TY_UNLOCKS) {
@@ -529,6 +552,7 @@ export class Airfield {
       exit: this.worldSpot(t, 'exit', at(12.6, 0.5, -5.3)).add(new THREE.Vector3(2, 0, 0)),
       cash: door.clone().add(new THREE.Vector3(-7, 0, 7)),
       cafe: at(AT.cafeLocal.x, 0.5, AT.cafeLocal.z),
+      shop: at(AT.shopLocal.x, 0.5, AT.shopLocal.z),
     };
   }
 
@@ -586,8 +610,11 @@ export class Airfield {
       if (animate) this.flyers.grow(o);
     }
     this.blockers.push(c.oven.blocker, { minX: c.spot.x - 2.6, maxX: c.spot.x + 2.6, minZ: c.spot.z - 6, maxZ: c.spot.z - 1 });
-    const cafe: Cafe = {
+    this.addStop({
+      key: 'cafe',
       spot: c.spot,
+      who: () => true,
+      maxWait: TY.cafeWait,
       has: () => c.shelf.count > 0,
       buy: (p) => {
         const it = c.shelf.pop();
@@ -598,8 +625,182 @@ export class Airfield {
         this.progress.addXp(1);
         this.sfx.sale();
       },
-    };
-    this.pax.cafe = cafe;
+    });
+    this.cafeOpen = true;
+  }
+  private cafeOpen = false;
+
+  /** A new stop for passengers (kept in visiting order: 🍪 café, 🎁 shop, 👑 lounge). */
+  private addStop(s: Stop) {
+    const order = ['cafe', 'shop', 'lounge'];
+    this.pax.stops = [...this.pax.stops.filter((x) => x.key !== s.key), s].sort((a, b) => order.indexOf(a.key) - order.indexOf(b.key));
+  }
+
+  // --------------------------------------------------------------------------
+  // 🎁 The Pollen Gift Shop (v0.70): a round counter inside the terminal, right of the line. It makes a pollen sweet
+  // every few seconds; passengers stop on their way through and buy one.
+  // --------------------------------------------------------------------------
+  private shop!: { shelf: Stack; parts: THREE.Object3D[]; spot: THREE.Vector3; t: number; open: boolean };
+  private buildShop(at: THREE.Vector3) {
+    const bar = new THREE.Group();
+    bar.position.copy(at);
+    const top = mesh(new THREE.CylinderGeometry(2.3, 2.1, 1.6, 22), mat(0x8e5ad9, { rough: 0.6 }));
+    top.position.y = 0.8;
+    const lip = mesh(new THREE.TorusGeometry(2.3, 0.18, 8, 26).rotateX(Math.PI / 2), mat(0xffd166, { rough: 0.4, metal: 0.3 }));
+    lip.position.y = 1.6;
+    // a pollen-ball "awning" post with a sunflower top
+    const post = mesh(new THREE.CylinderGeometry(0.15, 0.15, 3.4, 8), mat(0x5b8a3a, { rough: 0.8 }));
+    post.position.set(1.6, 2.6, -0.8);
+    const bloom = mesh(new THREE.CylinderGeometry(1.1, 1.1, 0.2, 14).rotateX(Math.PI / 2.4), mat(0xffcf3a, { rough: 0.6 }));
+    bloom.position.set(1.6, 4.4, -0.8);
+    bar.add(top, lip, post, bloom);
+    this.scene.add(bar);
+    const shelf = new Stack(bar, gridLayout(3, 2, 0.62, 0.62, 1.65, -0.3, 0), TY.shopMax);
+    const sign = new TextSprite(1.1, '#e6c8ff');
+    sign.setText('🎁 GIFT SHOP');
+    sign.sprite.position.copy(at).setY(6.5);
+    (sign.sprite.material as THREE.SpriteMaterial).depthTest = false;
+    sign.sprite.renderOrder = 5;
+    this.scene.add(sign.sprite);
+    this.shop = { shelf, parts: [bar, sign.sprite], spot: at.clone().add(new THREE.Vector3(-3.5, 0, 0)), t: 0, open: false };
+    for (const o of this.shop.parts) shown(o, false);
+  }
+
+  private openShop(animate: boolean) {
+    const s = this.shop;
+    s.open = true;
+    for (const o of s.parts) {
+      shown(o, true);
+      if (animate) this.flyers.grow(o);
+    }
+    this.blockers.push({ minX: s.spot.x + 1.2, maxX: s.spot.x + 5.8, minZ: s.spot.z - 2.3, maxZ: s.spot.z + 2.3 });
+    this.addStop({
+      key: 'shop',
+      spot: s.spot,
+      who: () => true,
+      maxWait: 2,
+      has: () => s.shelf.count > 0,
+      buy: (p) => {
+        const it = s.shelf.pop();
+        if (!it) return;
+        this.flyers.fly(it.mesh, () => p.pos.clone().setY(p.pos.y + 1), () => it.mesh.removeFromParent(), 0.3, 0.6);
+        this.bill(TY.shopPrice + staffFx.shopPrice(this.staffLv('shop')), s.spot);
+        this.progress.addXp(1);
+        this.sfx.sale();
+      },
+    });
+  }
+
+  // --------------------------------------------------------------------------
+  // 👑 The VIP Lounge (v0.70): a leaf sofa on a red carpet with golden rope posts. Once it's open, some travellers
+  // are VIPs (golden, with a crown): they pay ×3 for their ticket, relax here for a moment (a lounge fee), then
+  // board first.
+  // --------------------------------------------------------------------------
+  private lounge!: { parts: THREE.Object3D[]; spot: THREE.Vector3; open: boolean };
+  private buildLounge() {
+    const { x, z } = AT.lounge;
+    const g = new THREE.Group();
+    g.position.set(x, 0, z);
+    const carpet = mesh(new THREE.BoxGeometry(6, 0.08, 12), mat(0xc0392b, { rough: 0.9 }), false);
+    carpet.position.set(0, 0.04, 1);
+    const sofa = mesh(new THREE.CapsuleGeometry(1.3, 6, 6, 12).rotateZ(Math.PI / 2).scale(1, 0.7, 1), mat(0x4f9a3a, { rough: 0.7 }));
+    sofa.position.set(0, 1.0, -4.4);
+    const back = mesh(new THREE.CapsuleGeometry(0.9, 6.4, 6, 12).rotateZ(Math.PI / 2), mat(0x3f8a2e, { rough: 0.7 }));
+    back.position.set(0, 2.2, -5.4);
+    g.add(carpet, sofa, back);
+    const gold = mat(0xffd166, { rough: 0.35, metal: 0.5 });
+    for (const sx of [-1, 1]) {
+      for (const sz of [-1, 1.4]) {
+        const post = mesh(new THREE.CylinderGeometry(0.16, 0.2, 2.2, 8), gold);
+        post.position.set(sx * 3.4, 1.1, sz * 3.4);
+        const knob = mesh(new THREE.SphereGeometry(0.3, 10, 8), gold);
+        knob.position.set(sx * 3.4, 2.3, sz * 3.4);
+        g.add(post, knob);
+      }
+    }
+    this.scene.add(g);
+    const sign = new TextSprite(1.1, '#ffd166');
+    sign.setText('👑 VIP LOUNGE');
+    sign.sprite.position.set(x, 6, z - 3);
+    this.scene.add(sign.sprite);
+    this.lounge = { parts: [g, sign.sprite], spot: new THREE.Vector3(x, 0, z - 2.2), open: false };
+    for (const o of this.lounge.parts) shown(o, false);
+  }
+
+  private openLounge(animate: boolean) {
+    const l = this.lounge;
+    l.open = true;
+    for (const o of l.parts) {
+      shown(o, true);
+      if (animate) this.flyers.grow(o);
+    }
+    this.blockers.push({ minX: l.spot.x - 4, maxX: l.spot.x + 4, minZ: l.spot.z - 4.4, maxZ: l.spot.z - 1.4 });
+    this.pax.vipChance = TY.vipShare;
+    this.addStop({
+      key: 'lounge',
+      spot: l.spot,
+      who: (p) => p.vip,
+      maxWait: TY.loungeSecs + 1,
+      // (a VIP relaxes for a moment, then pays the lounge fee and heads for the gate)
+      has: (p) => p.stopT >= TY.loungeSecs,
+      buy: () => {
+        this.bill(TY.loungeFee, l.spot);
+        this.progress.addXp(2);
+      },
+    });
+  }
+
+  // --------------------------------------------------------------------------
+  // ⬆️ STAFF upgrades (v0.70): stand on the pad by the nest; the panel opens with a row per hired job.
+  // --------------------------------------------------------------------------
+  private staffZone!: Zone;
+  private staffOpen = false;
+  private staffWasIn = false;
+  private buildStaffPad() {
+    const { x, z } = AT.staffPad;
+    const pad = makePad(3.6, 3.6, '⬆️ STAFF', '#7df9a0');
+    pad.position.set(x, 0.05, z);
+    this.scene.add(pad);
+    const label = new TextSprite(1.0, '#7df9a0');
+    label.setText('⬆️ STAFF UPGRADES');
+    label.sprite.position.set(x, 3.4, z);
+    this.scene.add(label.sprite);
+    this.staffZone = new Zone(x, z, 1.8, 1.8);
+  }
+  /** A job's staff level. */
+  staffLv(id: StaffId) {
+    return this.st.staff?.[id] ?? 0;
+  }
+  private openStaff() {
+    this.staffOpen = true;
+    this.sfx.popup();
+    this.hud.openUpgrades({
+      model: () => staffPanel(this.st.staff ??= {}, this.save.cash, (id) => this.owns(id)),
+      buy: (id, n) => {
+        const spent = buyStaff(this.st.staff ??= {}, id, n, this.save.cash);
+        if (spent <= 0) return;
+        this.save.cash -= spent;
+        this.hud.setCash(this.save.cash);
+        this.sfx.upgrade();
+        this.applyStaff();
+      },
+      tab: () => {},
+      close: () => {
+        this.staffOpen = false;
+      },
+    });
+  }
+  /** Put the staff levels to work: helpers' speed and carry, check-in speed, the Banker's grab, your backpack. */
+  private applyStaff() {
+    for (const w of this.workers) {
+      const job = w.model.root.userData.job as StaffId | undefined;
+      if (!job) continue;
+      const lv = this.staffLv(job);
+      w.boost = staffFx.speed(lv);
+      w.stack.max = (w.model.root.userData.carry0 as number) + staffFx.carry(lv);
+    }
+    for (const b of this.bankers) b.boost = staffFx.grab(this.staffLv('banker'));
+    this.pax.checkMult = staffFx.quick(this.staffLv('checkin'));
   }
 
   /** 🌼 A nectar flower (`open` = bought: the second one shows up later). */
@@ -625,7 +826,10 @@ export class Airfield {
   /** 🛫 A gate with its plane (`open` = bought). */
   /** A gate's plane: a ladybug (2 seats), or a bee (3) after 🐝 Bee Shuttles. */
   private planeModel(i: number) {
-    return this.owns('ty-bees') ? artBug('bee', TY.beeLength, { seed: 7 + i }) : artBug('ladybug', TY.ladybugLength, { seed: 3 + i });
+    const t = bestPlane((id) => this.owns(id));
+    const m = artBug(t.kind, t.length, { seed: 3 + i * 4 });
+    m.root.userData.planeType = t.kind;
+    return m;
   }
 
   private buildGate(x: number, z: number, i: number, open: boolean) {
@@ -674,6 +878,13 @@ export class Airfield {
       this.progress.addXp(TY.xpFlight);
       this.goals.add('flights', 1);
       this.tutorial.did(STEP.takeoff);
+      // 🗺️ a longer route's fare: the rest of each passenger's fare is paid as it lifts off
+      const fare = plane.outbound?.fare ?? 1;
+      if (fare > 1 && plane.aboard > 0) {
+        const bonus = Math.round(plane.aboard * TY.ticket * (fare - 1));
+        this.bill(bonus, plane.pos);
+        if (this.near(plane.pos, 40)) this.hud.floatAt(plane.pos.clone().setY(plane.pos.y + 6), this.camera, `🗺️ ${routeOf(plane.outbound?.place).place} fares +$${bonus}`, 'gold');
+      }
       if (this.near(plane.pos, 40)) {
         this.hud.floatAt(plane.pos.clone().setY(plane.pos.y + 3), this.camera, '🛫 Take-off!', 'big');
         this.sfx.takeoff();
@@ -681,7 +892,7 @@ export class Airfield {
     };
     plane.onRoute = () => {
       // (its next trip: the flight that will bring it home)
-      plane.inbound = this.newFlight(DESTINATIONS);
+      plane.inbound = this.newFlight();
       plane.outbound = null;
       // The travellers have flown off to their destination
       for (const p of gate.riders) {
@@ -698,15 +909,15 @@ export class Airfield {
       for (const p of gate.riders) plane.seat(p.model.root);
     };
     plane.onArrived = () => {
-      plane.inbound = null;
-      // Everyone off: they pay their landing fee and walk away into the lawn
+      // Everyone off (the landing fees are counted with the fare of where they came from: then it's done): they pay their landing fee and walk away into the lawn
       plane.unseat(this.scene);
       for (const p of gate.riders) {
         p.state = 'leaving';
         this.pax.leave(p);
-        this.bill(TY.landingFee, plane.pos);
+        this.bill(TY.landingFee * (plane.inbound?.fare ?? 1), plane.pos);
       }
       gate.riders = [];
+      plane.inbound = null;
       this.st.landings = (this.st.landings ?? 0) + 1;
       this.goals.add('landings', 1);
       if (this.near(plane.pos, 40)) this.hud.floatAt(plane.pos.clone().setY(3), this.camera, '🛬 Landed', '');
@@ -735,6 +946,7 @@ export class Airfield {
     const nest = new THREE.Vector3(AT.nest.x, 0, AT.nest.z + 7);
     if (id === 'ty-runner' || id === 'ty-runner2' || id === 'ty-runner3') {
       const w = new Worker(this.scene, nest.x, nest.z, () => this.fuelRoute(), { color: 0xffb02e }, 2.1);
+      Object.assign(w.model.root.userData, { job: 'fuel', carry0: w.baseCarry });
       titleTag(w.model, '⛽ FUEL RUNNER', TITLE.ant);
       this.workers.push(w);
       if (animate) this.flyers.grow(w.model.root);
@@ -750,6 +962,7 @@ export class Airfield {
       // 🧳 carries seed-bags from the BAG DROP to the gate that needs them most
       const w = new Worker(this.scene, nest.x, nest.z, () => this.bagRoute(), { color: 0x5fb4ff }, 2.1);
       w.baseCarry = w.stack.max = TY.bagCarry;
+      Object.assign(w.model.root.userData, { job: 'bags', carry0: w.baseCarry });
       titleTag(w.model, '🧳 BAGGAGE', TITLE.ant);
       this.workers.push(w);
       if (animate) this.flyers.grow(w.model.root);
@@ -797,6 +1010,7 @@ export class Airfield {
     } else if (id === 'ty-crumbs') {
       const c = this.cafe;
       const w = new Worker(this.scene, nest.x, nest.z, () => ({ src: c.pile.stack, srcZone: c.pile.zone, dst: c.oven.input, dstZone: c.oven.inZone }), { color: 0xe8b86a }, 2.1);
+      Object.assign(w.model.root.userData, { job: 'cafe', carry0: w.baseCarry });
       titleTag(w.model, '🍪 CRUMB RUNNER', TITLE.ant);
       this.workers.push(w);
       if (animate) this.flyers.grow(w.model.root);
@@ -809,10 +1023,18 @@ export class Airfield {
       this.scene.add(chef.root);
       c.chef = chef;
       if (animate) this.flyers.grow(chef.root);
-    } else if (id === 'ty-bees') {
-      // 🐝 every gate swaps its ladybug for a bee (3 seats) as soon as it's parked and empty
+    } else if (id === 'ty-bees' || id === 'ty-dragonfly' || id === 'ty-butterfly') {
+      // ✈️ every gate swaps its plane for the new one (✈️ fleet.ts) as soon as it's parked and empty
       for (const g of this.gates) g.swap = true;
-      if (animate) this.hud.banner('🐝 Bee Shuttles!', 'Each ladybug is swapped for a bee (3 seats) when it is next at its gate', 3200);
+      const t = FLEET.find((f) => f.unlock === id)!;
+      if (animate) this.hud.banner(`${t.icon} ${t.name} fleet!`, `Each gate's plane is swapped for a ${t.name.toLowerCase()} when it's next at its gate`, 3200);
+    } else if (id === 'ty-route-picnic' || id === 'ty-route-log' || id === 'ty-route-tide' || id === 'ty-route-lizard') {
+      if (animate) this.hud.banner('🗺️ New route open!', 'Longer routes pay higher fares: some flights go there now', 3000);
+    } else if (id === 'ty-shop') {
+      this.openShop(animate);
+    } else if (id === 'ty-lounge') {
+      this.openLounge(animate);
+      if (animate) this.hud.banner('👑 VIP Lounge open!', 'Golden VIPs pay ×3, relax in the lounge and board first', 3200);
     }
   }
 
@@ -892,10 +1114,12 @@ export class Airfield {
     this.flyers.pushInto(it, pad, 0.45);
   }
 
-  /** Book a flight number and a place. */
-  private newFlight(places: string[]) {
+  /** Book a flight: a number and one of the 🗺️ routes you've opened (with its fare and length). */
+  private newFlight() {
     this.st.seq ??= 101;
-    return { no: this.st.seq++, place: places[Math.floor(Math.random() * places.length)] };
+    const routes = openRoutes((id) => this.owns(id));
+    const r = routes[Math.floor(Math.random() * routes.length)];
+    return { no: this.st.seq++, place: r.place, fare: r.fare, extra: r.extra };
   }
 
   // --------------------------------------------------------------------------
@@ -926,14 +1150,15 @@ export class Airfield {
       if (!g.open) return;
       const p = g.plane;
       const seats = p.model.seats.length;
-      const bee = p.model.seats.length >= 3;
+      const kind = (p.model.root.userData.planeType as string | undefined) ?? 'ladybug';
+      const pt = FLEET.find((f) => f.kind === kind) ?? FLEET[0];
       const dep = p.state === 'parked' || p.state === 'taxiOut' || p.state === 'hold' || p.state === 'lineUp' || p.state === 'takeoff';
       const flight = dep ? p.outbound : p.inbound;
       const per = TY.fuelPerFlight;
       const info: PlaneInfo = {
         gate: i + 1,
-        icon: bee ? '🐝' : '🐞',
-        type: `${bee ? 'Honey Bee' : 'Ladybug'} · ${seats} seats`,
+        icon: pt.icon,
+        type: `${pt.name} · ${seats} seats`,
         flight: flight?.no ?? null,
         place: flight?.place ?? null,
         dir: dep ? 'dep' : 'arr',
@@ -1055,7 +1280,7 @@ export class Airfield {
     const p = this.player.pos;
     const me = this.player;
     const prog = this.progress;
-    me.carryMax = CONFIG.player.baseCarry + prog.carryBonus;
+    me.carryMax = CONFIG.player.baseCarry + prog.carryBonus + staffFx.backpack(this.staffLv('you'));
     me.speedMult = prog.speedMult * 1.6; // (the airfield is big: you walk a bit faster than in the colony)
     me.update(dt, move, this.blockers, walkable);
     p.y = this.groundY(p.x, p.z);
@@ -1082,7 +1307,7 @@ export class Airfield {
     this.flowers.forEach((f, i) => {
       if (!f.piece.root.visible) return;
       f.t += dt;
-      if (f.t >= TY.flowerEvery && !f.stack.full) {
+      if (f.t >= TY.flowerEvery / (this.events.dew ? 2 : 1) && !f.stack.full) {
         f.t = 0;
         const it = f.stack.addInstant('nectar');
         this.flyers.grow(it.mesh, 0.25);
@@ -1130,7 +1355,7 @@ export class Airfield {
 
 
     // 🍪 The café: take crumbs at the pile, drop them at the kitchen's IN; snacks hop through the hatch
-    if (this.pax.cafe) {
+    if (this.cafeOpen) {
       const c = this.cafe;
       c.pile.update(dt);
       c.oven.update(dt);
@@ -1166,6 +1391,22 @@ export class Airfield {
         1.2,
       );
     });
+
+    // 🎁 the gift shop makes a pollen sweet every few seconds
+    if (this.shop.open && !this.shop.shelf.full) {
+      this.shop.t += dt * staffFx.quick(this.staffLv('shop'));
+      if (this.shop.t >= TY.shopEvery) {
+        this.shop.t = 0;
+        this.flyers.grow(this.shop.shelf.addInstant('candy').mesh, 0.25);
+      }
+    }
+    // ⬆️ the STAFF pad: step on it to open the upgrades
+    const onStaff = this.staffZone.contains(p);
+    if (onStaff && !this.staffWasIn && !this.staffOpen) this.openStaff();
+    this.staffWasIn = onStaff;
+    this.applyStaff();
+    // 🦎🌧️🪶 now and then, something happens
+    this.events.update(dt, !this.learning);
 
     for (const w of this.workers) w.update(dt, this.flyers);
     for (const b of this.bankers) b.update(dt, this.flyers);
@@ -1215,7 +1456,7 @@ export class Airfield {
       const p = g.plane;
       if (p.waiting && !p.cleared && p.waitT >= TY.towerDelay) p.clear();
     }
-    if (this.runwayUser) return;
+    if (this.runwayUser || this.events.runwayBlocked) return; // (🦎 nobody uses the runway while the lizard's on it)
     const next = open
       .map((g) => g.plane)
       .filter((p) => p.waiting && p.cleared)
@@ -1280,7 +1521,7 @@ export class Airfield {
     // Call more passengers while there are free seats (and the fuel to go)
     const free = plane.freeSeats - g.boarding.length;
     if (fuelled && free > 0 && this.pax.atGate[this.gates.indexOf(g)].length) {
-      plane.outbound ??= this.newFlight(DESTINATIONS);
+      plane.outbound ??= this.newFlight();
       g.boarding.push(...this.pax.callToBoard(this.gates.indexOf(g), free, nose));
     }
     for (let i = g.boarding.length - 1; i >= 0; i--) {
@@ -1370,10 +1611,12 @@ export class Airfield {
       { x: AT.tower.x, z: AT.tower.z, icon: '🗼' },
       ...this.flowers.filter((f) => f.piece.root.visible).map((f) => ({ x: f.zone.x, z: f.zone.z, icon: '🌼', alert: f.stack.full })),
       ...this.gates.flatMap((g, i) => (g.open ? [{ x: g.fuelZone.x, z: g.fuelZone.z, icon: '⛽', label: `Gate ${i + 1}`, alert: g.fuel.count < TY.fuelPerFlight }] : [])),
-      ...this.gates.filter((g) => g.open && g.plane.inSight).map((g) => ({ x: g.plane.pos.x, z: g.plane.pos.z, icon: this.owns('ty-bees') ? '🐝' : '🐞' })),
+      ...this.gates.filter((g) => g.open && g.plane.inSight).map((g) => ({ x: g.plane.pos.x, z: g.plane.pos.z, icon: FLEET.find((f) => f.kind === g.plane.model.root.userData.planeType)?.icon ?? '🐞' })),
+      { x: AT.staffPad.x, z: AT.staffPad.z, icon: '⬆️', label: 'Staff' },
+      ...this.events.markers(),
       { x: this.cashPad.zone.x, z: this.cashPad.zone.z, icon: '💵', alert: this.cashPad.stack.count > 0 },
       { x: this.bagDropZone.x, z: this.bagDropZone.z, icon: '🧳', label: 'Bags', alert: this.bagDrop.count >= TY.bagDropMax - 2 },
-      ...(this.pax.cafe
+      ...(this.cafeOpen
         ? [
             { x: this.cafe.pile.zone.x, z: this.cafe.pile.zone.z, icon: '🧺' },
             { x: this.cafe.oven.inZone.x, z: this.cafe.oven.inZone.z, icon: '🍪', label: 'Café', alert: this.cafe.oven.input.count === 0 && this.cafe.shelf.count === 0 },
@@ -1410,8 +1653,8 @@ export class Airfield {
       finish: {
         title: '🛫 Your airline is flying!',
         html: `<p>Ants now fuel the planes, check passengers in and load the bags. Keep growing: a
-          <b>Banker ant</b>, a second <b>nectar flower</b>, <b>Gates 2, 3 and 4</b>, <b>🐝 Bee Shuttles</b> (3 seats)
-          and the <b>Control Tower</b>.</p>
+          <b>Banker ant</b>, a second <b>nectar flower</b>, <b>Gates 2, 3 and 4</b>, new 🗺️ <b>routes</b>, bigger planes,
+          a 🎁 <b>Gift Shop</b> and a 👑 <b>VIP Lounge</b>. The ⬆️ <b>STAFF</b> pad by the nest upgrades your ants.</p>
           <p>📅 <b>Daily goals</b> start now: finish each day's goals quickly for ⭐⭐⭐ and a cash bonus. Tap the
           📅 bar under the airfield's name to see them. Tap a ✈️ chip at the bottom (or a plane) for its flight card.</p>`,
         button: '✈️ Let\'s fly',

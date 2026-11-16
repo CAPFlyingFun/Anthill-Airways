@@ -71,6 +71,16 @@ export const TY = {
   /** The holding pattern: arrivals circle this high (each gate 3 higher) and this wide until cleared to land. */
   holdAlt: 22,
   holdRadius: 16,
+  /** 🎁 The Pollen Gift Shop (v0.70): a souvenir's price, how often it makes one, how many fit on its counter. */
+  shopPrice: 7,
+  shopEvery: 2.6,
+  shopMax: 6,
+  /** 👑 The VIP Lounge (v0.70): the share of travellers who are VIPs once it's open, their ticket (× a normal
+   *  one), the lounge fee they pay, and how long they relax there. */
+  vipShare: 0.25,
+  vipTicket: 3,
+  loungeFee: 10,
+  loungeSecs: 2.5,
   /** XP. */
   xpCheckIn: 3,
   xpFuel: 1,
@@ -102,6 +112,12 @@ export const AT = {
   tower: { x: 62, z: -30 },
   /** 🧳 The BAG DROP: bags slide out of the terminal here (just outside its airside doorway). */
   bagDrop: { x: 0, z: 1 },
+  /** ⬆️ The STAFF pad (upgrades for every ant job), by the colony's nest. */
+  staffPad: { x: 38, z: 40 },
+  /** 🎁 The Pollen Gift Shop's counter, inside the terminal (in its own space: right of the line). */
+  shopLocal: { x: 10, z: 5 },
+  /** 👑 The VIP Lounge: a leaf sofa on a red carpet, between the terminal and Gates 1-2. */
+  lounge: { x: -20, z: -1 },
   /** 🗼 The holding pattern's centre: over the runway's far (west) end, where arrivals circle. */
   hold: { x: -102, z: -62 },
   windsock: { x: 74, z: -42 },
@@ -147,5 +163,14 @@ export const TY_UNLOCKS: UnlockDef[] = [
   { id: 'ty-gate4', name: 'Gate 4 + Plane', icon: '✈️', cost: 1800, pos: [38, -4], requires: ['ty-gate3'], level: 7 },
   { id: 'ty-runner3', name: 'Fuel Runner 3', icon: '⛽', cost: 700, pos: [32, 32], requires: ['ty-gate4'] },
   { id: 'ty-bags2', name: 'Baggage Ant 2', icon: '🧳', cost: 320, pos: [-6, 2], requires: ['ty-gate2', 'ty-bags'] },
+  // ---- v0.70: 🗺️ routes, ✈️ fleet, 🎁 the gift shop, 👑 the VIP lounge ----
+  { id: 'ty-route-picnic', name: 'Route: 🧺 Picnic Table (fare ×1.5)', icon: '🗺️', cost: 450, pos: [-40, 44], requires: ['ty-banker'], level: 4 },
+  { id: 'ty-route-log', name: 'Route: 🪵 Fallen Log Town (×2)', icon: '🗺️', cost: 1100, pos: [-32, 50], requires: ['ty-route-picnic'], level: 6 },
+  { id: 'ty-route-tide', name: 'Route: 🐚 Tide Pool (×2.6)', icon: '🗺️', cost: 2600, pos: [-24, 54], requires: ['ty-route-log'], level: 9 },
+  { id: 'ty-route-lizard', name: 'Route: 🦎 Lizard Rock (×3.3)', icon: '🗺️', cost: 5500, pos: [-16, 58], requires: ['ty-route-tide'], level: 12 },
+  { id: 'ty-shop', name: 'Pollen Gift Shop', icon: '🎁', cost: 600, pos: [2, 16], requires: ['ty-cafe'], level: 5 },
+  { id: 'ty-lounge', name: 'VIP Lounge (VIPs pay ×3)', icon: '👑', cost: 1500, pos: [-20, -7], requires: ['ty-gate2'], level: 7 },
+  { id: 'ty-dragonfly', name: 'Dragonfly Express (4 seats, fast)', icon: '🪽', cost: 3500, pos: [48, 6], requires: ['ty-bees'], level: 9 },
+  { id: 'ty-butterfly', name: 'Butterfly Charters (6 seats)', icon: '🦋', cost: 8000, pos: [48, 14], requires: ['ty-dragonfly'], level: 12 },
   { id: 'ty-bags3', name: 'Baggage Ant 3', icon: '🧳', cost: 750, pos: [8, -3], requires: ['ty-gate3', 'ty-bags2'] },
 ];

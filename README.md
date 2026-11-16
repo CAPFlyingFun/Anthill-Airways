@@ -23,6 +23,11 @@ holding pattern until the tower clears them: automatic since v0.69.2), ✈️ fl
 chips along the bottom and a flight card per plane (`flightUi.ts`), and 📅 daily goals with ⭐ stars and a cash
 bonus (`goals.ts`).
 
+**v0.70:** ✈️ the fleet grows (🐝 bees → 🪽 dragonflies → 🦋 butterflies) and 🗺️ route tiles open longer routes with
+higher fares (`fleet.ts`); ⬆️ the STAFF pad by the nest upgrades every ant job (`staff.ts`); 🎁 a Pollen Gift Shop
+and a 👑 VIP Lounge (golden VIPs pay ×3 and board first); and 🦎 events (a lizard on the runway to shoo, a 🌧️ dew
+shower, a 🪶 feather to find: `events.ts`). Take-offs and landings run themselves (v0.69.2).
+
 ## 🏝️ Anthill Island (test version, v0.33)
 
 The new one-island game from the design doc, playable in its own save slot: **⚙️ Settings → Save slots →

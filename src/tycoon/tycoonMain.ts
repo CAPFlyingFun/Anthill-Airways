@@ -56,6 +56,12 @@ const HOWTO_HTML = `
       doing. 🎯 on the card points the camera at it until you walk. 📋 is the whole flight board.</li>
     <li>📅 <b>Daily goals</b> (the bar under the airfield's name): finish each day's goals quickly for ⭐⭐⭐
       and a cash bonus.</li>
+    <li>⬆️ Step on the <b>STAFF</b> pad by the nest to upgrade your ants' jobs (faster, carry more) and your backpack.</li>
+    <li>🗺️ <b>Route</b> tiles open longer routes that pay higher fares. The <b>fleet</b> tiles swap every plane for a
+      bigger one: 🐝 bees, 🪽 dragonflies, 🦋 butterflies.</li>
+    <li>🎁 The <b>Gift Shop</b> sells pollen sweets to passengers; the 👑 <b>VIP Lounge</b> brings golden VIPs who pay ×3.</li>
+    <li>🦎 Now and then something happens: a lizard sunbathing on the runway (walk up to shoo it), a 🌧️ dew shower
+      (flowers fill twice as fast), or a 🪶 feather to find.</li>
     <li>💵 Walk over the <b>cash pad</b> to collect. Spend it on the <b>glowing tiles</b>: ants who fuel the planes,
       check passengers in and collect the cash for you.</li>
     <li>👁️ The eye button switches to first person: see the airport through your ant's eyes.</li>
