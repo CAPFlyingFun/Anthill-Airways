@@ -3,6 +3,7 @@
 // the two game modes (base = walking around the colony, run = gate run),
 // XP/levels, saving, and the main loop.
 // ============================================================================
+import './core/carry'; // (first: saves carried over from the old Anthill-Airways-Dino address)
 import * as THREE from 'three';
 import './style.css';
 import { Input } from './core/input';

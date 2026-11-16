@@ -1,6 +1,7 @@
 // Vite build config.
 // - `base` must match the GitHub repo name so the game works at
-//   https://capflyingfun.github.io/Anthill-Airways-Dino/
+//   https://capflyingfun.github.io/Anthill-Airways/
+//   (renamed from Anthill-Airways-Dino in v0.67.1; the old address redirects here, see src/core/carry.ts)
 // - VitePWA writes the web app manifest + a service worker so the game
 //   can be installed to the iPhone home screen and played offline.
 // - Every build gets a VERSION + BUILD ID baked into the code, and a
@@ -30,7 +31,7 @@ function versionFile(): Plugin {
 }
 
 export default defineConfig({
-  base: '/Anthill-Airways-Dino/',
+  base: '/Anthill-Airways/',
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version),
     __BUILD_ID__: JSON.stringify(BUILD_ID),

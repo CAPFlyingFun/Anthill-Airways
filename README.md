@@ -6,7 +6,7 @@ An idle arcade tycoon (walk around, stack stuff on your back, unlock new land) w
 **gate runs**: send your goods down a lane through `+ / x / - / ÷ / ?` gates to grow
 (or shrink!) your payout.
 
-▶️ **Play:** https://capflyingfun.github.io/Anthill-Airways-Dino/
+▶️ **Play:** https://capflyingfun.github.io/Anthill-Airways/
 On iPhone: open in Safari → Share → **Add to Home Screen** to install it as an app (works offline).
 
 ## 🏝️ Anthill Island (test version, v0.33)
