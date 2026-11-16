@@ -35,8 +35,9 @@ export class Pax {
 }
 
 export interface FlowSpots {
-  /** Where newcomers step out of the lawn, and where leavers walk back into it. */
+  /** Where newcomers step out of the lawn, and where arrivals walk back into it. */
   edge: THREE.Vector3;
+  exit: THREE.Vector3;
   /** The check-in desk (the front of the line stands here) and the way the line runs back from it. */
   desk: THREE.Vector3;
   lineDir: THREE.Vector3;
@@ -91,7 +92,7 @@ export class Passengers {
   /** Climbed down off a plane: walk away into the lawn. */
   leave(p: Pax) {
     p.state = 'leaving';
-    p.target.copy(this.spots.edge);
+    p.target.copy(this.spots.exit);
     p.there = false;
   }
 
@@ -122,7 +123,8 @@ export class Passengers {
     // New travellers walk in while the line has room
     this.arriveT -= dt;
     if (this.arriveT <= 0 && this.line.length < TY.queueMax) {
-      this.arriveT = TY.arriveEvery * (0.7 + Math.random() * 0.6);
+      // (busier as the airport grows: each open gate brings more travellers)
+      this.arriveT = (TY.arriveEvery / (0.6 + 0.4 * this.gates)) * (0.7 + Math.random() * 0.6);
       const p = this.spawn(this.spots.edge);
       p.state = 'queue';
       this.line.push(p);

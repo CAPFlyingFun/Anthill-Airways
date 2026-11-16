@@ -58,9 +58,14 @@ interface Gate {
   boarding: Pax[];
   /** Seconds since the first passenger sat down (waiting for more before going). */
   boardT: number;
+  /** 🐝 Swap the plane for the upgraded one the next time it's parked and empty. */
+  swap?: boolean;
   open: boolean;
   label: TextSprite;
 }
+
+/** Where a gate's own link joins the runway: just west of its stand (planes enter and leave there). */
+const linkX = (gateX: number) => gateX - 12;
 
 /** One line of the ✈️ flight board. */
 export interface FlightRow {
@@ -135,11 +140,12 @@ export class Airfield {
     this.scene.add(serve);
 
     AT.flowers.forEach((f, i) => this.buildFlower(f.x, f.z, i === 0 || this.owns('ty-flower2')));
-    AT.gates.forEach((g, i) => this.buildGate(g.x, g.z, i, i === 0 || this.owns('ty-gate2')));
+    AT.gates.forEach((g, i) => this.buildGate(g.x, g.z, i, i === 0 || this.owns(`ty-gate${i + 1}`)));
     this.pax = new Passengers(
       this.scene,
       {
         edge: new THREE.Vector3(AT.lawnEdge.x, 0, AT.lawnEdge.z),
+        exit: new THREE.Vector3(AT.lawnExit.x, 0, AT.lawnExit.z),
         desk: desk.front,
         lineDir: new THREE.Vector3(1, 0, 0),
         gateWait: this.gates.map((g) => g.piece.root.localToWorld(g.piece.spots.gate.clone())),
@@ -178,10 +184,11 @@ export class Airfield {
     const rw = AT.runway;
     if (Math.abs(x - rw.x) < rw.length / 2 && Math.abs(z - rw.z) < rw.width / 2) return SURFACE.runway;
     const west = rw.x - rw.length / 2 + 6;
+    const east = AT.gates[AT.gates.length - 1].x + 8;
     const onTaxi =
-      (Math.abs(z - AT.taxiZ) < 3.5 && x > west - 3.5 && x < 23.5) ||
-      ((Math.abs(x - west) < 3.5 || Math.abs(x - 20) < 3.5) && z < AT.taxiZ && z > rw.z) ||
-      AT.gates.some((g) => Math.abs(x - g.x) < 3 && z > AT.taxiZ && z < g.z - 6);
+      (Math.abs(z - AT.taxiZ) < 3.5 && x > west - 3.5 && x < east + 3.5) ||
+      (Math.abs(x - west) < 3.5 && z < AT.taxiZ && z > rw.z) ||
+      AT.gates.some((g) => (Math.abs(x - g.x) < 3 && z > AT.taxiZ && z < g.z - 6) || (Math.abs(x - linkX(g.x)) < 3 && z < AT.taxiZ && z > rw.z));
     return onTaxi ? SURFACE.taxiway : 0;
   };
 
@@ -301,12 +308,19 @@ export class Airfield {
   private buildRunway() {
     const rw = AT.runway;
     this.place(artRunway(rw.length, rw.width), rw.x, rw.z);
-    // The taxiway: along the north of the gates, joining the runway at both ends
+    // The taxiway along the north of the gates (joining the runway's west end), and for each gate a spur up to
+    // its stand and its own short link onto the runway (planes take off and turn off there: quick turnarounds)
     const west = rw.x - rw.length / 2 + 6;
-    const pts = [new THREE.Vector2(west, rw.z), new THREE.Vector2(west, AT.taxiZ), new THREE.Vector2(20, AT.taxiZ), new THREE.Vector2(20, rw.z)];
-    this.place(artTaxiway(pts, 7), 0, 0);
-    for (const g of AT.gates) this.place(artTaxiway([new THREE.Vector2(g.x, AT.taxiZ), new THREE.Vector2(g.x, g.z - 6)], 6), 0, 0);
+    const east = AT.gates[AT.gates.length - 1].x + 8;
+    this.place(artTaxiway([new THREE.Vector2(west, rw.z), new THREE.Vector2(west, AT.taxiZ), new THREE.Vector2(east, AT.taxiZ)], 7), 0, 0);
+    AT.gates.forEach((g, i) => {
+      const spur = this.place(artTaxiway([new THREE.Vector2(g.x, AT.taxiZ), new THREE.Vector2(g.x, g.z - 6)], 6), 0, 0);
+      const link = this.place(artTaxiway([new THREE.Vector2(linkX(g.x), AT.taxiZ), new THREE.Vector2(linkX(g.x), rw.z)], 6), 0, 0);
+      this.gateRoads[i] = [spur.root, link.root];
+    });
   }
+  /** Each gate's spur + runway link (hidden until the gate is bought). */
+  private gateRoads: THREE.Object3D[][] = [];
 
   /** 🐚 The terminal, and where its check-in desk, line and cash pad go. */
   private buildTerminal() {
@@ -351,12 +365,17 @@ export class Airfield {
   }
 
   /** 🛫 A gate with its plane (`open` = bought). */
+  /** A gate's plane: a ladybug (2 seats), or a bee (3) after 🐝 Bee Shuttles. */
+  private planeModel(i: number) {
+    return this.owns('ty-bees') ? artBug('bee', TY.beeLength, { seed: 7 + i }) : artBug('ladybug', TY.ladybugLength, { seed: 3 + i });
+  }
+
   private buildGate(x: number, z: number, i: number, open: boolean) {
     const piece = this.place(artGate(i + 1), x, z);
     const stand = this.worldSpot(piece, 'plane', new THREE.Vector3(x, 0, z - 6));
-    const model = artBug('ladybug', TY.ladybugLength, { seed: 3 + i });
+    const model = this.planeModel(i);
     this.scene.add(model.root);
-    const plane = new Plane(model, stand, this.groundY);
+    const plane = new Plane(model, stand, linkX(x), this.groundY);
     // ⛽ the fuel pad beside the stand
     const fuelAt = stand.clone().add(new THREE.Vector3(6.5, 0, 2));
     const pad = makePad(3, 3, 'FUEL', '#ffb02e');
@@ -375,7 +394,8 @@ export class Airfield {
     this.scene.add(label.sprite);
     const door = this.worldSpot(piece, 'door', stand.clone().add(new THREE.Vector3(-3, 0, 0)));
     const gate: Gate = { door, piece, fuel, fuelZone: new Zone(fuelAt.x, fuelAt.z, 1.5, 1.5), plane, riders: [], boarding: [], boardT: 0, open, label };
-    for (const o of [piece.root, model.root, pad, label.sprite]) o.visible = open;
+    piece.root.userData.link = this.gateRoads[i] ?? [];
+    for (const o of [piece.root, model.root, pad, label.sprite, ...this.gateRoads[i]]) o.visible = open;
     pad.userData.gatePad = true;
     piece.root.userData.pad = pad;
     plane.onAirborne = () => {
@@ -420,11 +440,11 @@ export class Airfield {
   private buildDecor() {
     this.place(artTower(), AT.tower.x, AT.tower.z);
     this.place(artWindsock(), AT.windsock.x, AT.windsock.z);
-    this.place(artHangar(), AT.hangar.x, AT.hangar.z + 12);
-    this.place(artDewTank(), AT.flowers[1].x + 22, AT.flowers[1].z - 10, -0.4);
-    this.place(artBaggageCart(), AT.gates[0].x + 12, AT.gates[0].z + 4, 0.6);
+    this.place(artHangar(), AT.hangar.x, AT.hangar.z, -0.5);
+    this.place(artDewTank(), AT.flowers[1].x + 24, AT.flowers[1].z - 8, -0.4);
+    this.place(artBaggageCart(), -46, 2, 0.6);
     this.place(artSign('ANTHILL AIRWAYS'), AT.terminal.x - 30, AT.terminal.z + 24, 0.5);
-    this.place(artSign('GATES', 'up'), AT.terminal.x - 26, AT.terminal.z - 12, 0.3);
+    this.place(artSign('GATES', 'up'), -60, -4, 0.3);
   }
 
   // --------------------------------------------------------------------------
@@ -436,7 +456,7 @@ export class Airfield {
 
   private applyUnlock(id: string, animate: boolean) {
     const nest = new THREE.Vector3(AT.nest.x, 0, AT.nest.z + 7);
-    if (id === 'ty-runner' || id === 'ty-runner2') {
+    if (id === 'ty-runner' || id === 'ty-runner2' || id === 'ty-runner3') {
       const w = new Worker(this.scene, nest.x, nest.z, () => this.fuelRoute(), { color: 0xffb02e }, 2.1);
       titleTag(w.model, '⛽ FUEL RUNNER', TITLE.ant);
       this.workers.push(w);
@@ -462,14 +482,22 @@ export class Airfield {
       f.piece.root.visible = true;
       (f.piece.root.userData.label as TextSprite).sprite.visible = true;
       if (animate) this.flyers.grow(f.piece.root);
-    } else if (id === 'ty-gate2') {
-      const g = this.gates[1];
+    } else if (id === 'ty-gate2' || id === 'ty-gate3' || id === 'ty-gate4') {
+      const n = Number(id.slice(-1)) - 1;
+      const g = this.gates[n];
       g.open = true;
-      for (const o of [g.piece.root, g.plane.model.root, g.piece.root.userData.pad as THREE.Object3D, g.label.sprite]) o.visible = true;
-      this.pax.gates = 2;
-      if (animate) this.flyers.grow(g.plane.model.root);
+      for (const o of [g.piece.root, g.plane.model.root, g.piece.root.userData.pad as THREE.Object3D, g.label.sprite, ...(g.piece.root.userData.link as THREE.Object3D[])]) o.visible = true;
+      this.pax.gates = this.gates.filter((x) => x.open).length;
+      if (animate) {
+        this.flyers.grow(g.piece.root);
+        this.flyers.grow(g.plane.model.root);
+      }
     } else if (id === 'ty-tower') {
       for (const g of this.gates) g.plane.boost = TY.towerBoost;
+    } else if (id === 'ty-bees') {
+      // 🐝 every gate swaps its ladybug for a bee (3 seats) as soon as it's parked and empty
+      for (const g of this.gates) g.swap = true;
+      if (animate) this.hud.banner('🐝 Bee Shuttles!', 'Each ladybug is swapped for a bee (3 seats) when it is next at its gate', 3200);
     }
   }
 
@@ -728,6 +756,14 @@ export class Airfield {
   private updateBoarding(g: Gate, dt: number) {
     const plane = g.plane;
     if (!plane.parked) return;
+    if (g.swap && plane.aboard === 0 && !g.boarding.length) {
+      g.swap = false;
+      const i = this.gates.indexOf(g);
+      const old = plane.setModel(this.planeModel(i));
+      void old;
+      if (g.open) this.flyers.grow(plane.model.root);
+      plane.model.root.visible = g.open;
+    }
     const fuelled = g.fuel.count >= TY.fuelPerFlight;
     const nose = g.door;
     // Call more passengers while there are free seats (and the fuel to go)
@@ -807,8 +843,8 @@ export class Airfield {
       { x: AT.nest.x, z: AT.nest.z, icon: '🐜', label: 'Colony' },
       { x: AT.tower.x, z: AT.tower.z, icon: '🗼' },
       ...this.flowers.filter((f) => f.piece.root.visible).map((f) => ({ x: f.zone.x, z: f.zone.z, icon: '🌼', alert: f.stack.full })),
-      ...this.gates.filter((g) => g.open).map((g, i) => ({ x: g.fuelZone.x, z: g.fuelZone.z, icon: '⛽', label: `Gate ${i + 1}`, alert: g.fuel.count < TY.fuelPerFlight })),
-      ...this.gates.filter((g) => g.open && g.plane.model.root.visible).map((g) => ({ x: g.plane.pos.x, z: g.plane.pos.z, icon: '🐞' })),
+      ...this.gates.flatMap((g, i) => (g.open ? [{ x: g.fuelZone.x, z: g.fuelZone.z, icon: '⛽', label: `Gate ${i + 1}`, alert: g.fuel.count < TY.fuelPerFlight }] : [])),
+      ...this.gates.filter((g) => g.open && g.plane.model.root.visible).map((g) => ({ x: g.plane.pos.x, z: g.plane.pos.z, icon: this.owns('ty-bees') ? '🐝' : '🐞' })),
       { x: this.cashPad.zone.x, z: this.cashPad.zone.z, icon: '💵', alert: this.cashPad.stack.count > 0 },
     ];
     return {
@@ -841,7 +877,8 @@ export class Airfield {
       finish: {
         title: '🛫 Your airline is flying!',
         html: `<p>Ants now fuel the planes and check the passengers in. Keep growing: a <b>Banker ant</b>, a second
-          <b>nectar flower</b>, <b>Gate 2</b> with another ladybug, and the <b>Control Tower</b>.</p>`,
+          <b>nectar flower</b>, <b>Gates 2, 3 and 4</b>, <b>🐝 Bee Shuttles</b> (3 seats) and the <b>Control Tower</b>.
+          Tap the ✈️ chip under the airfield's name for the flight board.</p>`,
         button: '✈️ Let\'s fly',
       },
       defs: TY_UNLOCKS,

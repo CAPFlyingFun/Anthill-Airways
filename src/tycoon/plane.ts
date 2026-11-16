@@ -59,7 +59,11 @@ export class Plane {
   private rwEnd: number;
 
   /** `ground(x, z)` = how high the surface is there (the runway and taxiways are raised a little). */
-  constructor(public model: ArtBug, park: THREE.Vector3, private ground: (x: number, z: number) => number = () => 0) {
+  /**
+   * `link` = the x of its gate's own link to the runway (it enters there to take off, and turns off there after
+   * landing: short trips, so planes turn around fast). `ground(x, z)` = how high the surface is there.
+   */
+  constructor(public model: ArtBug, park: THREE.Vector3, private link: number, private ground: (x: number, z: number) => number = () => 0) {
     this.home = park.clone();
     this.riders = model.seats.map(() => null);
     const rw = AT.runway;
@@ -91,6 +95,19 @@ export class Plane {
     this.model.bob.rotation.set(0, 0, 0);
     this.model.flying = false;
     this.model.root.visible = true;
+  }
+
+  /** Swap in a different bug (an upgrade: 🐝 Bee Shuttles). Only while parked and empty. Returns the old one. */
+  setModel(m: ArtBug) {
+    const old = this.model;
+    m.root.position.copy(old.root.position);
+    m.root.rotation.copy(old.root.rotation);
+    m.root.visible = old.root.visible;
+    old.root.parent?.add(m.root);
+    old.root.removeFromParent();
+    this.model = m;
+    this.riders = m.seats.map(() => null);
+    return old;
   }
 
   /** Sit a passenger in a free seat (their world size kept). Returns false if it's full. */
@@ -132,7 +149,7 @@ export class Plane {
     const h = this.home;
     const tz = AT.taxiZ;
     const rz = AT.runway.z;
-    this.path = [v3(h.x, 0, tz), v3(this.rwStart - 8, 0, tz), v3(this.rwStart - 8, 0, rz), v3(this.rwStart, 0, rz)];
+    this.path = [v3(h.x, 0, tz), v3(this.link, 0, tz), v3(this.link, 0, rz), v3(this.link + 2, 0, rz)];
     this.state = 'taxiOut';
   }
 
@@ -152,7 +169,7 @@ export class Plane {
             this.state = 'takeoff';
             this.speed = 2;
             this.path = [
-              v3(this.rwStart + 70, this.ground(this.rwStart + 70, AT.runway.z), AT.runway.z),
+              v3(this.link + 44, this.ground(this.link + 44, AT.runway.z), AT.runway.z),
               v3(this.rwEnd + 40, TY.cruiseAlt * 0.6, AT.runway.z - 10),
               v3(this.rwEnd + 140, TY.cruiseAlt, AT.runway.z - 120),
             ];
@@ -165,8 +182,8 @@ export class Plane {
       }
       case 'takeoff': {
         // A run along the runway (legs, then wings), then climbing out to the north-east
-        this.speed = Math.min(TY.takeoffSpeed * this.boost, this.speed + dt * 12);
-        const airborne = this.pos.x > this.rwStart + 40;
+        this.speed = Math.min(TY.takeoffSpeed * this.boost, this.speed + dt * 16);
+        const airborne = this.pos.x > this.link + 30;
         m.flying = airborne;
         const done = this.follow(dt, this.speed, false);
         animateCreature(m, dt, airborne ? 0 : this.speed * 0.5);
@@ -234,7 +251,7 @@ export class Plane {
   /** Seconds until it leaves the ground (null: not heading out). */
   etaTakeoff(): number | null {
     if (this.state === 'taxiOut') return this.left() / (TY.taxiSpeed * this.boost) + 3;
-    if (this.state === 'takeoff') return this.wasUp ? 0 : Math.max(0, (this.rwStart + 40 - this.pos.x) / Math.max(this.speed, 8));
+    if (this.state === 'takeoff') return this.wasUp ? 0 : Math.max(0, (this.link + 30 - this.pos.x) / Math.max(this.speed, 8));
     return null;
   }
   /** Seconds until it's parked at its gate again (null: it's parked). */
@@ -264,7 +281,7 @@ export class Plane {
 
   /** Where landing planes turn off the runway (east of the gates). */
   private exitX() {
-    return Math.max(this.home.x + 30, 0);
+    return this.link;
   }
 
   /** Move along the path at `speed`; true when the last point is reached. `ground` keeps it on y = 0. */
