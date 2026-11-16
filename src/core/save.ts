@@ -76,6 +76,10 @@ export interface StorySave {
   pages: number[];
   /** 🪓 Tools: uses left on the stone you're using, the hatchet's uses left (0 = none), Rae's crafting (seconds in). */
   tools: { stoneHp: number; hatchet: number; raeT: number };
+  /** 🎒 v0.66: the backpack (counts per item), the 5 hotbar slots (tool kinds), the slot in your hand (-1 none). */
+  inv?: Record<string, number>;
+  hotbar?: (string | null)[];
+  held?: number;
 }
 
 /** 🏝️ Anthill Island: what the backyard remembers between sessions. */

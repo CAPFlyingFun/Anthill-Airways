@@ -578,22 +578,26 @@ export class Hud {
   private static ICONS: Record<string, string> = { stone: '🪨', branch: '🌿', fiber: '🌱', clothes: '👕', antfarm: '🐜', log: '🪵', berry: '🍓', mast: '📡', radio: '📻', bread: '🥖', parcel: '📦', extinguisher: '🧯', medicine: '💊', medkit: '🩹', luggage: '🧳', meal: '🍔', part: '🔩', fuel: '⛽', crumb: '🍞', snack: '🍪', leaf: '🍃', wrap: '🌯', sugar: '🧊', candy: '🍬', cash: '💵', bag: '🧳', snackbox: '🍱', fruit: '🍈', smoothie: '🥤', meat: '🍖', egg: '🥚', ticket: '🎟️', obsidian: '🪨', gem: '💎', magma: '🔥', crystal: '🔶', laundry: '🧺', towel: '🧻', grocery: '🥬', tray: '🍽️', beans: '🫘', coffee: '☕', shopbag: '🛍️' };
 
   /** What you're carrying: the 🎒 badge ("5/8", red when full) + the slots behind it. */
-  setInventory(counts: Map<string, number>, used: number, max: number) {
+  setInventory(counts: Map<string, number>, used: number, max: number, tools: { icon: string; label: string; wear: number }[] = []) {
     if (!this.invBound) {
       this.invBound = true;
       $('bagBtn').addEventListener('click', () => this.showBag(!this.invOpen));
       $('inv').addEventListener('click', () => this.showBag(false)); // (a tap on the list closes it)
     }
-    const key = [...counts].map(([t, n]) => `${t}${n}`).join() + `|${used}/${max}`;
+    const key = [...counts].map(([t, n]) => `${t}${n}`).join() + `|${used}/${max}|` + tools.map((x) => `${x.label}${Math.round(x.wear * 20)}`).join();
     if (key === this.invKey) return; // nothing changed: skip the DOM work
     this.invKey = key;
     const badge = $('bagBadge');
     badge.textContent = `${used}/${max}`;
     badge.classList.toggle('hidden', used === 0);
     badge.classList.toggle('full', used >= max);
-    $('invSlots').innerHTML = used
+    // (🦖 the story: your tools first, each with its wear bar, then what you carry)
+    const toolRow = tools.length
+      ? `<div class="inv-tools">${tools.map((x) => `<div class="inv-tool">${x.icon}<span>${x.label}</span><i><u style="width:${Math.round(x.wear * 100)}%"></u></i></div>`).join('')}</div>`
+      : '';
+    $('invSlots').innerHTML = toolRow + (used
       ? [...counts].map(([t, n]) => `<div class="inv-slot">${Hud.ICONS[t] ?? '❔'}<b>${n}</b></div>`).join('')
-      : '<div class="inv-empty">Empty</div>';
+      : '<div class="inv-empty">Empty</div>');
     const fill = $('invFill');
     fill.style.width = `${Math.min(100, (used / max) * 100)}%`;
     fill.classList.toggle('full', used >= max);

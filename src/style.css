@@ -1007,3 +1007,75 @@ body.in-cut #hud .topbar, body.in-cut #hint, body.in-cut .tut-edge { visibility:
 .chapter-end p { margin: 8px 0; }
 .chapter-end .next { background: #fff3d6; border-radius: 10px; padding: 8px 10px; }
 .chapter-end .small { font-size: 13px; opacity: 0.8; }
+
+/* ---- 🎒 v0.66: the story's tool hotbar, use button, storage panel, coach bubbles, thirst edges ---- */
+.hotbar {
+  position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(12px + env(safe-area-inset-bottom));
+  display: flex; gap: 6px; z-index: 6; pointer-events: auto;
+}
+.hotbar.hidden { display: none; }
+.hb-slot {
+  position: relative; width: 48px; height: 48px; border-radius: 12px; padding: 0;
+  background: rgba(15, 32, 70, 0.78); border: 2px solid rgba(255, 255, 255, 0.35);
+  box-shadow: 0 3px 0 rgba(0, 0, 0, 0.35); color: #fff; font-size: 24px; line-height: 1;
+  display: flex; align-items: center; justify-content: center;
+}
+.hb-slot.empty { background: rgba(15, 32, 70, 0.4); border-style: dashed; }
+.hb-slot.held { border-color: #ffd166; background: rgba(60, 90, 160, 0.9); transform: translateY(-4px); box-shadow: 0 0 0 2px #ffd166, 0 6px 0 rgba(0, 0, 0, 0.35); }
+.hb-slot em { position: absolute; top: 2px; left: 5px; font-size: 9px; font-style: normal; opacity: 0.6; font-weight: 800; }
+.hb-count { position: absolute; top: 2px; right: 4px; font-size: 10px; font-weight: 900; }
+.hb-wear { position: absolute; left: 6px; right: 6px; bottom: 5px; height: 4px; border-radius: 3px; background: rgba(0, 0, 0, 0.5); overflow: hidden; }
+.hb-wear u { display: block; height: 100%; background: #f4a640; text-decoration: none; }
+.hb-wear u.low { background: #ff5a5a; }
+.use-btn {
+  position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(74px + env(safe-area-inset-bottom)); z-index: 6;
+  padding: 10px 22px; border-radius: 24px; border: 2px solid var(--navy); font-weight: 900; font-size: 16px; letter-spacing: 0.5px;
+  background: linear-gradient(#ffd166, #f4a640); color: #3a2410; box-shadow: 0 4px 0 var(--navy); pointer-events: auto;
+}
+.use-btn:active { transform: translateX(-50%) translateY(3px); box-shadow: 0 1px 0 var(--navy); }
+.use-btn.hidden { display: none; }
+body.in-cut .hotbar, body.in-cut .use-btn { visibility: hidden; }
+
+/* 📦 Two-column storage (the workbench) */
+.store { position: absolute; inset: 0; z-index: 15; display: flex; align-items: center; justify-content: center; background: rgba(0, 0, 0, 0.35); padding: 16px; }
+.store.hidden { display: none; }
+.store-box { width: min(440px, 100%); background: #fffaf0; border: 2px solid var(--navy); border-radius: 18px; padding: 12px; box-shadow: 0 6px 0 var(--navy); color: #2a2017; }
+.store-cols { display: flex; gap: 8px; align-items: stretch; }
+.store-col { flex: 1; min-width: 0; background: #f3e6cc; border-radius: 12px; padding: 8px; display: flex; flex-direction: column; gap: 6px; }
+.store-col h4 { margin: 0 0 2px; font-size: 13px; }
+.store-mid { align-self: center; font-size: 20px; opacity: 0.6; }
+.store-item { display: flex; align-items: center; gap: 6px; padding: 8px; border-radius: 10px; border: 1.5px solid #c9b48a; background: #fff; font-size: 20px; text-align: left; }
+.store-item b { font-size: 15px; }
+.store-item small { font-size: 11px; opacity: 0.7; }
+.store-all { padding: 6px; border-radius: 10px; border: 1.5px solid var(--navy); background: #e7f0ff; font-weight: 800; font-size: 12px; }
+.store-empty { margin: 4px 0; font-size: 13px; opacity: 0.6; }
+.store-close { margin-top: 10px; width: 100%; }
+
+/* 🎒 tools at the top of the backpack panel */
+.inv-tools { display: flex; flex-direction: column; gap: 4px; width: 100%; margin-bottom: 6px; }
+.inv-tool { display: flex; align-items: center; gap: 6px; font-size: 16px; }
+.inv-tool span { font-size: 12px; font-weight: 800; min-width: 70px; }
+.inv-tool i { flex: 1; height: 6px; border-radius: 4px; background: rgba(255, 255, 255, 0.2); overflow: hidden; }
+.inv-tool u { display: block; height: 100%; background: #f4a640; text-decoration: none; }
+
+/* 💬 a one-time pointer at something on screen */
+.coach {
+  position: absolute; z-index: 14; padding: 10px 12px; border-radius: 14px; background: #fffaf0; color: #2a2017;
+  border: 2px solid var(--navy); box-shadow: 0 4px 0 var(--navy); font-size: 13px; line-height: 1.35; pointer-events: auto;
+  animation: talkIn 0.2s ease-out;
+}
+.coach::before {
+  content: ''; position: absolute; top: -9px; left: calc(var(--arrow, 50%) - 8px); width: 14px; height: 14px;
+  background: #fffaf0; border-left: 2px solid var(--navy); border-top: 2px solid var(--navy); transform: rotate(45deg);
+}
+.coach-glow { animation: coachGlow 0.9s ease-in-out infinite; border-radius: 10px; }
+@keyframes coachGlow { 50% { box-shadow: 0 0 0 4px rgba(255, 209, 102, 0.9); } }
+.hotbar.coach-glow { animation: coachGlow 0.9s ease-in-out infinite; }
+
+/* ❤️ red screen edges while you're out of water */
+.vignette { position: absolute; inset: 0; z-index: 4; pointer-events: none; opacity: 0; transition: opacity 0.4s; box-shadow: inset 0 0 90px 30px rgba(220, 20, 20, 0.75); }
+.vignette.on { opacity: 1; animation: vigPulse 1.1s ease-in-out infinite; }
+@keyframes vigPulse { 50% { opacity: 0.55; } }
+.hero-btn { width: 100%; margin: 4px 0 8px; }
+/* (cards and panels like your stats sit above the story's hotbar) */
+.overlay { z-index: 9; }

@@ -34,7 +34,7 @@ import { castPerson, CastId, Want } from '../actors/cast';
 import { makeRex, roar, RexParts } from '../actors/rex';
 import { makeHerbivore, HerbParts } from '../actors/herbivore';
 import { Flyers, ItemType, Stack, StackItem } from '../world/items';
-import { TextSprite, makePad, titleTag } from '../world/labels';
+import { TextSprite, titleTag } from '../world/labels';
 import { Blocker, CashPad, UnlockTile, Zone, gridLayout } from '../world/stations';
 import { Step, Tutorial, TutorialScript } from '../world/tutorial';
 import { stepTo } from '../world/airportWorld';
@@ -42,6 +42,7 @@ import { buildAircraftModel } from '../world/aircraft';
 import type { MapView } from '../ui/minimap';
 import { Dialogue, Line } from './dialogue';
 import { Cutscene, glide } from './cutscene';
+import { BackBundle, HandTool, Hotbar, HotbarSlot, Inventory, StorePanel, ToolKind, TOOL_ICON, TOOL_NAME, coach } from './backpack';
 import * as D from './storyData';
 
 const { P, T, HOME_X } = D;
@@ -81,6 +82,19 @@ function setShown(o: THREE.Object3D, on: boolean) {
 /** Items that are part of the story (never dropped when you pass out). */
 const STORY_ITEMS: ItemType[] = ['fuel', 'mast', 'radio', 'antfarm', 'clothes'];
 
+/** How close you need to be to give or take (v0.66: no more stepping onto a pad). */
+const CLOSE = 2.6;
+/** A soft ring on the ground (where a pile or a target is), instead of v0.65's dashed pads. */
+function groundRing(r: number, color: string) {
+  const m = new THREE.Mesh(
+    new THREE.RingGeometry(r - 0.12, r, 40),
+    new THREE.MeshBasicMaterial({ color: new THREE.Color(color), transparent: true, opacity: 0.55, depthWrite: false }),
+  );
+  m.rotation.x = -Math.PI / 2;
+  m.position.y = 0.05;
+  return m;
+}
+
 // ----------------------------------------------------------------------------
 // A pile you take things from (the dresser, the fallen trees, the berry bush, the fuel shed)
 // ----------------------------------------------------------------------------
@@ -92,10 +106,8 @@ class Pile {
   constructor(parent: THREE.Object3D, x: number, z: number, public type: ItemType, count: number, max: number, public regrow: number, private flyers: Flyers, padColor = '#ffe07a', cols = 3) {
     this.group.position.set(x, 0, z);
     parent.add(this.group);
-    const pad = makePad(2.8, 2.8, '', padColor);
-    pad.position.y = 0.04;
-    this.group.add(pad);
-    this.zone = new Zone(this.wx(x), z, 1.5, 1.5);
+    this.group.add(groundRing(1.5, padColor));
+    this.zone = new Zone(this.wx(x), z, CLOSE, CLOSE);
     this.stack = new Stack(this.group, gridLayout(cols, 2, type === 'log' ? 0.42 : 0.5, 0.75, 0.1), max);
     for (let i = 0; i < count; i++) this.stack.addInstant(type);
   }
@@ -125,10 +137,9 @@ class Bin {
   constructor(parent: THREE.Object3D, x: number, z: number, max: number, w = 2.8, label = '', color = '#4fe3ff', y0 = 0.08, cols = 3) {
     this.group.position.set(x, 0, z);
     parent.add(this.group);
-    this.pad = makePad(w, w, '', color);
-    this.pad.position.y = 0.04;
+    this.pad = groundRing(Math.max(1.1, w * 0.55), color);
     this.group.add(this.pad);
-    this.zone = new Zone(x + parent.position.x, z, w / 2 + 0.2, w / 2 + 0.2);
+    this.zone = new Zone(x + parent.position.x, z, Math.max(CLOSE, w / 2 + 0.2), Math.max(CLOSE, w / 2 + 0.2));
     this.stack = new Stack(this.group, gridLayout(cols, 2, 0.5, 0.6, y0), max);
     if (label) {
       this.sign = new TextSprite(0.6, '#ffffff');
@@ -150,6 +161,16 @@ class Bin {
   }
   show(on: boolean) {
     this.group.visible = on;
+  }
+  /** The sign's text (only redrawn when it changes). */
+  private signText = '';
+  setSign(text: string) {
+    if (!this.sign) {
+      this.sign = new TextSprite(0.55, '#ffffff');
+      this.sign.sprite.position.set(0, 2.6, 0);
+      this.group.add(this.sign.sprite);
+    }
+    if (text !== this.signText) this.sign.setText((this.signText = text));
   }
 }
 
@@ -214,6 +235,26 @@ export class StoryWorld {
   private workshop: Bin;
   private workshopSign = new TextSprite(0.5, '#ffd166');
   private told = new Set<string>(); // (one-time tips: "you need a stone", "you need a hatchet")
+  // 🎒 v0.66: the backpack, the tool hotbar, the tool in your hand, the pack on your back
+  inv: Inventory;
+  private hotbar = new Hotbar();
+  private hand: HandTool;
+  private bundle = new BackBundle();
+  private store = new StorePanel();
+  private backIn!: Stack;   // (things fly into your back, then go in the backpack)
+  private backOut!: Stack;  // (things come out of your back and fly to where they're going)
+  private hitFrom!: Stack;  // (a branch / log appears where you hit, then flies to your back)
+  private slots: (ToolKind | null)[] = [null, null, null, null, null];
+  private held = -1;
+  private benchZone = new Zone(0, 0, CLOSE + 1, CLOSE + 1);
+  private fireGhost: THREE.Object3D | null = null;
+  private benchGhost: THREE.Object3D | null = null;
+  // 💧 thirst warnings
+  private thirstLevel = 3; // 3 = fine, 2 = under 50%, 1 = under 25%, 0 = empty
+  private vignette = document.createElement('div');
+  private raeBark = new TextSprite(0.7, '#ffffff');
+  private raeBarkT = 0;
+  private lastBark = -999;
   private campfire: Bin;
   private fireObj = new THREE.Group();
   private flames: THREE.Mesh[] = [];
@@ -228,7 +269,7 @@ export class StoryWorld {
   private runner: Worker | null = null;
   private radio: Bin;
   private dino: CreatureModel & { herb: HerbParts };
-  private dinoZone = new Zone(0, 0, 2.4, 2.4);
+  private dinoZone = new Zone(0, 0, CLOSE, CLOSE);
   private dinoFeed: Stack;
   private dinoLoad: Stack;
   private trapLog: THREE.Group;
@@ -301,7 +342,7 @@ export class StoryWorld {
     this.stones = new Pile(I, P.stones.x, P.stones.z, 'stone', T.stonePile, T.stonePile, T.stoneRegrow, this.flyers, '#ffe07a', 2);
     this.fiber = new Pile(I, P.ferns.x, P.ferns.z, 'fiber', T.fiberPile, T.fiberPile, T.fiberRegrow, this.flyers, '#ffe07a', 3);
     this.saplingZone = new Zone(P.saplings.x, P.saplings.z, 1.8, 1.8);
-    this.workshop = new Bin(I, P.workshop.x, P.workshop.z, T.spares.stone + T.spares.branch + T.spares.fiber, 2.4, '', '#ffd23f', 0.1, 3);
+    this.workshop = new Bin(I, P.workshop.x, P.workshop.z, T.hatchet.stone + T.hatchet.branch + T.hatchet.fiber, 2.4, '', '#ffd23f', 0.1, 3);
     this.workshopSign.sprite.position.set(0, 2.4, 0);
     this.workshop.group.add(this.workshopSign.sprite);
     this.berries = new Pile(I, P.berries.x, P.berries.z, 'berry', T.berryPile, T.berryPile, T.berryRegrow, this.flyers, '#ffe07a', 3);
@@ -355,9 +396,22 @@ export class StoryWorld {
     // ------------------------------------------------------------------ you
     const me = castPerson(this.heroId, this.heroWant, P.human);
     this.player = new Player(this.scene, { model: me, spot: handsSpot(me) });
+    this.inv = new Inventory(this.capacity());
+    this.hand = new HandTool(this.scene);
+    this.hitFrom = new Stack(this.islandG, (_i, _t, out) => out.copy(this.hitPoint), 99);
+    this.attachPlayerBits();
+    this.hotbar.onTap = (i) => this.tapSlot(i);
+    this.hotbar.onUse = () => this.useNow();
+    this.benchZone.x = P.bench.x;
+    this.benchZone.z = P.bench.z + 1;
+    this.vignette.className = 'vignette';
+    document.getElementById('hud')!.appendChild(this.vignette);
+    this.raeBark.sprite.visible = false;
+    this.islandG.add(this.raeBark.sprite);
+    this.makeGhosts();
     this.restore();
     this.needsEl.className = 'needs hidden';
-    this.needsEl.innerHTML = `<div class="need water"><span>💧</span><i><b></b></i></div><div class="need health hidden"><span>❤️</span><i><b></b></i></div><div class="need tool hidden"><span>🪓</span><i><b></b></i></div>`;
+    this.needsEl.innerHTML = `<div class="need water"><span>💧</span><i><b></b></i></div><div class="need health hidden"><span>❤️</span><i><b></b></i></div>`;
     document.querySelector('#hud .tr')?.prepend(this.needsEl);
     this.tutorial = new Tutorial(this, hud, save, storySteps(this));
     this.camera.position.copy(this.player.pos).add(this.camOffset);
@@ -395,7 +449,13 @@ export class StoryWorld {
     st.z = p.z;
     st.ry = this.player.model.root.rotation.y;
     st.area = this.area;
-    st.carry = this.player.stack.items.map((it) => it.type);
+    st.carry = [];
+    // (what's still flying into your back counts as yours)
+    const inv = new Map(this.inv.counts);
+    for (const it of this.backIn.items) inv.set(it.type, (inv.get(it.type) ?? 0) + 1);
+    st.inv = Object.fromEntries(inv);
+    st.hotbar = [...this.slots];
+    st.held = this.held;
     st.plots.campfire = this.campfire.count();
     st.plots.bench = this.benchPlot.count();
     st.plots['ws-stone'] = this.workshop.count('stone');
@@ -459,7 +519,13 @@ export class StoryWorld {
     this.setArea(st.area);
     this.player.pos.set(st.x, 0, st.z);
     this.player.model.root.rotation.y = st.ry;
-    for (const t of st.carry) this.player.stack.addInstant(t as ItemType);
+    // 🎒 the backpack (older saves carried things in their arms: those go in the backpack)
+    this.inv.load(st.inv);
+    for (const t of st.carry ?? []) this.inv.add(t as ItemType);
+    st.carry = [];
+    this.slots = (st.hotbar ?? [null, null, null, null, null]).map((k) => (k as ToolKind | null) ?? null);
+    this.held = st.held ?? -1;
+    this.refreshTools();
   }
 
   // --------------------------------------------------------------------------
@@ -758,8 +824,8 @@ export class StoryWorld {
     tsa.setText('🌿 SAPLINGS: USE A STONE');
     tsa.sprite.position.set(P.saplings.x, 4.4, P.saplings.z - 2.2);
     I.add(tsa.sprite);
-    const pad = makePad(3.6, 3.6, '', '#ffe07a');
-    pad.position.set(P.saplings.x, 0.04, P.saplings.z);
+    const pad = groundRing(1.6, '#ffe07a');
+    pad.position.set(P.saplings.x, 0.05, P.saplings.z);
     I.add(pad);
     // Ferns: fans of long green leaves
     const fern = new THREE.MeshStandardMaterial({ color: 0x3f8f3a, roughness: 0.85, side: THREE.DoubleSide });
@@ -909,6 +975,7 @@ export class StoryWorld {
     half1.rotation.x = 0.28;
     const half2 = box(1.6, 0.14, 5.4, white, -0.3, 0.4, 7.2);
     half2.rotation.set(0.12, 0.5, 0.25);
+    half2.userData.onGround = true; // (solid: v0.66, it used to be skipped and you walked over it)
     const tip = box(1.0, 0.3, 0.6, mat(0xc0392b, 0.45), -0.6, 1.4, -5.4);
     broken.add(half1, half2, tip);
     for (let i = 0; i < 5; i++) broken.add(box(0.3 + i * 0.1, 0.06, 0.4, white, -2 + i * 0.9, 0.08, 4 + (i % 2) * 1.5));
@@ -979,13 +1046,16 @@ export class StoryWorld {
     this.wreckBlocked = true;
     this.plane.root.updateMatrixWorld(true);
     const box3 = new THREE.Box3();
+    void box3;
     for (const piece of this.plane.broken.children) {
-      box3.setFromObject(piece);
-      if (box3.max.y > 1.6) continue; // (the half still on the plane is up high: you walk under it)
-      const c = box3.getCenter(new THREE.Vector3());
-      const sz = box3.getSize(new THREE.Vector3());
-      if (sz.x < 0.6 && sz.z < 0.6) continue; // (little bits of debris: step over them)
-      this.solid(c.x, c.z, sz.x / 2, sz.z / 2, piece);
+      if (!piece.userData.onGround) continue; // (the half still on the plane is up high; small debris you step over)
+      // A row of small boxes along its length (one big box round a slanted slab would block empty ground too)
+      const g = (piece as THREE.Mesh).geometry as THREE.BoxGeometry;
+      const len = g.parameters.depth;
+      for (let k = -0.5; k <= 0.5001; k += 1 / 6) {
+        const at = piece.localToWorld(new THREE.Vector3(0, 0, k * len));
+        this.solid(at.x, at.z, 0.75, 0.75, piece);
+      }
     }
   }
 
@@ -1124,6 +1194,9 @@ export class StoryWorld {
     this.nest.show(on && !!f.antsSeen && !f.runner);
     this.radio.show(on);
     this.nestObj.visible = !!f.crash;
+    // (see-through ghosts of what you're about to build)
+    if (this.fireGhost) this.fireGhost.visible = on && !f.campfire;
+    if (this.benchGhost) this.benchGhost.visible = on && !!f.campfire && !f.bench;
   }
 
   /** 🐜 Your first helper: an ant carrying logs from the fallen trees to the workbench. */
@@ -1187,7 +1260,7 @@ export class StoryWorld {
 
   /** How many of an item you carry. */
   carrying(type: ItemType) {
-    return this.player.stack.items.filter((it) => it.type === type).length;
+    return this.inv.count(type);
   }
 
   /** Something is happening that you watch instead of play. */
@@ -1232,9 +1305,13 @@ export class StoryWorld {
     me.carryMax = CONFIG.player.baseCarry + prog.carryBonus;
     me.speedMult = prog.speedMult * 1.15;
     const still = new THREE.Vector2();
-    me.update(dt, busy ? still : move, this.area === 'home' ? this.blockersHome : this.blockersIsland, this.canWalk);
+    me.update(dt, busy || this.store.open ? still : move, this.area === 'home' ? this.blockersHome : this.blockersIsland, this.canWalk);
+    this.hand.update(dt);
     this.flyers.update(dt);
-    this.hud.setInventory(me.stack.counts(), me.stack.count, me.carryMax);
+    this.absorb();
+    this.inv.cap = this.capacity();
+    this.bundle.update(this.inv);
+    this.renderInventory();
     this.tutorial.update(dt, !busy);
     if (this.area === 'home') this.updateHome(dt, busy);
     else this.updateIsland(dt, busy);
@@ -1275,22 +1352,16 @@ export class StoryWorld {
       return;
     }
     if (!f.called) return;
-    // 👕 clothes from the dresser, 🐜 the ant farm from the desk, into the suitcase
-    this.every(this.dresser, dt, this.dresser.zone.contains(p) && this.player.canTake() && this.dresser.stack.count > 0, iv, () => {
-      if (this.flyers.transfer(this.dresser.stack, this.player.stack)) this.sfx.pickup();
-    });
-    this.every(this.desk, dt, this.desk.zone.contains(p) && this.player.canTake() && this.desk.stack.count > 0, iv, () => {
-      if (this.flyers.transfer(this.desk.stack, this.player.stack)) this.sfx.pickup();
-    });
-    const packable = (['clothes', 'antfarm'] as ItemType[]).find((t) => this.player.stack.has(t));
-    this.every(this.suitcase, dt, this.suitcase.zone.contains(p) && !!packable, iv, () => {
-      const t = (['clothes', 'antfarm'] as ItemType[]).find((k) => this.player.stack.has(k));
-      if (!t || !this.flyers.transferType(this.player.stack, this.suitcase.stack, t)) return;
-      this.sfx.drop();
-      this.progress.addXp(4);
-      if (t === 'clothes') f.clothes = (f.clothes ?? 0) + 1;
-      else f.antsPacked = 1;
-    });
+    // 👕 clothes from the dresser, 🐜 the ant farm from the desk (into your backpack), then into the suitcase
+    this.takeFrom(this.dresser, dt, this.dresser.zone, this.dresser.stack, 'clothes', true, iv);
+    this.takeFrom(this.desk, dt, this.desk.zone, this.desk.stack, 'antfarm', true, iv);
+    for (const t of ['clothes', 'antfarm'] as ItemType[]) {
+      this.giveTo(this.suitcase, dt, this.suitcase.zone, this.suitcase.stack, t, true, iv, () => {
+        this.progress.addXp(4);
+        if (t === 'clothes') f.clothes = (f.clothes ?? 0) + 1;
+        else f.antsPacked = 1;
+      });
+    }
     if ((f.clothes ?? 0) >= 2 && f.antsPacked && !f.packedLine) {
       this.run(async () => {
         await this.say(D.PACKED);
@@ -1324,45 +1395,35 @@ export class StoryWorld {
 
     const iv = CONFIG.player.pickupInterval / this.progress.workMult;
     const take = (key: object, zone: Zone, from: Stack, type: ItemType, ok = true, onTake?: () => void) =>
-      this.every(key, dt, ok && zone.contains(p) && me.canTake(type) && from.canPop(), iv, () => {
-        if (me.canTake(type) && this.flyers.transfer(from, me.stack)) {
-          this.sfx.pickup();
-          this.progress.addXp(CONFIG.xp.pickup);
-          onTake?.();
-        }
-      });
+      this.takeFrom(key, dt, zone, from, type, ok, iv, onTake);
     const drop = (key: object, zone: Zone, to: Stack, type: ItemType, ok = true, onDrop?: (it: StackItem) => void) =>
-      this.every(key, dt, ok && zone.contains(p) && me.stack.has(type) && !to.full, iv, () => {
-        const it = !to.full ? this.flyers.transferType(me.stack, to, type) : null;
-        if (!it) return;
-        this.sfx.drop();
-        this.progress.addXp(CONFIG.xp.drop);
-        onDrop?.(it);
-      });
+      this.giveTo(key, dt, zone, to, type, ok, iv, onDrop);
+    void me;
 
     // ⛽ the fuel shed (two cans), and leaving them by the plane
     take(this.fuel, this.fuel.zone, this.fuel.stack, 'fuel', true, () => (f.fuelTaken = (f.fuelTaken ?? 0) + 1));
     drop(this.fuelDrop, this.fuelDrop.zone, this.fuelDrop.stack, 'fuel', !!f.back, () => (st.fed.fuel += 1));
-    // 🪨 stones, 🌱 fiber; 🌿 branches knocked off the saplings with a stone; 🪓 the hatchet from Rae
-    const under = (t: ItemType) => this.carrying(t) < (T.carryCap[t] ?? 99);
-    take(this.stones, this.stones.zone, this.stones.stack, 'stone', !!f.back && under('stone'));
-    take(this.fiber, this.fiber.zone, this.fiber.stack, 'fiber', !!f.back && under('fiber'));
-    this.knockBranches(dt, !!f.back);
-    // (Rae keeps spares too, up to a few of each: your hands don't stay full of leftovers, and the next
-    // hatchet is ready to make when this one breaks. Counting ones still in the air, so nothing overfills.)
+    // 🪨 stones, 🌱 fiber, 🍓 berries, 🪵 loose logs (your ants chew them loose) go into your backpack
+    take(this.stones, this.stones.zone, this.stones.stack, 'stone', !!f.back);
+    take(this.fiber, this.fiber.zone, this.fiber.stack, 'fiber', !!f.back);
+    take(this.logs, this.logs.zone, this.logs.stack, 'log', !!f.back);
+    take(this.berries, this.berries.zone, this.berries.stack, 'berry', !!f.back);
+    // 🌿 / 🪵 with a tool in your hand: knock branches off the saplings, chop logs at the fallen trees
+    this.useTools(dt);
+    // 🪓 Rae takes what she needs for a hatchet (when you don't have a working one). Counting ones still in
+    // the air, so she never takes more than the recipe.
     for (const t of ['stone', 'branch', 'fiber'] as const) {
       const inBin = this.workshop.stack.items.filter((it) => it.type === t).length;
-      drop(this.workshop, this.workshop.zone, this.workshop.stack, t, !!f.back && inBin < T.spares[t]);
+      drop(this.workshop, this.workshop.zone, this.workshop.stack, t, !!f.back && st.tools.hatchet <= 0 && st.tools.raeT === 0 && inBin < T.hatchet[t]);
     }
-    // 🪵 logs: ones lying there (your ants chewed them loose), else chop them with your hatchet
-    take(this.logs, this.logs.zone, this.logs.stack, 'log', !!f.back);
-    this.chop(dt, !!f.back);
-    take(this.berries, this.berries.zone, this.berries.stack, 'berry', !!f.back && this.carrying('berry') < (T.carryCap.berry ?? 99));
-    // 🔥 the fire pit, 🛠️ the workbench plot, then the workbench itself
+    // 🔥 the fire pit and 🛠️ the workbench site take the logs they still need; the workbench takes what
+    // the radio mast needs (more goes in with 📦 Open), and hands you the mast once it's made
     drop(this.campfire, this.campfire.zone, this.campfire.stack, 'log', !!f.back && !f.campfire);
     drop(this.benchPlot, this.benchPlot.zone, this.benchPlot.stack, 'log', !!f.campfire && !f.bench);
-    drop(this.benchIn, this.benchIn.zone, this.benchIn.stack, 'log', !!f.bench);
-    take(this.benchOut, this.benchOut.zone, this.benchOut.stack, 'mast', !!f.bench);
+    const mastWants = !f.mast && st.bench.t === 0 && st.bench.made === 0 && this.benchOut.count('mast') === 0 && this.carrying('mast') === 0;
+    const inBench = this.benchIn.stack.items.filter((it) => it.type === 'log').length;
+    drop(this.benchIn, this.benchZone, this.benchIn.stack, 'log', !!f.bench && mastWants && inBench < T.mast);
+    take(this.benchOut, this.benchZone, this.benchOut.stack, 'mast', !!f.bench);
     // 🐜 berries for the ants
     drop(this.nest, this.nest.zone, this.nest.stack, 'berry', !!f.antsSeen && !f.runner, () => (st.fed.ants += 1));
     // 📡 the mast onto the plane
@@ -1372,6 +1433,9 @@ export class StoryWorld {
     this.dinoZone.z = this.dino.root.position.z;
     drop(this.dinoFeed, this.dinoZone, this.dinoFeed, 'berry', st.dino.state === 'free', () => (st.fed.dino += 1));
 
+    if (f.back && !f.campfire) this.campfire.setSign(`🔥 CAMPFIRE: 🪵 ${this.campfire.count()}/${T.campfire}`);
+    if (f.campfire && !f.bench) this.benchPlot.setSign(`🛠️ WORKBENCH: 🪵 ${this.benchPlot.count()}/${T.bench}`);
+    if (st.fed.ants < T.antFeed && f.antsSeen && !f.runner) this.nest.setSign(`🐜 FEED THE ANTS: 🍓 ${this.nest.count()}/${T.antFeed}`);
     if (this.campfire.count() >= T.campfire && !f.campfire) {
       this.buildCampfire();
       this.sfx.unlocked();
@@ -1573,7 +1637,10 @@ export class StoryWorld {
     this.st.water = 100;
     await this.say(D.LANDING);
     this.progress.addXp(15);
-    this.hud.banner('💧 Water', 'It drains while you explore. Drink at the stream (stand in it).', 3400);
+    if (!f.coachWater) {
+      f.coachWater = 1;
+      window.setTimeout(() => coach(this.needsEl.querySelector('.water'), '<b>💧 Your water</b><br>It drains while you explore. Stand in the stream to drink. Keep an eye on it!', 9), 600);
+    }
   }
 
   /** 🦖 The roar: the rex wrecks the plane while you're at the research camp. */
@@ -1704,11 +1771,68 @@ export class StoryWorld {
     }
     if (st.water <= 0) st.health = Math.max(0, st.health - (100 / T.hurtSecs) * dt);
     else if (st.water > 20) st.health = Math.min(100, st.health + 4 * dt);
-    if (st.water < T.thirsty && !this.warned) {
-      this.warned = true;
-      this.hud.banner('💧 Thirsty!', 'Drink at the stream: stand in it. (North of camp, on the trail.)', 3600);
-    }
+    this.thirstWarnings(dt);
     if (st.health <= 0) this.passOut();
+  }
+
+  /**
+   * 💧 Thirst warnings, getting louder (v0.66: Joshua nearly passed out without noticing):
+   *   under 50%  a gentle toast
+   *   under 25%  the bar pulses, and the quest arrow points to the stream until you drink
+   *   empty      red screen edges and a buzz while your ❤️ drains
+   * Rae speaks up too if you walk past her thirsty.
+   */
+  private thirstWarnings(dt: number) {
+    const w = this.st.water;
+    const level = w <= 0 ? 0 : w < 25 ? 1 : w < 50 ? 2 : 3;
+    if (level < this.thirstLevel) {
+      if (level === 2) this.hud.banner('💧 Getting thirsty', 'Stop by the stream when you can.', 2200);
+      if (level === 1) {
+        this.hud.banner('💧 Thirsty!', 'Follow the arrow to the stream and stand in it to drink.', 3400);
+        this.sfx.popup();
+      }
+      if (level === 0) {
+        this.hud.banner('❤️ You\'re out of water!', 'Your health is dropping. Get to the stream, fast!', 3600);
+        this.sfx.risky();
+      }
+    }
+    this.thirstLevel = w > 55 ? 3 : Math.min(this.thirstLevel, level);
+    if (level >= 2 && w > 30) this.thirstLevel = Math.max(this.thirstLevel, level);
+    // red edges while your health drains (and a buzz, on phones that can)
+    const empty = level === 0 && this.area === 'island';
+    this.vignette.classList.toggle('on', empty);
+    if (empty && Math.floor(this.t / 3) !== Math.floor((this.t - dt) / 3)) {
+      try {
+        navigator.vibrate?.(180);
+      } catch {
+        /* (not on every phone) */
+      }
+    }
+    // ✈️ Rae: "You look parched"
+    const r = this.rae.root.position;
+    if (this.st.flags.crash && w < 40 && this.t - this.lastBark > 45 && Math.hypot(this.player.pos.x - r.x, this.player.pos.z - r.z) < 7) {
+      this.lastBark = this.t;
+      this.bark('✈️ You look parched! Stream\'s just north.');
+    }
+    if (this.raeBarkT > 0) {
+      this.raeBarkT -= dt;
+      this.raeBark.sprite.visible = this.raeBarkT > 0;
+    }
+  }
+
+  /** Rae says something without stopping the game (a line over her head for a few seconds). */
+  private bark(text: string) {
+    this.raeBark.setText(text);
+    this.raeBark.sprite.position.set(this.rae.root.position.x, 3.4, this.rae.root.position.z);
+    this.raeBark.sprite.visible = true;
+    this.raeBarkT = 4.5;
+  }
+
+  /** While you're thirsty (under 25%): the quest arrow points to the nearest bit of the stream. */
+  thirstTarget(): THREE.Vector3 | null {
+    const st = this.st;
+    if (this.area !== 'island' || !st.flags.landed || st.water >= 25 || this.busy) return null;
+    return v3(THREE.MathUtils.clamp(this.player.pos.x, -50, 50), 0, P.stream.z);
   }
 
   /** 😵 Out cold: you wake at camp (minus the ordinary things you carried). */
@@ -1720,9 +1844,8 @@ export class StoryWorld {
     window.setTimeout(() => {
       const st = this.st;
       // Drop what isn't part of the story (logs, berries)
-      const keep = this.player.stack.items.filter((it) => STORY_ITEMS.includes(it.type));
-      for (const it of this.player.stack.items) if (!keep.includes(it)) it.mesh.removeFromParent();
-      this.player.stack.items = keep;
+      for (const [t, n] of [...this.inv.counts]) if (!STORY_ITEMS.includes(t)) this.inv.remove(t, n);
+      this.refreshTools();
       const wake = st.flags.campfire ? v3(P.campfire.x - 2.5, 0, P.campfire.z + 1.5) : v3(P.spawnIsland.x, 0, P.spawnIsland.z);
       this.player.pos.copy(wake);
       st.water = 60;
@@ -1749,14 +1872,10 @@ export class StoryWorld {
     const h = this.needsEl.querySelector<HTMLElement>('.health')!;
     h.classList.toggle('hidden', st.health >= 99.5);
     h.querySelector<HTMLElement>('b')!.style.width = `${Math.round(st.health)}%`;
-    // 🪓 / 🪨 how worn your tool is (the hatchet if you have one, else the stone you're holding)
-    const tool = this.needsEl.querySelector<HTMLElement>('.tool')!;
-    const hatchet = st.tools.hatchet > 0;
-    const stone = !hatchet && this.player.stack.has('stone');
-    tool.classList.toggle('hidden', !hatchet && !stone);
-    if (hatchet || stone) {
-      tool.querySelector('span')!.textContent = hatchet ? '🪓' : '🪨';
-      tool.querySelector<HTMLElement>('b')!.style.width = `${Math.round(100 * (hatchet ? st.tools.hatchet / T.hatchetUses : st.tools.stoneHp / T.stoneUses))}%`;
+    // (the first time your health shows: what it means)
+    if (st.health < 99.5 && !st.flags.coachHealth) {
+      st.flags.coachHealth = 1;
+      coach(h, '<b>❤️ Health</b><br>With no water, your health drops. At zero you pass out and wake at camp. Drink at the stream!', 8);
     }
   }
 
@@ -1770,46 +1889,273 @@ export class StoryWorld {
     this.hud.banner(title, text, 3200);
   }
 
-  /** Standing at the saplings with a stone: a branch every so often (the stone wears down). */
-  private knockBranches(dt: number, ok: boolean) {
-    const me = this.player;
-    const tools = this.st.tools;
-    const there = ok && this.saplingZone.contains(me.pos);
-    if (there && !me.stack.has('stone')) this.tip('need-stone', '🪨 You need a stone', 'Pick up a sharp stone on the stream bank, then knock branches loose with it.');
-    const enough = this.carrying('branch') >= (T.carryCap.branch ?? 2);
-    this.every(this.saplingZone, dt, there && !enough && me.stack.has('stone') && me.canTake('branch'), T.branchSecs / this.progress.workMult, () => {
-      this.flyers.grow(me.stack.addInstant('branch').mesh, 0.25);
-      this.sfx.drop();
+  // --------------------------------------------------------------------------
+  // 🎒 The backpack (v0.66)
+  // --------------------------------------------------------------------------
+  /** How much you can carry (your Carry stat adds to it). */
+  private capacity() {
+    return 24 + this.progress.carryBonus * 3;
+  }
+
+  /** The backpack bits that ride on whoever you play: the in/out spots at your back, the pack, the tool. */
+  private attachPlayerBits() {
+    const m = this.player.model;
+    const H = m.height;
+    const back = (_i: number, _t: ItemType, out: THREE.Vector3) => out.set(0, H * 0.62, -H * 0.12);
+    this.backIn = new Stack(m.root, back, 999);
+    this.backOut = new Stack(m.root, back, 999);
+    this.bundle.attach(m);
+    this.hand.attach(m);
+  }
+
+  /** Things that have landed in your back go into the backpack. */
+  private absorb() {
+    const landed = this.backIn.items.filter((it) => !it.flying);
+    if (!landed.length) return;
+    for (const it of landed) {
+      it.mesh.removeFromParent();
+      this.inv.add(it.type);
+    }
+    this.backIn.items = this.backIn.items.filter((it) => it.flying);
+    this.refreshTools();
+  }
+
+  /** Room left in the backpack (counting what's on its way in). */
+  private room() {
+    return this.inv.cap - this.inv.total() - this.backIn.items.length;
+  }
+
+  /** Close to a pile: take one every `iv` seconds (it flies into your back). */
+  private takeFrom(key: object, dt: number, zone: Zone, from: Stack, type: ItemType, ok: boolean, iv: number, onTake?: () => void) {
+    const p = this.player.pos;
+    const can = ok && zone.contains(p) && from.canPop() && this.room() > 0;
+    if (ok && zone.contains(p) && from.canPop() && this.room() <= 0) this.tip('full', '🎒 Your backpack is full', 'Drop things where they\'re needed, or store logs at the workbench.');
+    this.every(key, dt, can, iv, () => {
+      if (this.room() <= 0 || !this.flyers.transfer(from, this.backIn)) return;
+      this.sfx.pickup();
       this.progress.addXp(CONFIG.xp.pickup);
-      this.hud.floatAt(v3(me.pos.x, 3.2, me.pos.z), this.camera, '+1 🌿', '');
-      tools.stoneHp -= 1;
-      if (tools.stoneHp <= 0) {
-        me.stack.popType('stone')?.mesh.removeFromParent();
-        tools.stoneHp = T.stoneUses;
-        this.sfx.trash();
-        this.hud.banner('🪨 Your stone went dull and cracked', me.stack.has('stone') ? 'Good thing you brought another.' : 'Grab another on the stream bank.', 2800);
-      }
+      onTake?.();
     });
   }
 
-  /** At the fallen trees with a hatchet: chop a log every so often (the hatchet wears). */
-  private chop(dt: number, ok: boolean) {
-    const me = this.player;
-    const tools = this.st.tools;
-    const there = ok && this.logs.zone.contains(me.pos); // (you chop even while the ants' loose logs lie there)
-    if (there && tools.hatchet <= 0) this.tip('need-hatchet', '🪓 You need a hatchet', 'These trunks are too thick to break by hand. Rae can make you a hatchet.');
-    this.every(this.logs.stack, dt, there && tools.hatchet > 0 && me.canTake('log'), T.chopSecs / this.progress.workMult, () => {
-      this.flyers.grow(me.stack.addInstant('log').mesh, 0.25);
+  /** Close to something that wants `type`: give it one every `iv` seconds (it flies out of your back). */
+  private giveTo(key: object, dt: number, zone: Zone, to: Stack, type: ItemType, ok: boolean, iv: number, onGive?: (it: StackItem) => void) {
+    const p = this.player.pos;
+    this.every(key, dt, ok && zone.contains(p) && this.inv.has(type) && !to.full, iv, () => {
+      if (to.full || !this.inv.remove(type)) return;
+      this.backOut.addInstant(type);
+      const it = this.flyers.transferType(this.backOut, to, type);
+      if (!it) {
+        this.backOut.popType(type)?.mesh.removeFromParent();
+        this.inv.add(type);
+        return;
+      }
       this.sfx.drop();
-      this.progress.addXp(CONFIG.xp.pickup);
-      this.hud.floatAt(v3(me.pos.x, 3.2, me.pos.z), this.camera, '+1 🪵', '');
+      this.progress.addXp(CONFIG.xp.drop);
+      this.refreshTools();
+      onGive?.(it);
+    });
+  }
+
+  /** The 🎒 panel: what you carry, with your tools (and how worn they are) on top. */
+  private renderInventory() {
+    const tools = this.slots
+      .filter((k): k is ToolKind => !!k)
+      .map((k) => ({ icon: TOOL_ICON[k], label: k === 'stone' ? `${TOOL_NAME[k]} ×${this.inv.count('stone')}` : TOOL_NAME[k], wear: this.wear(k) }));
+    const counts = new Map(this.inv.counts);
+    this.hud.setInventory(counts, this.inv.total(), this.inv.cap, tools);
+    // ⚒️ the hotbar (on the island, once you're back at camp)
+    const showBar = this.area === 'island' && !!this.st.flags.back && !this.cut.active;
+    this.hotbar.show(showBar);
+    if (showBar) this.hotbar.render(this.slots.map((k): HotbarSlot | null => (k ? { kind: k, wear: this.wear(k), count: k === 'stone' ? this.inv.count('stone') : undefined } : null)), this.held);
+  }
+
+  // --------------------------------------------------------------------------
+  // ⚒️ Tools: the hotbar, the tool in your hand, the swing (automatic while close, a tap swings faster)
+  // --------------------------------------------------------------------------
+  private hasTool(k: ToolKind) {
+    return k === 'hatchet' ? this.st.tools.hatchet > 0 : this.inv.has('stone');
+  }
+  private wear(k: ToolKind) {
+    return k === 'hatchet' ? this.st.tools.hatchet / T.hatchetUses : this.st.tools.stoneHp / T.stoneUses;
+  }
+  /** Tools you have go in the first free slot; ones you don't have any more leave it. */
+  private refreshTools() {
+    this.slots.forEach((k, i) => {
+      if (k && !this.hasTool(k)) {
+        this.slots[i] = null;
+        if (this.held === i) this.held = -1;
+      }
+    });
+    for (const k of ['hatchet', 'stone'] as ToolKind[]) {
+      if (!this.hasTool(k) || this.slots.includes(k)) continue;
+      const i = this.slots.indexOf(null);
+      if (i < 0) continue;
+      this.slots[i] = k;
+      // (a new tool goes straight into your hand, with a pointer to the hotbar the first time)
+      this.held = i;
+      if (!this.st.flags[`coach-${k}`] && this.st.flags.back) {
+        this.st.flags[`coach-${k}`] = 1;
+        window.setTimeout(() => coach(this.hotbar.el, k === 'stone'
+          ? '<b>🪨 Your stone is in your hand</b><br>Your tools live down here. Tap one to hold it, tap again to put it away.'
+          : '<b>🪓 Your hatchet is in your hand</b><br>Stand at the fallen trees to chop. Tap 🪓 CHOP to swing faster. The bar shows its wear.', 8), 400);
+      }
+    }
+    this.hand.hold(this.held >= 0 ? this.slots[this.held] : null);
+  }
+  private tapSlot(i: number) {
+    if (!this.slots[i]) return;
+    this.held = this.held === i ? -1 : i;
+    this.hand.hold(this.held >= 0 ? this.slots[this.held] : null);
+    this.sfx.pickup();
+  }
+  private heldKind(): ToolKind | null {
+    return this.held >= 0 ? this.slots[this.held] : null;
+  }
+
+  /** Where your tool would work right now (and what it gives). */
+  private toolTarget(): { kind: ToolKind; label: string; at: THREE.Vector3; give: ItemType } | null {
+    if (this.area !== 'island' || !this.st.flags.back) return null;
+    const p = this.player.pos;
+    if (this.saplingZone.contains(p)) return { kind: 'stone', label: '🪨 KNOCK', at: v3(P.saplings.x, 1.6, P.saplings.z - 2.2), give: 'branch' };
+    if (this.logs.zone.contains(p)) return { kind: 'hatchet', label: '🪓 CHOP', at: v3(P.logs.x, 0.8, P.logs.z - 3.6), give: 'log' };
+    return null;
+  }
+
+  private hitPoint = new THREE.Vector3();
+  /** A swing landed: the branch / log appears where you hit and flies into your back; the tool wears. */
+  private strike(kind: ToolKind, give: ItemType, at: THREE.Vector3) {
+    if (this.room() <= 0) return;
+    const tools = this.st.tools;
+    this.hitPoint.copy(at);
+    this.hitFrom.addInstant(give);
+    this.flyers.transfer(this.hitFrom, this.backIn);
+    this.sfx.drop();
+    this.progress.addXp(CONFIG.xp.pickup);
+    this.hud.floatAt(v3(this.player.pos.x, 3.4, this.player.pos.z), this.camera, give === 'log' ? '+1 🪵' : '+1 🌿', '');
+    if (kind === 'stone') {
+      tools.stoneHp -= 1;
+      if (tools.stoneHp <= 0) {
+        this.inv.remove('stone');
+        tools.stoneHp = T.stoneUses;
+        this.sfx.trash();
+        this.hud.banner('🪨 Your stone went dull and cracked', this.inv.has('stone') ? 'Good thing you brought another.' : 'Grab another on the stream bank.', 2800);
+      }
+    } else {
       tools.hatchet -= 1;
       if (tools.hatchet <= 0) {
         tools.hatchet = 0;
         this.sfx.trash();
         this.hud.banner('🪓 Your hatchet broke!', 'Bring Rae another stone, branch and 2 fiber for a new one.', 3400);
       }
+    }
+    this.refreshTools();
+  }
+
+  /** Close to the saplings / fallen trees: swing on your own (if the right tool is in your hand). */
+  private useTools(dt: number) {
+    const tgt = this.toolTarget();
+    const ready = !!tgt && this.heldKind() === tgt.kind && this.hasTool(tgt.kind) && this.room() > 0;
+    const nearBench = !!this.st.flags.bench && this.benchZone.contains(this.player.pos);
+    this.hotbar.setUse(ready ? tgt!.label : nearBench ? '📦 OPEN WORKBENCH' : null);
+    if (tgt && !ready) {
+      if (!this.hasTool(tgt.kind)) {
+        if (tgt.kind === 'stone') this.tip('need-stone', '🪨 You need a stone', 'Pick up a sharp stone on the stream bank, then knock branches loose with it.');
+        else this.tip('need-hatchet', '🪓 You need a hatchet', 'These trunks are too thick to break by hand. Rae can make you a hatchet.');
+      } else if (this.heldKind() !== tgt.kind) {
+        this.tip(`hold-${tgt.kind}`, `${TOOL_ICON[tgt.kind]} Hold your ${TOOL_NAME[tgt.kind].toLowerCase()}`, `Tap the ${TOOL_ICON[tgt.kind]} in your hotbar (bottom of the screen) to put it in your hand.`);
+      }
+    }
+    const every = (tgt?.kind === 'hatchet' ? T.chopSecs : T.branchSecs) / this.progress.workMult;
+    this.every(this.hand, dt, ready, every, () => {
+      const t = tgt!;
+      faceToward(this.player.model, t.at.x - this.player.pos.x, t.at.z - this.player.pos.z, 1, 10);
+      this.hand.swing(() => this.strike(t.kind, t.give, t.at));
     });
+  }
+
+  /** The big button: an extra (faster) swing, or open the workbench. */
+  private useNow() {
+    const tgt = this.toolTarget();
+    if (tgt && this.heldKind() === tgt.kind && this.hasTool(tgt.kind) && this.room() > 0) {
+      faceToward(this.player.model, tgt.at.x - this.player.pos.x, tgt.at.z - this.player.pos.z, 1, 10);
+      this.hand.swing(() => this.strike(tgt.kind, tgt.give, tgt.at), 0.28);
+      return;
+    }
+    if (this.st.flags.bench && this.benchZone.contains(this.player.pos)) this.openBench();
+  }
+
+  /** 📦 The workbench's storage: yours on the left, the workbench's on the right. */
+  private openBench() {
+    const icon = (t: ItemType) => (t === 'log' ? '🪵' : t === 'mast' ? '📡' : '📦');
+    this.store.show(
+      () => [
+        { title: '🎒 Your backpack', items: (['log', 'mast'] as ItemType[]).filter((t) => this.inv.has(t)).map((t) => ({ type: t, icon: icon(t), n: this.inv.count(t) })) },
+        {
+          title: '🛠️ Workbench',
+          items: [
+            ...(this.benchIn.count('log') ? [{ type: 'log' as ItemType, icon: '🪵', n: this.benchIn.count('log'), label: `of ${T.benchMax}` }] : []),
+            ...(this.benchOut.count('mast') ? [{ type: 'mast' as ItemType, icon: '📡', n: 1 }] : []),
+          ],
+        },
+      ],
+      (from, t, all) => {
+        let n = all ? 99 : 1;
+        while (n-- > 0) {
+          if (from === 0) {
+            if (t !== 'log' || this.benchIn.stack.full || !this.inv.remove('log')) break;
+            this.benchIn.stack.addInstant('log');
+          } else {
+            const bin = t === 'mast' ? this.benchOut : this.benchIn;
+            if (!bin.count(t) || this.room() <= 0) break;
+            bin.consume(1, t);
+            this.inv.add(t);
+          }
+        }
+        this.sfx.drop();
+        this.refreshTools();
+      },
+    );
+  }
+
+  /** Ghosts of what you can build (see-through, where the fire pit and the workbench will go). */
+  private makeGhosts() {
+    const ghost = (src: THREE.Object3D) => {
+      const g = src.clone(true);
+      const m = new THREE.MeshBasicMaterial({ color: 0x9fe8ff, transparent: true, opacity: 0.32, depthWrite: false });
+      const drop: THREE.Object3D[] = [];
+      g.traverse((o) => {
+        if ((o as THREE.Mesh).isMesh) {
+          (o as THREE.Mesh).material = m;
+          (o as THREE.Mesh).castShadow = false;
+        } else if ((o as THREE.Light).isLight || (o as THREE.Sprite).isSprite) drop.push(o);
+      });
+      for (const o of drop) o.removeFromParent();
+      g.visible = false;
+      this.islandG.add(g);
+      return g;
+    };
+    this.fireGhost = ghost(this.fireObj);
+    this.benchGhost = ghost(this.benchObj);
+  }
+
+  /** Swap who you play (the character card in your stats): same place, same backpack, same story. */
+  setHero(hero: NonNullable<StorySave['hero']>) {
+    this.st.hero = hero;
+    const old = this.player;
+    const model = castPerson(hero.id, { file: hero.outfit as Want['file'], pregnant: hero.pregnant }, P.human);
+    const me = new Player(this.scene, { model, spot: handsSpot(model) });
+    me.pos.copy(old.pos);
+    me.model.root.rotation.y = old.model.root.rotation.y;
+    me.setFirstPerson(old.firstPerson);
+    setShown(old.model.root, false);
+    old.model.root.removeFromParent();
+    this.player = me;
+    this.attachPlayerBits();
+    this.refreshTools();
+    this.talk.resetHero();
+    this.sync();
+    writeSave(this.save);
   }
 
   /** Rae's workshop: once it has a stone, a branch and 2 fiber, she makes a hatchet (her hands busy). */
@@ -1830,6 +2176,7 @@ export class StoryWorld {
         tools.raeT = 0;
         for (const t of ['stone', 'branch', 'fiber'] as const) this.workshop.consume(R[t], t);
         tools.hatchet = T.hatchetUses;
+        this.refreshTools(); // (it goes in your hotbar, and in your hand)
         sitPose(this.rae, 0.75);
         this.sfx.unlocked();
         this.progress.addXp(25);
@@ -1843,7 +2190,7 @@ export class StoryWorld {
     }
     this.workshopSign.setText(
       tools.hatchet > 0
-        ? `🪓 RAE'S SPARES: 🪨 ${have('stone')} 🌿 ${have('branch')} 🌱 ${have('fiber')}`
+        ? '🪓 RAE\'S WORKSHOP'
         : `🪓 HATCHET: 🪨 ${have('stone')}/${R.stone} 🌿 ${have('branch')}/${R.branch} 🌱 ${have('fiber')}/${R.fiber}`,
     );
   }
@@ -2221,6 +2568,19 @@ function sitPose(m: CreatureModel, seat: number) {
 // 🎯 Chapter 1's objectives (the quest card + arrow)
 // ============================================================================
 function storySteps(w: StoryWorld): TutorialScript {
+  const script = storyStepsPlain(w);
+  const steps = script.steps;
+  // (while you're thirsty, every step's arrow and card point to the stream first)
+  script.steps = (world) =>
+    steps(world).map((s) => ({
+      ...s,
+      text: () => (w.thirstTarget() ? '💧 You\'re thirsty! Drink at the stream (stand in it)' : s.text()),
+      target: () => w.thirstTarget() ?? s.target(),
+    }));
+  return script;
+}
+
+function storyStepsPlain(w: StoryWorld): TutorialScript {
   const at = (x: number, z: number, home = false) => v3(x + (home ? HOME_X : 0), 0, z);
   const st = () => w.st;
   const f = () => w.st.flags;
@@ -2271,7 +2631,7 @@ function storySteps(w: StoryWorld): TutorialScript {
         done: () => has('stone') >= 2 || !!f().hatchet || w.workshopHas('stone'),
       },
       {
-        text: () => '🌿 Knock a branch off the saplings with a stone (west of camp)',
+        text: () => '🌿 Hold your stone (hotbar) and knock a branch off the saplings, west of camp',
         target: () => at(P.saplings.x, P.saplings.z),
         done: () => has('branch') >= 1 || !!f().hatchet || w.workshopHas('branch'),
       },
@@ -2288,19 +2648,19 @@ function storySteps(w: StoryWorld): TutorialScript {
         done: () => !!f().hatchet,
       },
       {
-        text: () => `🪵 Chop ${T.campfire} logs at the fallen trees with your hatchet (west of camp)`,
+        text: () => `🪵 Hold your hatchet and chop ${T.campfire} logs at the fallen trees, west of camp`,
         target: () => at(P.logs.x, P.logs.z),
         progress: () => has('log') / T.campfire,
         done: () => has('log') >= T.campfire || !!f().campfire,
       },
       {
-        text: () => `🔥 Build a campfire: drop ${T.campfire} logs on the fire pit`,
+        text: () => `🔥 Build a campfire: bring ${T.campfire} logs to the fire pit`,
         target: () => (has('log') ? at(P.campfire.x, P.campfire.z) : at(P.logs.x, P.logs.z)),
         progress: () => (st().plots.campfire ?? 0) / T.campfire,
         done: () => !!f().campfire,
       },
       {
-        text: () => `🛠️ Build a workbench: ${T.bench} logs`,
+        text: () => `🛠️ Build a workbench: bring ${T.bench} logs to its spot`,
         target: () => (has('log') ? at(P.bench.x, P.bench.z) : at(P.logs.x, P.logs.z)),
         progress: () => (st().plots.bench ?? 0) / T.bench,
         done: () => !!f().bench,
@@ -2312,7 +2672,7 @@ function storySteps(w: StoryWorld): TutorialScript {
         done: () => has('berry') >= T.antFeed || !!f().runner,
       },
       {
-        text: () => '🐜 Feed your ants: drop the berries at their nest by the plane\'s tail',
+        text: () => '🐜 Feed your ants: bring the berries to their nest by the plane\'s tail',
         target: () => (has('berry') ? at(P.nest.x, P.nest.z) : at(P.berries.x, P.berries.z)),
         progress: () => st().fed.ants / T.antFeed,
         done: () => !!f().runner,

@@ -56,7 +56,7 @@ export const P = {
 
 /** How fast things go. */
 export const T = {
-  waterSecs: 150,      // full -> empty, while you're out and about on the island
+  waterSecs: 210,      // full -> empty, while you're out and about on the island (v0.66: was 150)
   thirsty: 35,         // the warning (%)
   hurtSecs: 26,        // full health -> passing out, once your water is empty
   drink: 45,           // % a second, standing in the stream

@@ -53,6 +53,9 @@ const HOW_TO_HTML = `
     <li>🗺️ Tap the minimap (top right) for the whole island.</li>
   </ul>`;
 
+/** The character card's live heads while it's open during the game (the frame loop draws them). */
+const cardHeads: Avatar[] = [];
+
 export async function startStory({ app, renderer, save, hud, sfx, input, progress, queenProgress, away }: StoryContext) {
   // 1) The models: the ants (your helper), only the story's people, the island's trees and dinos
   const people = castFiles(['jack', 'sarah', 'rae']);
@@ -89,7 +92,7 @@ export async function startStory({ app, renderer, save, hud, sfx, input, progres
   // 🧍 You, live in the player card (top left)
   const avaSlot = document.getElementById('pcAva')!;
   const look = lookFor(world.heroId, world.heroWant);
-  const avatar = look ? Avatar.make(look.file, avaSlot) : null;
+  let avatar = look ? Avatar.make(look.file, avaSlot) : null;
   avaSlot.classList.toggle('live', !!avatar);
   progress.onLevelUp = (level) => {
     avatar?.nod();
@@ -116,6 +119,27 @@ export async function startStory({ app, renderer, save, hud, sfx, input, progres
     writeSave(save);
   });
   applyView();
+
+  // 5b) 🧍 Change character: a button at the top of your stats (tap your level card). Same place, same backpack.
+  const statsCard = document.querySelector('#stats .stats-card');
+  if (statsCard && !document.getElementById('heroBtn')) {
+    const btn = document.createElement('button');
+    btn.id = 'heroBtn';
+    btn.className = 'menu-btn hero-btn';
+    btn.textContent = '🧍 Change character';
+    statsCard.querySelector('#statsTitle')?.after(btn);
+    btn.addEventListener('click', async () => {
+      document.getElementById('stats')!.classList.add('hidden');
+      const hero = await pickHero(renderer, hud, cardHeads);
+      world.setHero(hero);
+      avatar?.dispose();
+      const l = lookFor(world.heroId, world.heroWant);
+      avatar = l ? Avatar.make(l.file, avaSlot) : null;
+      avaSlot.classList.toggle('live', !!avatar);
+      applyView();
+      hud.banner(`🧍 You're playing ${CAST[world.heroId].name}`, 'Same place, same backpack, same story.', 2400);
+    });
+  }
 
   // 6) ⚙️ Settings → 📖 How to play
   document.getElementById('howtoBtn')!.addEventListener('click', () => {
@@ -256,6 +280,7 @@ export async function startStory({ app, renderer, save, hud, sfx, input, progres
     renderer.render(world.scene, world.camera);
     const realDt = Math.min(0.05, rawMs / 1000);
     avatar?.render(renderer, realDt);      // (🧍 you, in the player card)
+    for (const h of cardHeads) h.render(renderer, realDt); // (🧍 the character card's heads, while it's open)
     world.talk.update(renderer, realDt);   // (💬 whoever is talking)
     world.renderNeeds();
     map.update(Math.min(0.1, rawMs / 1000));
@@ -281,10 +306,10 @@ export async function startStory({ app, renderer, save, hud, sfx, input, progres
 // ============================================================================
 // 🧍 The character card: who you play, then how they look (with live 3D heads)
 // ============================================================================
-async function pickHero(renderer: THREE.WebGLRenderer, hud: Hud) {
+async function pickHero(renderer: THREE.WebGLRenderer, hud: Hud, shared?: Avatar[]) {
   // (a little loop of its own draws the heads while the card is up: the game isn't running yet)
-  const heads: Avatar[] = [];
-  let on = true;
+  const heads: Avatar[] = shared ?? [];
+  let on = !shared; // (in the game, the frame loop draws them)
   let last = performance.now();
   const loop = (now: number) => {
     if (!on) return;
@@ -296,7 +321,7 @@ async function pickHero(renderer: THREE.WebGLRenderer, hud: Hud) {
     renderer.clear();
     for (const h of heads) h.render(renderer, dt);
   };
-  requestAnimationFrame(loop);
+  if (on) requestAnimationFrame(loop);
   const clearHeads = () => {
     for (const h of heads) h.dispose();
     heads.length = 0;
