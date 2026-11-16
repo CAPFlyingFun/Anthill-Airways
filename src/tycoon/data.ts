@@ -13,10 +13,10 @@
 // THE LOOP: 🐞 passengers walk in from the lawn → check in at the terminal (they pay a ticket: 💵 on the cash pad,
 // and their 🧳 seed-bag goes to the BAG DROP) → wait at their gate → the plane needs nectar (⛽ carried from the
 // flowers to the gate's FUEL pad) and its passengers' bags (🧳 carried from the BAG DROP to the gate's BAGS pad)
-// → board → taxi to the hold line → 🗼 cleared for take-off → fly the route → circle until 🗼 cleared to land →
-// land → arriving passengers get off (a landing fee 💵) → again.
-// The glowing tiles hire ants who do the jobs for you: a Fuel Runner, a Check-in ant, a Baggage ant, a Tower ant,
-// a Banker. (v0.69: bags, runway clearance, the flight card and 📅 daily goals came from AirportPRG.)
+// → board → taxi to the hold line → 🗼 the tower clears it (one bug on the runway at a time) → fly the route →
+// circle until it's cleared to land → land → arriving passengers get off (a landing fee 💵) → again.
+// The glowing tiles hire ants who do the jobs for you: a Fuel Runner, a Check-in ant, a Baggage ant, a Banker.
+// (v0.69: bags, the runway queue, the flight card and 📅 daily goals came from AirportPRG.)
 // ============================================================================
 import type { UnlockDef } from '../data/config';
 import { mm } from './scale';
@@ -66,8 +66,8 @@ export const TY = {
   bagDropMax: 16,
   bagPadMax: 6,
   bagCarry: 8,
-  /** 🗼 Runway clearance: the Tower ant clears a waiting plane after this long (you can tap sooner). */
-  towerDelay: 1.2,
+  /** 🗼 The tower clears a plane this long after it reaches the HOLD line / the holding pattern (by itself). */
+  towerDelay: 0.6,
   /** The holding pattern: arrivals circle this high (each gate 3 higher) and this wide until cleared to land. */
   holdAlt: 22,
   holdRadius: 16,
@@ -75,7 +75,6 @@ export const TY = {
   xpCheckIn: 3,
   xpFuel: 1,
   xpBag: 1,
-  xpClear: 2,
   xpFlight: 12,
 } as const;
 
@@ -135,7 +134,6 @@ export const TY_UNLOCKS: UnlockDef[] = [
   { id: 'ty-runner', name: 'Fuel Runner Ant', icon: '⛽', cost: 30, pos: [-2, 8], requires: [] },
   { id: 'ty-checkin', name: 'Check-in Ant', icon: '🎫', cost: 70, pos: [-6, 24], requires: ['ty-runner'] },
   { id: 'ty-bags', name: 'Baggage Ant', icon: '🧳', cost: 60, pos: [8, 4], requires: ['ty-checkin'] },
-  { id: 'ty-atc', name: 'Tower Ant (clears the runway)', icon: '🎧', cost: 90, pos: [52, -24], requires: ['ty-checkin'] },
   { id: 'ty-banker', name: 'Banker Ant', icon: '🏦', cost: 120, pos: [-40, 30], requires: ['ty-checkin'] },
   { id: 'ty-flower2', name: 'Nectar Flower 2', icon: '🌼', cost: 160, pos: [24, 26], requires: ['ty-runner'] },
   { id: 'ty-gate2', name: 'Gate 2 + Ladybug', icon: '🐞', cost: 400, pos: [-10, -4], requires: ['ty-banker'], level: 3 },

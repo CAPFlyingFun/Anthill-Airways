@@ -18,8 +18,8 @@ nectar → fuel → check-in → board → fly → land, with ants to hire for e
 Art lab (dev only): `npx vite`, then `/Anthill-Airways/lab/?show=bugs|flora|airport`.
 
 **v0.69, ideas from AirportPRG:** 🧳 seed-bags (each passenger's bag goes to the BAG DROP; a plane waits for its
-passengers' bags on its gate's BAGS pad), 🗼 runway clearance (one bug on the runway at a time: planes wait at the
-HOLD line or circle in a holding pattern until you tap their 🗼 CLEAR chip, or the Tower ant clears them), ✈️ flight
+passengers' bags on its gate's BAGS pad), 🗼 a one-bug-at-a-time runway (planes wait at the HOLD line or circle in a
+holding pattern until the tower clears them: automatic since v0.69.2), ✈️ flight
 chips along the bottom and a flight card per plane (`flightUi.ts`), and 📅 daily goals with ⭐ stars and a cash
 bonus (`goals.ts`).
 

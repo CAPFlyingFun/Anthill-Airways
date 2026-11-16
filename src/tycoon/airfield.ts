@@ -73,12 +73,19 @@ interface Gate {
   /** 🧳 Its BAGS pad: the passengers' seed-bags waiting to be loaded. */
   bags: Stack;
   bagZone: Zone;
-  /** Was its plane waiting for 🗼 clearance last frame? (a beep when it starts) */
-  wasWaiting: boolean;
 }
 
 /** Where a gate's own link joins the runway: just west of its stand (planes enter and leave there). */
 const linkX = (gateX: number) => gateX - 12;
+
+/**
+ * Show or put away a piece of the airport. (lod.ts shows whatever the camera can see unless it's marked
+ * `userData.hidden`: without that, the unbought café's kitchen and an unbought gate's ladybug popped up.)
+ */
+function shown(o: THREE.Object3D, on: boolean) {
+  o.visible = on;
+  o.userData.hidden = !on;
+}
 
 /** A taxiway: its centre points (x, world z) and half its width. */
 interface PathDef {
@@ -129,7 +136,7 @@ const SIZE = 760;
 /** The lawn's square (the ground and the far backdrop go further). */
 const LAWN = 470;
 /** 🎓 Steps finished by actions (did()). */
-const STEP = { nectar: 0, fuel: 1, checkIn: 2, bags: 3, clear: 4, takeoff: 5, cash: 6 } as const;
+const STEP = { nectar: 0, fuel: 1, checkIn: 2, bags: 3, takeoff: 4, cash: 5 } as const;
 
 export class Airfield {
   static MAP_BOUNDS: MapRect = { minX: -110, maxX: 110, minZ: -84, maxZ: 76 };
@@ -365,16 +372,19 @@ export class Airfield {
     }
   }
 
-  private place(p: ArtPiece, x: number, z: number, ry = 0) {
+  /** Put a piece in the world. `solid` = its walls block you now (a gate not bought yet: only once it opens). */
+  private place(p: ArtPiece, x: number, z: number, ry = 0, solid = true) {
     p.root.position.set(x, 0, z);
     p.root.rotation.y = ry;
     this.scene.add(p.root);
     p.root.updateMatrixWorld(true);
-    for (const b of p.blockers) {
+    const walls: Blocker[] = p.blockers.map((b) => {
       // (blockers are local: turn their corners into the world)
       const c = [new THREE.Vector3(b.minX, 0, b.minZ), new THREE.Vector3(b.maxX, 0, b.maxZ)].map((v) => p.root.localToWorld(v));
-      this.blockers.push({ minX: Math.min(c[0].x, c[1].x), maxX: Math.max(c[0].x, c[1].x), minZ: Math.min(c[0].z, c[1].z), maxZ: Math.max(c[0].z, c[1].z) });
-    }
+      return { minX: Math.min(c[0].x, c[1].x), maxX: Math.max(c[0].x, c[1].x), minZ: Math.min(c[0].z, c[1].z), maxZ: Math.max(c[0].z, c[1].z) };
+    });
+    p.root.userData.walls = walls;
+    if (solid) this.blockers.push(...walls);
     this.pieces.push(p);
     if (p.roofs.length) {
       // (its size on the ground, for the 2.5D cutaway: see updateRoofs)
@@ -565,14 +575,14 @@ export class Airfield {
     this.scene.add(cafeSign.sprite);
 
     this.cafe = { pile, oven, shelf, parts: [pile.group, crust, crumbSign.sprite, oven.group, bar, cafeSign.sprite], spot: at.clone().add(new THREE.Vector3(0, 0, 3.4)), chef: null };
-    for (const o of this.cafe.parts) o.visible = false;
+    for (const o of this.cafe.parts) shown(o, false);
   }
 
   /** The café opens: show it, let the walls block, and send passengers past it. */
   private openCafe(animate: boolean) {
     const c = this.cafe;
     for (const o of c.parts) {
-      o.visible = true;
+      shown(o, true);
       if (animate) this.flyers.grow(o);
     }
     this.blockers.push(c.oven.blocker, { minX: c.spot.x - 2.6, maxX: c.spot.x + 2.6, minZ: c.spot.z - 6, maxZ: c.spot.z - 1 });
@@ -595,7 +605,7 @@ export class Airfield {
   /** 🌼 A nectar flower (`open` = bought: the second one shows up later). */
   private buildFlower(x: number, z: number, open: boolean) {
     const piece = this.place(artFuelFlower(), x, z);
-    piece.root.visible = open;
+    shown(piece.root, open);
     const pump = this.worldSpot(piece, 'pump', new THREE.Vector3(x, 0, z + 4));
     const g = new THREE.Group();
     g.position.copy(pump);
@@ -606,7 +616,7 @@ export class Airfield {
     const label = new TextSprite(1.0, '#ffd166');
     label.setText('🌼 NECTAR');
     label.sprite.position.copy(pump).setY(3.5);
-    label.sprite.visible = open;
+    shown(label.sprite, open);
     this.scene.add(label.sprite);
     piece.root.userData.label = label;
     this.flowers.push({ piece, stack, zone: new Zone(pump.x, pump.z, 1.8, 1.8), t: 0 });
@@ -619,7 +629,7 @@ export class Airfield {
   }
 
   private buildGate(x: number, z: number, i: number, open: boolean) {
-    const piece = this.place(artGate(i + 1), x, z);
+    const piece = this.place(artGate(i + 1), x, z, 0, open);
     const stand = this.worldSpot(piece, 'plane', new THREE.Vector3(x, 0, z - 6));
     const model = this.planeModel(i);
     this.scene.add(model.root);
@@ -652,11 +662,11 @@ export class Airfield {
     const door = this.worldSpot(piece, 'door', stand.clone().add(new THREE.Vector3(-3, 0, 0)));
     const gate: Gate = {
       door, piece, fuel, fuelZone: new Zone(fuelAt.x, fuelAt.z, 1.5, 1.5), plane, riders: [], boarding: [], boardT: 0, open, label,
-      bags, bagZone: new Zone(bagsAt.x, bagsAt.z, 1.5, 1.5), wasWaiting: false,
+      bags, bagZone: new Zone(bagsAt.x, bagsAt.z, 1.5, 1.5),
     };
     piece.root.userData.link = this.gateRoads[i] ?? [];
     piece.root.userData.bags = [bagPad, bg];
-    for (const o of [piece.root, model.root, pad, bagPad, bg, label.sprite, ...this.gateRoads[i]]) o.visible = open;
+    for (const o of [piece.root, model.root, pad, bagPad, bg, label.sprite, ...this.gateRoads[i]]) shown(o, open);
     pad.userData.gatePad = true;
     piece.root.userData.pad = pad;
     plane.onAirborne = () => {
@@ -765,15 +775,16 @@ export class Airfield {
       if (animate) this.flyers.grow(b.model.root);
     } else if (id === 'ty-flower2') {
       const f = this.flowers[1];
-      f.piece.root.visible = true;
-      (f.piece.root.userData.label as TextSprite).sprite.visible = true;
+      shown(f.piece.root, true);
+      shown((f.piece.root.userData.label as TextSprite).sprite, true);
       if (animate) this.flyers.grow(f.piece.root);
     } else if (id === 'ty-gate2' || id === 'ty-gate3' || id === 'ty-gate4') {
       const n = Number(id.slice(-1)) - 1;
       const g = this.gates[n];
       this.buildPaved(); // (open the runway's and the taxiway's borders where this gate's paths join them)
       g.open = true;
-      for (const o of [g.piece.root, g.plane.model.root, g.piece.root.userData.pad as THREE.Object3D, g.label.sprite, ...(g.piece.root.userData.link as THREE.Object3D[]), ...(g.piece.root.userData.bags as THREE.Object3D[])]) o.visible = true;
+      for (const o of [g.piece.root, g.plane.model.root, g.piece.root.userData.pad as THREE.Object3D, g.label.sprite, ...(g.piece.root.userData.link as THREE.Object3D[]), ...(g.piece.root.userData.bags as THREE.Object3D[])]) shown(o, true);
+      this.blockers.push(...(g.piece.root.userData.walls as Blocker[])); // (its bridge is solid now)
       this.pax.gates = this.gates.filter((x) => x.open).length;
       if (animate) {
         this.flyers.grow(g.piece.root);
@@ -896,7 +907,7 @@ export class Airfield {
       const g = this.gates[f.gate - 1];
       const kind = f.dir === 'arr' ? 'arr' : 'dep';
       const place = f.place ?? (kind === 'dep' ? 'Next flight' : '');
-      const tone = f.tone === 'act' ? 'warn' : f.tone;
+      const tone = f.tone;
       rows.push({ kind, no: f.flight ? `AA ${f.flight}` : '', place, gate: f.gate, status: f.board, eta: f.eta, tone });
       // (a full gate holds up check-in: say so)
       const waiting = this.pax.atGate[f.gate - 1].length + g.boarding.length;
@@ -935,7 +946,6 @@ export class Airfield {
         eta: null,
         ring: 1,
         tone: 'go',
-        action: null,
         pay: dep ? p.aboard * TY.ticket : p.aboard * TY.landingFee,
       };
       const set = (step: string, short: string, tone: PlaneInfo['tone'], eta: number | null = null, ring = 1, board = step) =>
@@ -960,27 +970,21 @@ export class Airfield {
           set('TAXIING TO THE RUNWAY', 'TAXI', 'go', p.etaTakeoff(), 1, 'TAXIING');
           break;
         case 'hold':
-          if (p.cleared) set('CLEARED · WAITING FOR THE RUNWAY', 'NEXT', 'go', null, 1, 'CLEARED · NEXT');
-          else {
-            set('🗼 CLEAR FOR TAKE-OFF', '🗼 CLEAR', 'act', null, 1, 'WAITING FOR TAKE-OFF CLEARANCE 🗼');
-            info.action = 'takeoff';
-          }
+          set('🗼 HOLDING SHORT · NEXT UP', 'HOLDING', 'go', null, 1, 'HOLDING SHORT');
           break;
         case 'lineUp':
           set('LINING UP', 'LINE UP', 'go', p.etaTakeoff(), 1);
           break;
         case 'takeoff':
-          set('TAKING OFF 🛫', 'TAKE-OFF', 'go', p.etaTakeoff(), 1, 'TAKING OFF');
+          // (once it's off the ground there's nothing to count down: it's climbing away)
+          if (p.etaTakeoff() === 0) set('CLIMBING OUT ✈️', 'AIRBORNE', 'go', null, 1, 'AIRBORNE');
+          else set('TAKING OFF 🛫', 'TAKE-OFF', 'go', p.etaTakeoff(), 1, 'TAKING OFF');
           break;
         case 'route':
           set('ON ITS WAY BACK', 'IN THE AIR', 'info', p.etaLanding(), p.routeFrac, 'ON TIME');
           break;
         case 'holding':
-          if (p.cleared) set('CLEARED TO LAND · NEXT', 'NEXT', 'go', null, 1, 'CLEARED TO LAND');
-          else {
-            set('🗼 CLEAR TO LAND', '🗼 CLEAR', 'act', null, 1, 'HOLDING · NEEDS CLEARANCE 🗼');
-            info.action = 'land';
-          }
+          set('🗼 CIRCLING · NEXT TO LAND', 'CIRCLING', 'go', null, 1, 'CIRCLING');
           break;
         case 'landing':
           set('LANDING 🛬', 'LANDING', 'go', p.etaLanding(), 1, 'LANDING');
@@ -1014,7 +1018,6 @@ export class Airfield {
       let text = `GATE ${f.gate}`;
       if (f.short === 'NECTAR') text += ' · ⛽ NEEDS NECTAR';
       else if (f.short === 'BAGS') text += ' · 🧳 NEEDS BAGS';
-      else if (f.action) text += ' · 🗼 NEEDS CLEARANCE';
       else if (f.eta !== null) text += ` · ${f.dir === 'dep' ? '🛫' : '🛬'} ${clockText(f.eta)}`;
       this.gates[f.gate - 1].label.setText(text);
     }
@@ -1201,20 +1204,16 @@ export class Airfield {
   // 🗼 The runway: one bug at a time
   // --------------------------------------------------------------------------
   /**
-   * Planes wait at their HOLD line (or circle) until they're CLEARED: you tap them, or the Tower ant clears them
-   * after a moment. The runway goes to one cleared plane at a time (landings first: they're burning nectar up
-   * there), and is free again once it's airborne, or has rolled out and turned off.
+   * The tower runs the runway by itself (v0.69.2: no taps needed). Planes reach their HOLD line (or circle in) and
+   * are cleared a moment later; the runway goes to one cleared plane at a time (landings first: they're burning
+   * nectar up there), and is free again once it's airborne, or has rolled out and turned off.
    */
   private updateRunway() {
     const open = this.gates.filter((g) => g.open);
     if (this.runwayUser && !this.runwayUser.onRunway) this.runwayUser = null;
     for (const g of open) {
       const p = g.plane;
-      if (this.towerAnt && p.waiting && !p.cleared && p.waitT >= TY.towerDelay) p.clear();
-      // (a beep when a plane starts waiting for you: its chip flashes 🗼 CLEAR)
-      const needsYou = p.waiting && !p.cleared;
-      if (needsYou && !g.wasWaiting && !this.towerAnt) this.sfx.risky();
-      g.wasWaiting = needsYou;
+      if (p.waiting && !p.cleared && p.waitT >= TY.towerDelay) p.clear();
     }
     if (this.runwayUser) return;
     const next = open
@@ -1227,24 +1226,6 @@ export class Airfield {
     }
   }
 
-  /** 🗼 You cleared gate `i`'s plane (its chip or its card's button). True if it was waiting for you. */
-  clearGate(i: number) {
-    const g = this.gates[i];
-    if (!g?.open || !g.plane.clear()) return false;
-    const p = g.plane;
-    this.progress.addXp(TY.xpClear);
-    this.sfx.gateGood();
-    const busy = !!this.runwayUser;
-    const text = p.state === 'hold' ? (busy ? '🗼 Next for take-off' : '🗼 Cleared for take-off!') : busy ? '🗼 Next to land' : '🗼 Cleared to land!';
-    // (said over the plane when it's in view, otherwise just above the chips)
-    const at = p.pos.clone().setY(p.pos.y + 3);
-    const v = at.clone().project(this.camera);
-    if (p.model.root.visible && v.z < 1 && Math.abs(v.x) < 0.9 && Math.abs(v.y) < 0.9) this.hud.floatAt(at, this.camera, text, 'big');
-    else this.hud.floatXY(window.innerWidth / 2, window.innerHeight - 110, text, 'big');
-    this.tutorial.did(STEP.clear);
-    return true;
-  }
-
   // --------------------------------------------------------------------------
   // 🎯 Picking a plane: tap it (or its chip): a ring under it, its flight card open
   // --------------------------------------------------------------------------
@@ -1254,8 +1235,7 @@ export class Airfield {
     let bestD = 46;
     const v = new THREE.Vector3();
     this.gates.forEach((g, i) => {
-      const m = g.plane.model.root;
-      if (!g.open || !m.visible) return;
+      if (!g.open || !g.plane.inSight) return;
       v.copy(g.plane.pos).setY(g.plane.pos.y + 1).project(this.camera);
       if (v.z > 1) return;
       const d = Math.hypot((v.x * 0.5 + 0.5) * w - x, (-v.y * 0.5 + 0.5) * h - y);
@@ -1271,7 +1251,7 @@ export class Airfield {
   private ringT = 0;
   private updateRing(dt: number) {
     const g = this.selected !== null ? this.gates[this.selected] : null;
-    const show = !!g && g.open && g.plane.model.root.visible;
+    const show = !!g && g.open && g.plane.inSight;
     this.selRing.visible = show;
     if (!show || !g) return;
     this.ringT += dt;
@@ -1293,7 +1273,7 @@ export class Airfield {
       const old = plane.setModel(this.planeModel(i));
       void old;
       if (g.open) this.flyers.grow(plane.model.root);
-      plane.model.root.visible = g.open;
+      shown(plane.model.root, g.open);
     }
     const fuelled = g.fuel.count >= TY.fuelPerFlight;
     const nose = g.door;
@@ -1345,7 +1325,7 @@ export class Airfield {
   // --------------------------------------------------------------------------
   private updateCamera(dt: number) {
     // (a watched plane flying off on its route, out of sight: back to you)
-    if (this.watch !== null && !this.gates[this.watch].plane.model.root.visible) this.watch = null;
+    if (this.watch !== null && !this.gates[this.watch].plane.inSight) this.watch = null;
     const target = this.watch !== null ? this.tmpCam.copy(this.gates[this.watch].plane.pos).setY(0) : this.player.pos;
     const fp = this.player.firstPerson;
     this.setFov(fp ? fpFov(this.camera.aspect) : this.thirdFov);
@@ -1390,7 +1370,7 @@ export class Airfield {
       { x: AT.tower.x, z: AT.tower.z, icon: '🗼' },
       ...this.flowers.filter((f) => f.piece.root.visible).map((f) => ({ x: f.zone.x, z: f.zone.z, icon: '🌼', alert: f.stack.full })),
       ...this.gates.flatMap((g, i) => (g.open ? [{ x: g.fuelZone.x, z: g.fuelZone.z, icon: '⛽', label: `Gate ${i + 1}`, alert: g.fuel.count < TY.fuelPerFlight }] : [])),
-      ...this.gates.filter((g) => g.open && g.plane.model.root.visible).map((g) => ({ x: g.plane.pos.x, z: g.plane.pos.z, icon: this.owns('ty-bees') ? '🐝' : '🐞' })),
+      ...this.gates.filter((g) => g.open && g.plane.inSight).map((g) => ({ x: g.plane.pos.x, z: g.plane.pos.z, icon: this.owns('ty-bees') ? '🐝' : '🐞' })),
       { x: this.cashPad.zone.x, z: this.cashPad.zone.z, icon: '💵', alert: this.cashPad.stack.count > 0 },
       { x: this.bagDropZone.x, z: this.bagDropZone.z, icon: '🧳', label: 'Bags', alert: this.bagDrop.count >= TY.bagDropMax - 2 },
       ...(this.pax.cafe
@@ -1429,7 +1409,7 @@ export class Airfield {
       },
       finish: {
         title: '🛫 Your airline is flying!',
-        html: `<p>Ants now fuel the planes, check passengers in, load the bags and clear the runway. Keep growing: a
+        html: `<p>Ants now fuel the planes, check passengers in and load the bags. Keep growing: a
           <b>Banker ant</b>, a second <b>nectar flower</b>, <b>Gates 2, 3 and 4</b>, <b>🐝 Bee Shuttles</b> (3 seats)
           and the <b>Control Tower</b>.</p>
           <p>📅 <b>Daily goals</b> start now: finish each day's goals quickly for ⭐⭐⭐ and a cash bonus. Tap the
@@ -1452,18 +1432,11 @@ export class Airfield {
           target: () => (this.player.stack.has('seedbag') ? t.at(g0.bagZone) : t.at(this.bagDropZone)),
           done: () => g0.bags.count > 0 || this.st.flights > 0 || !g0.plane.parked,
         },
-        {
-          // 🗼 the ladybug boards, taxis to the HOLD line and waits for you
-          text: () => (g0.plane.state === 'hold' ? '🗼 Tap the flashing 🗼 CLEAR chip at the bottom: cleared for take-off!' : '🐞 Your ladybug boards, then taxis to the runway…'),
-          target: () => g0.plane.pos.clone(),
-          done: () => this.st.flights > 0 || g0.plane.onRunway || g0.plane.cleared,
-        },
-        { text: () => '🛫 Watch your ladybug take off!', target: () => g0.plane.pos.clone(), done: () => this.st.flights > 0 },
+        { text: () => '🛫 Your ladybug boards and taxis out: watch it take off!', target: () => g0.plane.pos.clone(), done: () => this.st.flights > 0 },
         { text: () => '💵 Pick up your cash', target: () => t.at(this.cashPad.zone) },
         t.unlockStep('ty-runner', '⛽ Hire a Fuel Runner ant'),
         t.unlockStep('ty-checkin', '🎫 Hire a Check-in ant'),
         t.unlockStep('ty-bags', '🧳 Hire a Baggage ant'),
-        t.unlockStep('ty-atc', '🎧 Hire a Tower ant: it clears the runway for you'),
       ],
     };
   }

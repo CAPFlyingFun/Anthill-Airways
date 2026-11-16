@@ -1148,8 +1148,6 @@ body.in-cut .hotbar, body.in-cut .use-btn { visibility: hidden; }
 }
 .fl-chip.warn, .fl-card.warn { --tone: #ff6b6b; }
 .fl-chip.info, .fl-card.info { --tone: #9aa3ad; }
-.fl-chip.act, .fl-card.act { --tone: #5cff7a; }
-.fl-chip.act { background: rgba(26, 96, 40, 0.94); animation: flPulse 0.9s ease-in-out infinite; }
 .fl-chip.sel { box-shadow: 0 0 0 3px #fff; }
 .fl-ring {
   --p: 100;
@@ -1163,7 +1161,6 @@ body.in-cut .hotbar, body.in-cut .use-btn { visibility: hidden; }
 .fl-chip .tx { display: flex; flex-direction: column; align-items: flex-start; line-height: 1.1; }
 .fl-chip b { font-size: 12px; font-weight: 900; color: #ffd166; letter-spacing: 0.5px; white-space: nowrap; }
 .fl-chip small { font-size: 11px; font-weight: 900; color: #fff; white-space: nowrap; font-variant-numeric: tabular-nums; }
-@keyframes flPulse { 50% { transform: scale(1.06); } }
 
 /* The flight card: AirportPRG's blue card with the round portrait on top */
 .fl-card {
@@ -1203,10 +1200,6 @@ body.in-cut .hotbar, body.in-cut .use-btn { visibility: hidden; }
   background: #1d3550; color: #fff; font-size: 12.5px; font-weight: 900; letter-spacing: 0.3px; font-variant-numeric: tabular-nums;
 }
 .fl-card.warn .fl-step { background: #7a2424; }
-.fl-step.act {
-  background: linear-gradient(#7ee36a, #3fae3a); color: #0e2a10; box-shadow: 0 4px 0 #2a7a28;
-  animation: flPulse 0.9s ease-in-out infinite;
-}
 @media (orientation: landscape) and (max-height: 520px) {
   .fl-card { width: 160px; padding-top: 34px; bottom: calc(56px + var(--safe-b)); }
   .fl-por { top: -28px; }
@@ -1248,3 +1241,6 @@ body.in-cut .hotbar, body.in-cut .use-btn { visibility: hidden; }
   border-radius: 2px; transform: rotate(-7deg); box-shadow: 0 2px 0 rgba(0, 0, 0, 0.25); white-space: nowrap;
 }
 .gl-none { font-weight: 800; }
+
+/* 📅 The daily-goals bar (Airport Tycoon's use of the chip under the zone name): room for all its goals */
+.next-chip.goal-bar { max-width: calc(100vw - 118px - var(--safe-l) - var(--safe-r)); }

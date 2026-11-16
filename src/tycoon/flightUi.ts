@@ -2,12 +2,12 @@
 // flightUi.ts — ✈️ the FLIGHT CHIPS and the FLIGHT CARD (v0.69, after AirportPRG).
 //
 //  • Along the bottom: one chip per open gate (its plane, a ring that fills as the current step goes by, the flight
-//    number and the next thing: a clock, BAGS, NECTAR…). A plane waiting for YOU flashes green: 🗼 CLEAR. Tap
-//    that to clear it for take-off / to land. Tap any other chip (or the plane itself) to open its card.
+//    number and the next thing: a clock, BAGS, NECTAR…). Tap a chip (or the plane itself) to open its card.
+//    (The tower clears take-offs and landings by itself: v0.69.2.)
 //    📋 at the front opens the whole flight board.
 //  • On the left: the selected plane's card. A round portrait with the ring, AA 104, the bug and its seats, where
-//    it's flying, 🐛 passengers · 🧳 bags · 💧 nectar, and one big button with the step it's on (green when it's
-//    yours to press: 🗼 CLEAR FOR TAKE-OFF / 🗼 CLEAR TO LAND). 🎯 points the camera at the plane until you walk.
+//    it's flying, 🐛 passengers · 🧳 bags · 💧 nectar, and a bar with the step it's on. 🎯 points the camera at
+//    the plane until you walk.
 //
 // The elements are built once and only their text and classes change (rebuilding them every tick swallowed taps).
 // ============================================================================
@@ -35,17 +35,14 @@ export interface PlaneInfo {
   eta: number | null;
   /** 0..1: how far through the step (the portrait's ring). */
   ring: number;
-  /** go = on its way, warn = needs something, info = nothing to do, act = waiting for YOUR clearance. */
-  tone: 'go' | 'warn' | 'info' | 'act';
-  action: 'takeoff' | 'land' | null;
+  /** go = on its way, warn = needs something (nectar, bags), info = nothing happening. */
+  tone: 'go' | 'warn' | 'info';
   /** 💵 This flight's money: tickets (departures, already paid) or landing fees (arrivals). */
   pay: number;
 }
 
 export interface FlightUiHooks {
   info: () => PlaneInfo[];
-  /** 🗼 Clear gate `g` (0-based). True if it was waiting for you. */
-  clear: (g: number) => boolean;
   /** The card opened / closed on gate `g` (the ring under the plane). */
   select: (g: number | null) => void;
   /** 🎯 Point the camera at gate `g`'s plane. */
@@ -114,17 +111,11 @@ export class FlightUi {
         <div><span>💧</span><b class="fl-fuel"></b></div>
       </div>
       <div class="fl-pay"></div>
-      <button class="fl-step"></button>`;
+      <div class="fl-step"></div>`;
     for (const k of ['ring', 'ic', 'no', 'type', 'route', 'pax', 'bags', 'fuel', 'pay', 'step']) this.c[k] = this.card.querySelector(`.fl-${k}`)!;
     this.card.querySelector('.fl-x')!.addEventListener('click', () => this.show(null));
     this.card.querySelector('.fl-aim')!.addEventListener('click', () => {
       if (this.open !== null) hooks.watch(this.open);
-    });
-    this.c.step.addEventListener('click', () => {
-      if (this.open === null) return;
-      const f = this.last.find((x) => x.gate === this.open! + 1);
-      if (f?.action) hooks.clear(this.open);
-      this.update();
     });
     parent.insertBefore(this.card, before);
   }
@@ -156,7 +147,7 @@ export class FlightUi {
       put(chip.ic, f.icon);
       chip.ring.style.setProperty('--p', `${Math.round(f.ring * 100)}`);
       put(chip.no, f.flight ? `AA ${f.flight}` : `GATE ${f.gate}`);
-      put(chip.st, f.action ? '🗼 CLEAR' : f.eta !== null ? `${f.dir === 'dep' ? '🛫' : '🛬'} ${clock(f.eta)}` : f.short);
+      put(chip.st, f.eta !== null ? `${f.dir === 'dep' ? '🛫' : '🛬'} ${clock(f.eta)}` : f.short);
     }
     // (a gate that closed: drop its chip)
     for (const [g, chip] of this.chips) {
@@ -181,7 +172,6 @@ export class FlightUi {
     put(c.fuel, `${f.fuel[0]}/${f.fuel[1]}`);
     put(c.pay, f.pay ? (f.dir === 'dep' ? `🎫 Tickets: $${f.pay}` : `💵 Landing fees: $${f.pay}`) : '');
     put(c.step, f.eta !== null ? `${f.step} · ${clock(f.eta)}` : f.step);
-    c.step.classList.toggle('act', !!f.action);
   }
 
   private makeChip(gate: number): Chip {
@@ -190,13 +180,6 @@ export class FlightUi {
     const chip: Chip = { btn, ring: btn.querySelector('.fl-ring')!, ic: btn.querySelector('i')!, no: btn.querySelector('b')!, st: btn.querySelector('small')! };
     btn.addEventListener('click', () => {
       const g = gate - 1;
-      const f = this.last.find((x) => x.gate === gate);
-      // a plane waiting for you: one tap clears it
-      if (f?.action) {
-        this.hooks.clear(g);
-        this.update();
-        return;
-      }
       this.show(this.open === g ? null : g);
     });
     // keep the chips in gate order

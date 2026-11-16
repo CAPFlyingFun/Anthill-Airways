@@ -238,6 +238,8 @@ export class Tutorial {
     while (this.running && this.steps[this.save.tutorial]?.done?.() && guard++ < 30) this.advance();
     if (!this.running) return;
     const step = this.steps[this.save.tutorial];
+    // (a save from before a step was taken out can point past the end: that's the tutorial finished)
+    if (!step) return this.finish();
     this.setHint(step.text(), step.progress?.() ?? null);
     // The arrow
     const target = step.target();

@@ -90,6 +90,14 @@ export class Plane {
   get pos() {
     return this.model.root.position;
   }
+  /** Out on the route (or at a gate not bought yet) it's put away: `userData.hidden`, which lod.ts respects. */
+  get inSight() {
+    return !this.model.root.userData.hidden;
+  }
+  private setInSight(on: boolean) {
+    this.model.root.visible = on;
+    this.model.root.userData.hidden = !on;
+  }
   get parked() {
     return this.state === 'parked';
   }
@@ -121,7 +129,7 @@ export class Plane {
     this.model.root.rotation.set(0, 0, 0);
     this.model.bob.rotation.set(0, 0, 0);
     this.model.flying = false;
-    this.model.root.visible = true;
+    this.setInSight(true);
   }
 
   /** Swap in a different bug (an upgrade: 🐝 Bee Shuttles). Only while parked and empty. Returns the old one. */
@@ -130,6 +138,7 @@ export class Plane {
     m.root.position.copy(old.root.position);
     m.root.rotation.copy(old.root.rotation);
     m.root.visible = old.root.visible;
+    m.root.userData.hidden = old.root.userData.hidden;
     old.root.parent?.add(m.root);
     old.root.removeFromParent();
     this.model = m;
@@ -256,7 +265,7 @@ export class Plane {
         if (done) {
           this.state = 'route';
           this.routeT = TY.routeSecs / this.boost;
-          m.root.visible = false;
+          this.setInSight(false);
           this.onRoute();
         }
         return;
@@ -269,7 +278,7 @@ export class Plane {
           this.wasUp = false;
           this.waitT = 0;
           this.orbiting = false;
-          m.root.visible = true;
+          this.setInSight(true);
           m.flying = true;
           m.bob.rotation.x = 0;
           const c = AT.hold;

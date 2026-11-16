@@ -49,10 +49,9 @@ const HOWTO_HTML = `
       counter inside the terminal, and passengers buy one on the way to their gate.</li>
     <li>🧳 Each passenger's <b>seed-bag</b> goes to the <b>BAG DROP</b> outside the terminal. Carry the bags to
       the gate's <b>BAGS</b> pad: a plane won't leave without its passengers' bags.</li>
-    <li>🐞 A fuelled plane boards its passengers and taxis to the <b>HOLD</b> line by the runway.
-      🗼 <b>Only one bug may use the runway at a time:</b> tap its flashing <b>🗼 CLEAR</b> chip at the bottom to
-      clear it for take-off. Coming back, it circles until you clear it to land (or hire the 🎧 <b>Tower ant</b>).
-      The arriving passengers pay a landing fee.</li>
+    <li>🐞 A fuelled plane boards its passengers, taxis to the <b>HOLD</b> line, takes off and flies its route.
+      🗼 The tower lets <b>one bug use the runway at a time</b>: planes wait their turn at the HOLD line, or circle
+      before landing. The arriving passengers pay a landing fee.</li>
     <li>✈️ Tap a chip at the bottom (or a plane) for its <b>flight card</b>: passengers, bags, nectar and what it's
       doing. 🎯 on the card points the camera at it until you walk. 📋 is the whole flight board.</li>
     <li>📅 <b>Daily goals</b> (the bar under the airfield's name): finish each day's goals quickly for ⭐⭐⭐
@@ -101,7 +100,7 @@ export async function startTycoon({ app, renderer, save, hud, sfx, input, progre
     boardPanel.querySelector('.board-title')!.textContent = '✈️ ANTHILL AIRWAYS';
     boardPanel.querySelector('.board-tip')!.innerHTML =
       'A plane goes when it has <b>⛽ nectar</b> on its gate\'s FUEL pad, its passengers\' <b>🧳 bags</b> on the BAGS pad, ' +
-      'and passengers aboard (it waits a few seconds for more). Then 🗼 <b>clear it</b> for take-off: only one bug on the runway at a time.';
+      'and passengers aboard (it waits a few seconds for more). 🗼 The tower lets one bug use the runway at a time.';
     drawBoard();
     boardPanel.classList.remove('hidden');
     window.clearInterval(boardTimer);
@@ -112,7 +111,6 @@ export async function startTycoon({ app, renderer, save, hud, sfx, input, progre
   // ✈️ The chips along the bottom and the flight card (tap a chip, or tap a plane)
   const flights = new FlightUi(document.getElementById('hud')!, {
     info: () => field.planeInfo(),
-    clear: (g) => field.clearGate(g),
     select: (g) => (field.selected = g),
     watch: (g) => {
       field.watch = g;
@@ -128,6 +126,7 @@ export async function startTycoon({ app, renderer, save, hud, sfx, input, progre
   };
 
   // 📅 The daily goals: a bar under the zone name (tap it for the panel)
+  document.getElementById('nextBtn')!.classList.add('goal-bar');
   const goalsPanel = document.createElement('div');
   goalsPanel.className = 'overlay hidden';
   goalsPanel.innerHTML = `<div class="card goals-card"><h2>📅 Daily Goals</h2><div class="gl-body"></div><button class="menu-btn">Close</button></div>`;
