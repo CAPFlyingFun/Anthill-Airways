@@ -92,6 +92,9 @@ function shown(o: THREE.Object3D, on: boolean) {
   o.userData.hidden = !on;
 }
 
+/** 🛖 The hangar is the bottle-cap piece at this size (so the biggest aircraft fit inside). */
+const HANGAR_SCALE = 1.8;
+
 /** A taxiway: its centre points (x, world z) and half its width. */
 interface PathDef {
   pts: THREE.Vector2[];
@@ -370,6 +373,7 @@ export class Airfield {
       AT.gates.some((g) => Math.abs(x - g.x) < 12 && z > g.z - 30 && z < g.z + 8) ||
       AT.flowers.some((f) => Math.hypot(x - f.x, z - f.z) < 10) ||
       Math.hypot(x - AT.recycler.x, z - AT.recycler.z) < 11 ||
+      Math.hypot(x - AT.hangar.x, z - AT.hangar.z) < 19 ||
       AT.bins.some((b) => Math.hypot(x - b.x, z - b.z) < 6) ||
       TY_UNLOCKS.some((u) => Math.hypot(x - u.pos[0], z - u.pos[1]) < 8) ||
       !CLEARINGS.some((c) => Math.hypot(x - c.x, z - c.z) < c.r - 4);
@@ -911,6 +915,41 @@ export class Airfield {
   private targets: { id: string; name: string; at: THREE.Vector3; r: number; live: () => boolean; rows: () => MenuRow[]; buy: (row: string) => void; arrow: THREE.Sprite; can: boolean }[] = [];
   private targetT = 0;
   private arrowT = 0;
+  /**
+   * 🛖 What's parked in the hangar (v0.72.1): the aircraft you fly now, full size, in the middle with its nose to
+   * the door; the types you've retired as little display models along the back wall; and the mechanic ant.
+   * Rebuilt when the fleet changes.
+   */
+  private hangarStuff: CreatureModel[] = [];
+  private fillHangar() {
+    for (const m of this.hangarStuff) {
+      m.root.removeFromParent();
+      const k = this.idlers.indexOf(m);
+      if (k >= 0) this.idlers.splice(k, 1);
+    }
+    this.hangarStuff = [];
+    const at = (x: number, z: number) => this.hangar.root.localToWorld(new THREE.Vector3(x, 0.3 / HANGAR_SCALE, z));
+    const ry = this.hangar.root.rotation.y;
+    const park = (m: CreatureModel, p: THREE.Vector3, turn: number) => {
+      m.root.position.copy(p);
+      m.root.rotation.y = ry + turn;
+      this.scene.add(m.root);
+      this.idlers.push(m);
+      this.hangarStuff.push(m);
+    };
+    const flying = bestPlane((id) => this.owns(id));
+    park(artBug(flying.kind, flying.length, { seed: 21 }), at(0, -0.6), 0);
+    // (retired types: small models in an arc along the back wall, oldest on the left)
+    const retired = FLEET.filter((t) => t !== flying && (!t.unlock || this.owns(t.unlock)));
+    retired.forEach((t, i) => {
+      const a = Math.PI + (i - (retired.length - 1) / 2) * 0.42;
+      park(artBug(t.kind, Math.min(t.length, 4.5) * 0.6, { seed: 30 + i }), at(Math.sin(a) * 5.6, Math.cos(a) * 5.6), a + Math.PI);
+    });
+    const mech = spawnCreature('worker', 2.1) ?? makeAnt(0x8e2f14);
+    titleTag(mech, '🔧 MECHANIC', TITLE.ant);
+    park(mech, at(3.6, 3.4), -2.4);
+  }
+
   /** A building upgrade's level ("gate0.fuel"). */
   up(key: string) {
     return this.st.ups?.[key] ?? 0;
@@ -1012,7 +1051,7 @@ export class Airfield {
 
     // 🛖 The Hangar: your fleet. Upgrades for whatever flies, then each aircraft: owned, the next to unlock, later ones.
     this.addTarget(
-      'hangar', 'Hangar', v(AT.hangar.x, AT.hangar.z), 13, () => this.owns('ty-hangar'),
+      'hangar', 'Hangar', v(AT.hangar.x, AT.hangar.z), 17, () => this.owns('ty-hangar'),
       () => {
         const rows: MenuRow[] = UPS.plane.map((d) => {
           const lv = this.up(`fleet.${d.k}`);
@@ -1046,7 +1085,7 @@ export class Airfield {
         this.save.unlocked.push(t.unlock);
         this.applyUnlock(t.unlock, true);
       },
-      12,
+      15,
     );
   }
 
@@ -1272,10 +1311,21 @@ export class Airfield {
     this.place(artTower(), AT.tower.x, AT.tower.z);
     this.place(artWindsock(), AT.windsock.x, AT.windsock.z);
     // (🛖 the hangar is built with its tile: until then it's put away, and not solid)
-    this.hangar = this.place(artHangar(), AT.hangar.x, AT.hangar.z, -0.5, false);
+    // (a bottle cap 27 across: big enough to park any aircraft inside; its door faces the field, west)
+    const hangar = artHangar();
+    hangar.root.scale.setScalar(HANGAR_SCALE);
+    this.hangar = this.place(hangar, AT.hangar.x, AT.hangar.z, -1.25, false);
     shown(this.hangar.root, false);
-    this.place(artDewTank(), AT.flowers[1].x + 24, AT.flowers[1].z - 8, -0.4);
-    this.place(artBaggageCart(), 60, -4, 0.6);
+    const sign = new TextSprite(1.3, '#8fd3ff');
+    sign.setText('🛖 HANGAR');
+    sign.sprite.position.set(AT.hangar.x, 11, AT.hangar.z);
+    (sign.sprite.material as THREE.SpriteMaterial).depthTest = false;
+    sign.sprite.renderOrder = 5;
+    shown(sign.sprite, false);
+    this.scene.add(sign.sprite);
+    this.hangar.root.userData.sign = sign.sprite;
+    this.place(artDewTank(), 70, -18, -0.4);
+    this.place(artBaggageCart(), 64, -14, 0.6);
     this.place(artSign('ANTHILL AIRWAYS'), AT.terminal.x - 30, AT.terminal.z + 24, 0.5);
     this.place(artSign('GATES', 'up'), -64, -14, 0.3);
   }
@@ -1371,6 +1421,7 @@ export class Airfield {
     } else if (FLEET.some((f) => f.unlock === id)) {
       // ✈️ every gate swaps its plane for the new one (✈️ fleet.ts) as soon as it's parked and empty
       for (const g of this.gates) g.swap = true;
+      if (this.owns('ty-hangar') && this.hangar) this.fillHangar();
       const t = FLEET.find((f) => f.unlock === id)!;
       if (animate) this.hud.banner(`${t.icon} ${t.name} fleet!`, `Each gate's plane is swapped for a ${t.name.toLowerCase()} when it's next at its gate`, 3200);
     } else if (id === 'ty-route-picnic' || id === 'ty-route-log' || id === 'ty-route-tide' || id === 'ty-route-lizard') {
@@ -1386,7 +1437,9 @@ export class Airfield {
       if (animate) this.flyers.grow(w.model.root);
     } else if (id === 'ty-hangar') {
       shown(this.hangar.root, true);
+      shown(this.hangar.root.userData.sign as THREE.Object3D, true);
       this.blockers.push(...(this.hangar.root.userData.walls as Blocker[]));
+      this.fillHangar();
       if (animate) {
         this.flyers.grow(this.hangar.root);
         this.hud.banner('🛖 Hangar built!', 'Tap it (or walk up to it) to unlock new aircraft and upgrade your fleet', 3600);

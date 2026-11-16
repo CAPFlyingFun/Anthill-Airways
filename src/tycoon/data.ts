@@ -138,7 +138,8 @@ export const AT = {
   /** 🗼 The holding pattern's centre: over the runway's far (west) end, where arrivals circle. */
   hold: { x: -102, z: -62 },
   windsock: { x: 74, z: -42 },
-  hangar: { x: 70, z: -18 },
+  /** 🛖 The hangar (v0.72.1: nearly twice the size, on the open ground east of the flowers, its door to the field). */
+  hangar: { x: 66, z: 6 },
   /** The runway: centred here, running along x. */
   runway: { x: 0, z: -58, length: 170, width: 20 },
   /** The taxiway along the north of the gates (v0.69: moved 8 closer to the gates so each link has room for its
@@ -154,6 +155,8 @@ export const CLEARINGS = [
   { x: 0, z: 0, r: 74 },
   { x: 0, z: 52, r: 56 },
   { x: 40, z: 30, r: 44 },
+  // (v0.72.1: the 🛖 hangar's ground, so the grass doesn't lean in over its back wall)
+  { x: 70, z: 6, r: 25 },
   ...[-100, -55, -10, 35, 80, 115].map((x) => ({ x, z: -58, r: 34 })),
 ];
 
@@ -177,7 +180,7 @@ export const TY_UNLOCKS: UnlockDef[] = [
   { id: 'ty-crumbs', name: 'Crumb Runner Ant', icon: '🍪', cost: 200, pos: [-58, 0], requires: ['ty-cafe'] },
   { id: 'ty-chef', name: 'Chef Ant (faster oven)', icon: '🔥', cost: 650, pos: [-30, -2], requires: ['ty-crumbs'], level: 5 },
   // (v0.72: the 🛖 hangar: new aircraft are unlocked, and upgraded, in its menu; the fleet tiles are gone)
-  { id: 'ty-hangar', name: 'Hangar (your fleet)', icon: '🛖', cost: 600, pos: [60, -8], requires: ['ty-gate2'], level: 4 },
+  { id: 'ty-hangar', name: 'Hangar (your fleet)', icon: '🛖', cost: 600, pos: [50, 10], requires: ['ty-gate2'], level: 4 },
   { id: 'ty-gate4', name: 'Gate 4 + Plane', icon: '✈️', cost: 1800, pos: [38, -4], requires: ['ty-gate3'], level: 7 },
   { id: 'ty-runner3', name: 'Fuel Runner 3', icon: '⛽', cost: 700, pos: [32, 32], requires: ['ty-gate4'] },
   { id: 'ty-bags2', name: 'Baggage Ant 2', icon: '🧳', cost: 320, pos: [-6, 2], requires: ['ty-gate2', 'ty-bags'] },
