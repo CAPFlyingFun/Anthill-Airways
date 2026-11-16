@@ -26,8 +26,11 @@ export class Pax {
   there = false;
   /** Which gate it's flying from. */
   gate = -1;
-  /** Walked round the terminal yet (on the way from check-in to the gates)? */
-  rounded = false;
+  /** Waypoints still to walk through before its target (into the terminal, out to the gates). */
+  via: THREE.Vector3[] = [];
+  /** 🍪 Stopping at the café on the way to the gate? (and how long it's waited there) */
+  cafeStop = false;
+  cafeT = 0;
   constructor(public model: ArtBug) {}
   get pos() {
     return this.model.root.position;
@@ -43,8 +46,19 @@ export interface FlowSpots {
   lineDir: THREE.Vector3;
   /** Each gate's waiting spot (the line there runs along x). */
   gateWait: THREE.Vector3[];
-  /** A corner to walk round on the way from check-in to the gates (so nobody walks through the terminal). */
-  round: THREE.Vector3;
+  /** Waypoints from the lawn into the line (the terminal's front door), and from the desk out to the gates
+   *  (through the terminal's airside doorway), so nobody walks through a wall. */
+  inbound: THREE.Vector3[];
+  outbound: THREE.Vector3[];
+}
+
+/** 🍪 The Nectar Café (once it's open): where passengers stand to buy, and the buying. */
+export interface Cafe {
+  spot: THREE.Vector3;
+  /** A snack ready on the counter? */
+  has(): boolean;
+  /** Hand one over (the airfield pays the cash pad). */
+  buy(p: Pax): void;
 }
 
 export class Passengers {
@@ -58,6 +72,8 @@ export class Passengers {
   serving = false;
   /** How many gates are open (gate 2 is bought later). */
   gates = 1;
+  /** 🍪 The café (null until it's bought). */
+  cafe: Cafe | null = null;
   /** Called when a passenger finishes checking in (the airfield pays + gives XP). */
   onCheckIn: (p: Pax) => void = () => {};
   private arriveT = 2;
@@ -99,7 +115,9 @@ export class Passengers {
   /** The next passengers to board at gate `g` (up to `n`), walking out to `to`. */
   callToBoard(g: number, n: number, to: THREE.Vector3) {
     const q = this.atGate[g];
-    const called = q.splice(0, n);
+    // (only those already waiting at the gate: not ones still at the café or on their way)
+    const called = q.filter((p) => p.state === 'waiting').slice(0, n);
+    for (const p of called) q.splice(q.indexOf(p), 1);
     for (const p of called) {
       p.state = 'boarding';
       p.target.copy(to);
@@ -127,21 +145,29 @@ export class Passengers {
       this.arriveT = (TY.arriveEvery / (0.6 + 0.4 * this.gates)) * (0.7 + Math.random() * 0.6);
       const p = this.spawn(this.spots.edge);
       p.state = 'queue';
+      p.via = this.spots.inbound.map((v) => v.clone());
       this.line.push(p);
     }
 
     // The line shuffles up; the front one checks in when someone's at the desk and a gate has room
-    this.line.forEach((p, i) => this.lineSpot(i, p.target));
+    this.line.forEach((p, i) => {
+      if (this.followVia(p)) return;
+      this.lineSpot(i, p.target);
+    });
     const front = this.line[0];
     const gate = this.freeGate();
-    if (front && this.serving && gate >= 0 && front.pos.distanceTo(front.target) < 1.2) {
+    if (front && !front.via.length && this.serving && gate >= 0 && front.pos.distanceTo(front.target) < 1.2) {
       this.checkT += dt;
       if (this.checkT >= TY.checkInSecs) {
         this.checkT = 0;
         this.line.shift();
         front.gate = gate;
         front.state = 'toGate';
-        front.there = false; // (it was standing at the desk: not yet at the terminal's corner)
+        front.there = false; // (it was standing at the desk: on its way now)
+        // a snack at the café first (if there is one), then out through the airside doorway to the gate
+        front.cafeStop = !!this.cafe;
+        front.cafeT = 0;
+        front.via = front.cafeStop ? [] : this.spots.outbound.map((v) => v.clone());
         this.atGate[gate].push(front);
         this.onCheckIn(front);
       }
@@ -149,12 +175,27 @@ export class Passengers {
       this.checkT = Math.min(this.checkT, TY.checkInSecs * 0.5);
     }
     this.atGate.forEach((q, g) => q.forEach((p, i) => {
-      if (p.state === 'toGate' && !p.rounded) {
-        // first round the terminal's corner, then on to the gate
-        p.target.copy(this.spots.round);
-        if (p.there) p.rounded = true;
-        return;
+      if (p.state === 'toGate' && p.cafeStop) {
+        // 🍪 at the café counter: buy a snack (or give up after a while if there are none)
+        const cafe = this.cafe;
+        if (!cafe) p.cafeStop = false;
+        else {
+          p.target.copy(cafe.spot).add(this.tmp.set(((p.model.root.id % 5) - 2) * 0.9, 0, 0));
+          if (p.there) {
+            p.cafeT += dt;
+            if (cafe.has()) {
+              cafe.buy(p);
+              p.cafeStop = false;
+            } else if (p.cafeT > TY.cafeWait) p.cafeStop = false;
+            if (!p.cafeStop) {
+              p.via = this.spots.outbound.map((v) => v.clone());
+              p.there = false;
+            }
+          }
+          return;
+        }
       }
+      if (p.state === 'toGate' && this.followVia(p)) return;
       this.gateSpot(g, i, p.target);
       if (p.state === 'toGate' && p.there) p.state = 'waiting';
     }));
@@ -169,6 +210,18 @@ export class Passengers {
         this.all.splice(i, 1);
       }
     }
+  }
+
+  /** Walking through waypoints: aims at the next one, drops it once there. False when there are none left. */
+  private followVia(p: Pax) {
+    if (!p.via.length) return false;
+    if (p.there && p.target.distanceTo(p.via[0]) < 0.01) {
+      p.via.shift();
+      p.there = false;
+      if (!p.via.length) return false;
+    }
+    p.target.copy(p.via[0]);
+    return true;
   }
 
   /** The open gate with the fewest waiting (and room for more), or -1. */

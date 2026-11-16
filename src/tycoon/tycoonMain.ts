@@ -42,7 +42,10 @@ const HOWTO_HTML = `
   a pebble is a boulder, and a ladybug is your first plane.</p>
   <ul>
     <li>🌼 <b>Nectar is the fuel.</b> Stand at a flower to pick drops up, then stand on a gate's <b>FUEL</b> pad.</li>
-    <li>🎫 <b>Passengers</b> walk in from the lawn. Stand on <b>CHECK-IN</b> to check them in: each one pays a ticket.</li>
+    <li>🎫 <b>Passengers</b> walk in from the lawn and line up in the 🐚 <b>terminal</b>. Stand behind its
+      <b>CHECK-IN</b> counter to check them in: each one pays a ticket.</li>
+    <li>🍪 The <b>Nectar Café</b> (a tile): carry picnic crumbs to the kitchen's oven; the snacks go to the café
+      counter inside the terminal, and passengers buy one on the way to their gate.</li>
     <li>🐞 A fuelled plane boards its passengers, taxis to the runway, takes off and flies its route.
       When it lands, the arriving passengers pay a landing fee.</li>
     <li>💵 Walk over the <b>cash pad</b> to collect. Spend it on the <b>glowing tiles</b>: ants who fuel the planes,

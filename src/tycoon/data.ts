@@ -33,12 +33,15 @@ export const TY = {
   passengerSpeed: 8,
   /** A new passenger walks in every this many seconds (while the terminal line has room). */
   arriveEvery: 6,
-  queueMax: 6,
+  queueMax: 8,
   /** Checking one passenger in (you or the Check-in ant at the desk). */
   checkInSecs: 1.1,
   /** 💵 What each passenger pays at check-in, and the landing fee per arriving passenger. */
   ticket: 8,
   landingFee: 3,
+  /** 🍪 The Nectar Café: what a snack sells for, and how long a passenger waits at the café for one. */
+  snackPrice: 5,
+  cafeWait: 4,
   /** ⛽ Nectar drops one flight burns, and the most a gate's fuel pad holds. */
   fuelPerFlight: 2,
   fuelMax: 8,
@@ -77,6 +80,11 @@ export const AT = {
     { x: 12, z: 16 },
     { x: 32, z: 12 },
   ],
+  /** 🍪 The café's kitchen (an oven outside the terminal's west wall) and its crumb pile (picnic crumbs). */
+  oven: { x: -42, z: 0 },
+  crumbs: { x: -60, z: 14 },
+  /** The café counter, inside the terminal (in the terminal's own space: left of the check-in counter). */
+  cafeLocal: { x: -9, z: 1.5 },
   tower: { x: 62, z: -30 },
   windsock: { x: 74, z: -42 },
   hangar: { x: 70, z: -18 },
@@ -111,7 +119,10 @@ export const TY_UNLOCKS: UnlockDef[] = [
   { id: 'ty-runner2', name: 'Fuel Runner 2', icon: '⛽', cost: 280, pos: [20, 34], requires: ['ty-gate2', 'ty-flower2'] },
   { id: 'ty-gate3', name: 'Gate 3 + Ladybug', icon: '🐞', cost: 800, pos: [14, -4], requires: ['ty-gate2'], level: 5 },
   { id: 'ty-tower', name: 'Control Tower', icon: '🗼', cost: 900, pos: [54, -10], requires: ['ty-gate2'], level: 5 },
-  { id: 'ty-bees', name: 'Bee Shuttles (3 seats)', icon: '🐝', cost: 1300, pos: [-50, 18], requires: ['ty-gate3'], level: 6 },
+  { id: 'ty-cafe', name: 'Nectar Café', icon: '🍪', cost: 220, pos: [-52, 26], requires: ['ty-banker'], level: 3 },
+  { id: 'ty-crumbs', name: 'Crumb Runner Ant', icon: '🍪', cost: 200, pos: [-58, 0], requires: ['ty-cafe'] },
+  { id: 'ty-chef', name: 'Chef Ant (faster oven)', icon: '🔥', cost: 650, pos: [-30, -2], requires: ['ty-crumbs'], level: 5 },
+  { id: 'ty-bees', name: 'Bee Shuttles (3 seats)', icon: '🐝', cost: 1300, pos: [-12, -2], requires: ['ty-gate3'], level: 6 },
   { id: 'ty-gate4', name: 'Gate 4 + Plane', icon: '✈️', cost: 1800, pos: [38, -4], requires: ['ty-gate3'], level: 7 },
   { id: 'ty-runner3', name: 'Fuel Runner 3', icon: '⛽', cost: 700, pos: [32, 32], requires: ['ty-gate4'] },
 ];

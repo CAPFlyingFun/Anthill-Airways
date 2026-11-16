@@ -29,13 +29,13 @@ import { spawnCreature } from '../actors/creatures';
 import { animateCreature, makeAnt, type CreatureModel } from '../actors/models';
 import { Flyers, Stack, makeItem, type StackItem } from '../world/items';
 import { TextSprite, TITLE, makePad, titleTag } from '../world/labels';
-import { CashPad, UnlockTile, Zone, gridLayout, type Blocker } from '../world/stations';
+import { Bakery, CashPad, OVEN, ResourcePile, UnlockTile, Zone, gridLayout, type Blocker } from '../world/stations';
 import { TUTORIAL_DONE, Tutorial, type TutorialScript } from '../world/tutorial';
 import type { MapRect, MapView } from '../ui/minimap';
 import { AT, CLEARINGS, TY, TYCOON_SAVE_V, TY_UNLOCKS, walkable } from './data';
 import { SURFACE, artBaggageCart, artBackdrop, artBug, artDewTank, artFuelFlower, artHangar, artScatter, artGate, artGround, artLawn, artRunway, artSign, artTaxiway, artTerminal, artTower, artWindsock, type ArtLawn, type ArtPiece } from './art';
 import { DESTINATIONS, Plane } from './plane';
-import { Passengers, type Pax } from './passengers';
+import { Passengers, type Cafe, type Pax } from './passengers';
 import { mat, mesh, PAL } from './kit';
 
 /** A nectar flower: its 3D, the drops waiting on it, the spot you stand to take them. */
@@ -134,9 +134,9 @@ export class Airfield {
     const desk = this.buildTerminal();
     this.cashPad = new CashPad(this.scene, desk.cash.x, desk.cash.z);
     this.cashPads.push(this.cashPad);
-    this.deskZone = new Zone(desk.serve.x, desk.serve.z, 1.6, 1.6);
-    const serve = makePad(3.2, 3.2, 'CHECK-IN', '#ffd166');
-    serve.position.set(desk.serve.x, 0.05, desk.serve.z);
+    this.deskZone = new Zone(desk.serve.x, desk.serve.z, 1.4, 1.0);
+    const serve = makePad(3.0, 2.2, 'CHECK-IN', '#ffd166');
+    serve.position.set(desk.serve.x, desk.serve.y + 0.06, desk.serve.z);
     this.scene.add(serve);
 
     AT.flowers.forEach((f, i) => this.buildFlower(f.x, f.z, i === 0 || this.owns('ty-flower2')));
@@ -147,9 +147,10 @@ export class Airfield {
         edge: new THREE.Vector3(AT.lawnEdge.x, 0, AT.lawnEdge.z),
         exit: new THREE.Vector3(AT.lawnExit.x, 0, AT.lawnExit.z),
         desk: desk.front,
-        lineDir: new THREE.Vector3(1, 0, 0),
+        lineDir: new THREE.Vector3(0, 0, 1), // (the line runs back along the red carpet, out of the front door)
         gateWait: this.gates.map((g) => g.piece.root.localToWorld(g.piece.spots.gate.clone())),
-        round: new THREE.Vector3(AT.terminal.x + 26, 0, AT.terminal.z - 8),
+        inbound: [desk.door],
+        outbound: [desk.inside, desk.exit],
       },
       AT.gates.length,
       this.groundY,
@@ -165,6 +166,7 @@ export class Airfield {
     };
 
     this.buildDecor();
+    this.buildCafe(desk.cafe);
 
     // The glowing tiles
     for (const def of TY_UNLOCKS) {
@@ -181,6 +183,10 @@ export class Airfield {
 
   /** How high the surface is at (x, z): the runway and taxiways are raised a little above the dirt. */
   groundY = (x: number, z: number) => {
+    // inside the 🐚 terminal: its floor (a fan 22 from the hinge, ±60°, the hinge 11 behind its centre)
+    const lx = x - AT.terminal.x;
+    const lz = z - AT.terminal.z + 11;
+    if (lz > 0 && Math.hypot(lx, lz) < 21 && Math.abs(Math.atan2(lx, lz)) < Math.PI / 3) return 0.5;
     const rw = AT.runway;
     if (Math.abs(x - rw.x) < rw.length / 2 && Math.abs(z - rw.z) < rw.width / 2) return SURFACE.runway;
     const west = rw.x - rw.length / 2 + 6;
@@ -322,26 +328,106 @@ export class Airfield {
   /** Each gate's spur + runway link (hidden until the gate is bought). */
   private gateRoads: THREE.Object3D[][] = [];
 
-  /** 🐚 The terminal, and where its check-in desk, line and cash pad go. */
+  /**
+   * 🐚 The terminal: the main LOBBY (v0.68.3). Passengers come in through the front door, line up along the red
+   * carpet, check in at the shell's pebble counter (you, or the Check-in ant, stand BEHIND it), stop at the 🍪 café
+   * (once it's open) and leave through the airside doorway in the right wall, toward the gates.
+   */
   private buildTerminal() {
-    const t = this.place(artTerminal(), AT.terminal.x, AT.terminal.z);
-    const door = this.worldSpot(t, 'door', new THREE.Vector3(AT.terminal.x, 0, AT.terminal.z + 14));
-    // An outdoor check-in desk beside the door: you stand on its west side, the line runs east
-    const deskAt = door.clone().add(new THREE.Vector3(6, 0, 4));
-    const desk = mesh(new THREE.CapsuleGeometry(1.0, 2.6, 4, 12).rotateX(Math.PI / 2).scale(1, 1.1, 1), mat(PAL.pebbleWarm, { rough: 0.55 }));
-    desk.position.copy(deskAt).setY(1.0);
-    this.scene.add(desk);
-    this.blockers.push({ minX: deskAt.x - 0.9, maxX: deskAt.x + 0.9, minZ: deskAt.z - 2.1, maxZ: deskAt.z + 2.1 });
+    const T = AT.terminal;
+    const t = this.place(artTerminal(), T.x, T.z);
+    const at = (x: number, y: number, z: number) => t.root.localToWorld(new THREE.Vector3(x, y, z));
+    const door = this.worldSpot(t, 'door', at(0, 0, 13.5));
+    const front = this.worldSpot(t, 'counter', at(0, 0.5, -0.6));
     const sign = new TextSprite(1.3, '#ffffff');
     this.deskSign = sign;
     sign.setText('🎫 CHECK-IN');
-    sign.sprite.position.copy(deskAt).setY(5);
+    sign.sprite.position.copy(at(0, 7.5, -3));
+    (sign.sprite.material as THREE.SpriteMaterial).depthTest = false; // (readable through the roof)
+    sign.sprite.renderOrder = 5;
     this.scene.add(sign.sprite);
     return {
-      front: deskAt.clone().add(new THREE.Vector3(2.2, 0, 0)),
-      serve: deskAt.clone().add(new THREE.Vector3(-2.6, 0, 0)),
+      /** where the front of the line stands (in front of the counter) */
+      front,
+      /** where you / the Check-in ant stand: behind the counter */
+      serve: at(0, 0.5, -5.7),
+      /** outside the front door (newcomers walk here first) */
+      door: door.clone().add(new THREE.Vector3(0, 0, 3)),
+      /** inside, past the counter's end, then out the airside doorway */
+      inside: at(8, 0.5, -0.4),
+      exit: this.worldSpot(t, 'exit', at(12.6, 0.5, -5.3)).add(new THREE.Vector3(2, 0, 0)),
       cash: door.clone().add(new THREE.Vector3(-7, 0, 7)),
+      cafe: at(AT.cafeLocal.x, 0.5, AT.cafeLocal.z),
     };
+  }
+
+  // --------------------------------------------------------------------------
+  // 🍪 The Nectar Café (bought): picnic crumbs -> the kitchen's oven (outside the west wall) -> snacks pass
+  // through a hatch onto the café counter inside -> passengers buy one on the way to their gate.
+  // --------------------------------------------------------------------------
+  private cafe!: { pile: ResourcePile; oven: Bakery; shelf: Stack; parts: THREE.Object3D[]; spot: THREE.Vector3; chef: CreatureModel | null };
+  private buildCafe(at: THREE.Vector3) {
+    const pile = new ResourcePile(this.scene, AT.crumbs.x, AT.crumbs.z, this.flyers, 'crumb', 'bread');
+    pile.spawnEvery = () => 2.2;
+    // a big picnic crust lying behind the pile (where the crumbs come from)
+    const crust = new THREE.Group();
+    crust.position.set(AT.crumbs.x - 1, 0, AT.crumbs.z - 9);
+    const bread = mesh(new THREE.CapsuleGeometry(4, 9, 6, 14).rotateZ(Math.PI / 2).scale(1, 0.55, 1), mat(0xe8b86a, { rough: 0.9 }));
+    bread.position.y = 2.2;
+    const top = mesh(new THREE.CapsuleGeometry(4.1, 9, 6, 14).rotateZ(Math.PI / 2).scale(1, 0.2, 1.02), mat(0xa8622a, { rough: 0.85 }));
+    top.position.y = 4.1;
+    crust.add(bread, top);
+    crust.rotation.y = 0.4;
+    this.scene.add(crust);
+    const crumbSign = new TextSprite(1.0, '#ffd166');
+    crumbSign.setText('🧺 PICNIC CRUMBS');
+    crumbSign.sprite.position.set(AT.crumbs.x, 8, AT.crumbs.z - 4);
+    this.scene.add(crumbSign.sprite);
+
+    const oven = new Bakery(this.scene, AT.oven.x, AT.oven.z, this.flyers, { ...OVEN, label: '🍪 KITCHEN' });
+
+    // the café counter inside the shell: a little round pebble bar with the snacks on top
+    const bar = new THREE.Group();
+    bar.position.copy(at);
+    const top2 = mesh(new THREE.CylinderGeometry(2.6, 2.4, 1.6, 22), mat(0xd9566a, { rough: 0.6 }));
+    top2.position.y = 0.8;
+    const lip = mesh(new THREE.TorusGeometry(2.6, 0.18, 8, 26).rotateX(Math.PI / 2), mat(0xffd166, { rough: 0.4, metal: 0.3 }));
+    lip.position.y = 1.6;
+    bar.add(top2, lip);
+    this.scene.add(bar);
+    const shelf = new Stack(bar, gridLayout(3, 2, 0.62, 0.62, 1.65, 0, 0), 6);
+    const cafeSign = new TextSprite(1.1, '#ffd166');
+    cafeSign.setText('🍪 NECTAR CAFÉ');
+    cafeSign.sprite.position.copy(at).setY(6.5);
+    (cafeSign.sprite.material as THREE.SpriteMaterial).depthTest = false;
+    cafeSign.sprite.renderOrder = 5;
+    this.scene.add(cafeSign.sprite);
+
+    this.cafe = { pile, oven, shelf, parts: [pile.group, crust, crumbSign.sprite, oven.group, bar, cafeSign.sprite], spot: at.clone().add(new THREE.Vector3(0, 0, 3.4)), chef: null };
+    for (const o of this.cafe.parts) o.visible = false;
+  }
+
+  /** The café opens: show it, let the walls block, and send passengers past it. */
+  private openCafe(animate: boolean) {
+    const c = this.cafe;
+    for (const o of c.parts) {
+      o.visible = true;
+      if (animate) this.flyers.grow(o);
+    }
+    this.blockers.push(c.oven.blocker, { minX: c.spot.x - 2.6, maxX: c.spot.x + 2.6, minZ: c.spot.z - 6, maxZ: c.spot.z - 1 });
+    const cafe: Cafe = {
+      spot: c.spot,
+      has: () => c.shelf.count > 0,
+      buy: (p) => {
+        const it = c.shelf.pop();
+        if (!it) return;
+        this.flyers.fly(it.mesh, () => p.pos.clone().setY(p.pos.y + 1), () => it.mesh.removeFromParent(), 0.3, 0.6);
+        this.bill(TY.snackPrice, c.spot);
+        this.progress.addXp(1);
+        this.sfx.sale();
+      },
+    };
+    this.pax.cafe = cafe;
   }
 
   /** 🌼 A nectar flower (`open` = bought: the second one shows up later). */
@@ -442,9 +528,9 @@ export class Airfield {
     this.place(artWindsock(), AT.windsock.x, AT.windsock.z);
     this.place(artHangar(), AT.hangar.x, AT.hangar.z, -0.5);
     this.place(artDewTank(), AT.flowers[1].x + 24, AT.flowers[1].z - 8, -0.4);
-    this.place(artBaggageCart(), -46, 2, 0.6);
+    this.place(artBaggageCart(), 60, -4, 0.6);
     this.place(artSign('ANTHILL AIRWAYS'), AT.terminal.x - 30, AT.terminal.z + 24, 0.5);
-    this.place(artSign('GATES', 'up'), -60, -4, 0.3);
+    this.place(artSign('GATES', 'up'), -64, -14, 0.3);
   }
 
   // --------------------------------------------------------------------------
@@ -463,8 +549,8 @@ export class Airfield {
       if (animate) this.flyers.grow(w.model.root);
     } else if (id === 'ty-checkin') {
       const a = spawnCreature('worker', 2.1) ?? makeAnt(0x8e2f14);
-      a.root.position.set(this.deskZone.x - 0.4, 0, this.deskZone.z);
-      a.root.rotation.y = Math.PI / 2; // (facing the line, east)
+      a.root.position.set(this.deskZone.x, 0.5, this.deskZone.z);
+      a.root.rotation.y = 0; // (behind the counter, facing the line)
       titleTag(a, '🎫 CHECK-IN', TITLE.ant);
       this.scene.add(a.root);
       this.checkInAnt = a;
@@ -494,6 +580,23 @@ export class Airfield {
       }
     } else if (id === 'ty-tower') {
       for (const g of this.gates) g.plane.boost = TY.towerBoost;
+    } else if (id === 'ty-cafe') {
+      this.openCafe(animate);
+    } else if (id === 'ty-crumbs') {
+      const c = this.cafe;
+      const w = new Worker(this.scene, nest.x, nest.z, () => ({ src: c.pile.stack, srcZone: c.pile.zone, dst: c.oven.input, dstZone: c.oven.inZone }), { color: 0xe8b86a }, 2.1);
+      titleTag(w.model, '🍪 CRUMB RUNNER', TITLE.ant);
+      this.workers.push(w);
+      if (animate) this.flyers.grow(w.model.root);
+    } else if (id === 'ty-chef') {
+      const c = this.cafe;
+      c.oven.makeFaster();
+      const chef = spawnCreature('worker', 2.1) ?? makeAnt(0x8e2f14);
+      chef.root.position.set(AT.oven.x, 0, AT.oven.z + 4.6);
+      titleTag(chef, '🔥 CHEF', TITLE.ant);
+      this.scene.add(chef.root);
+      c.chef = chef;
+      if (animate) this.flyers.grow(chef.root);
     } else if (id === 'ty-bees') {
       // 🐝 every gate swaps its ladybug for a bee (3 seats) as soon as it's parked and empty
       for (const g of this.gates) g.swap = true;
@@ -701,6 +804,21 @@ export class Airfield {
       g.plane.update(dt);
     });
 
+    // 🍪 The café: take crumbs at the pile, drop them at the kitchen's IN; snacks hop through the hatch
+    if (this.pax.cafe) {
+      const c = this.cafe;
+      c.pile.update(dt);
+      c.oven.update(dt);
+      if (c.chef) animateCreature(c.chef, dt, 0);
+      this.every(c.pile.zone, dt, c.pile.zone.contains(p) && me.canTake('crumb'), iv, () => {
+        if (me.canTake('crumb') && this.flyers.transfer(c.pile.stack, me.stack)) this.sfx.pickup();
+      });
+      this.every(c.oven.inZone, dt, c.oven.inZone.contains(p) && me.stack.has('crumb'), iv, () => {
+        if (this.flyers.transferType(me.stack, c.oven.input, 'crumb')) this.sfx.drop();
+      });
+      this.every(c.shelf, dt, c.oven.output.count > 0 && !c.shelf.full, 0.5, () => this.flyers.transfer(c.oven.output, c.shelf));
+    }
+
     // 🎫 Check-in: you on the CHECK-IN pad, or the Check-in ant
     this.pax.serving = !!this.checkInAnt || this.deskZone.contains(p);
     this.pax.update(dt);
@@ -846,6 +964,12 @@ export class Airfield {
       ...this.gates.flatMap((g, i) => (g.open ? [{ x: g.fuelZone.x, z: g.fuelZone.z, icon: '⛽', label: `Gate ${i + 1}`, alert: g.fuel.count < TY.fuelPerFlight }] : [])),
       ...this.gates.filter((g) => g.open && g.plane.model.root.visible).map((g) => ({ x: g.plane.pos.x, z: g.plane.pos.z, icon: this.owns('ty-bees') ? '🐝' : '🐞' })),
       { x: this.cashPad.zone.x, z: this.cashPad.zone.z, icon: '💵', alert: this.cashPad.stack.count > 0 },
+      ...(this.pax.cafe
+        ? [
+            { x: this.cafe.pile.zone.x, z: this.cafe.pile.zone.z, icon: '🧺' },
+            { x: this.cafe.oven.inZone.x, z: this.cafe.oven.inZone.z, icon: '🍪', label: 'Café', alert: this.cafe.oven.input.count === 0 && this.cafe.shelf.count === 0 },
+          ]
+        : []),
     ];
     return {
       areas: [
@@ -890,7 +1014,7 @@ export class Airfield {
           done: () => g0.fuel.count >= TY.fuelPerFlight || this.st.flights > 0,
           progress: () => Math.min(1, g0.fuel.count / TY.fuelPerFlight),
         },
-        { text: () => '🎫 Stand at CHECK-IN to check a passenger in', target: () => t.at(this.deskZone), done: () => this.st.passengers > 0 },
+        { text: () => '🎫 Go behind the CHECK-IN counter in the 🐚 terminal', target: () => t.at(this.deskZone), done: () => this.st.passengers > 0 },
         { text: () => '🛫 Watch your ladybug take off!', target: () => g0.plane.pos.clone(), done: () => this.st.flights > 0 },
         { text: () => '💵 Pick up your cash', target: () => t.at(this.cashPad.zone) },
         t.unlockStep('ty-runner', '⛽ Hire a Fuel Runner ant'),
