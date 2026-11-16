@@ -1,4 +1,4 @@
-# 🐜✈️🦖 Anthill Airways
+# 🐜✈️ Anthill Airways
 
 **Start as an ant. End up running an airline to an island full of dinosaurs, a volcano… and a 5-star resort.**
 
