@@ -484,7 +484,9 @@ function randomLook(i: number, seed: number): Look {
  */
 function randomHead(r: () => number): NonNullable<Look['head']> {
   const pick = <T,>(list: readonly T[]) => list[Math.min(list.length - 1, Math.floor(r() * list.length))];
-  const natural = HAIR_COLOURS.slice(0, 12), dyed = HAIR_COLOURS.slice(12);
+  // (v0.83.1: not strawberry blonde. It is her skin's own tone, and from the game's height a woman with it in a bun
+  // or cut short read as bald: Joshua, of one in a picture, "It looks like this one is bald, lol")
+  const natural = HAIR_COLOURS.slice(0, 12).filter((c) => c.id !== 'strawberry-blonde'), dyed = HAIR_COLOURS.slice(12);
   const colour = r() < 0.9 ? (r() < 0.35 ? pick(natural.slice(0, 4)) : pick(natural)) : pick(dyed.length ? dyed : natural);
   const face: Record<string, number> = { [pick(FACE_TYPES).id]: Math.round((0.5 + r() * 0.5) * 100) / 100 };
   if (r() < 0.35) { const second = pick(FACE_TYPES).id; if (!(second in face)) face[second] = Math.round((0.2 + r() * 0.3) * 100) / 100; }
