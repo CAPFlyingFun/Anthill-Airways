@@ -20,7 +20,12 @@ import type { BugKind } from './bugs';
 import { mm } from './scale';
 
 export interface PlaneType {
+  /** Its name in the save and the menus (v0.89: a jumbo shares its bug's model with a smaller aircraft, so the bug's
+   *  kind no longer says which aircraft it is). The first six are named after their bug, as saves have them. */
+  id: string;
   kind: BugKind;
+  /** Its body colour, if not the bug's own (the jumbos'). */
+  color?: number;
   name: string;
   icon: string;
   /** Nose to tail, game units (big enough to read, small enough for a gate's 9 × 11 stand). */
@@ -38,12 +43,17 @@ export interface PlaneType {
 
 /** In order: each one replaces the one before it. */
 export const FLEET: PlaneType[] = [
-  { kind: 'ladybug', name: 'Ladybug', icon: '🐞', length: mm(8), speed: 1, unlock: null, seats: 2, cost: 0, level: 1 },
-  { kind: 'bee', name: 'Honey Bee', icon: '🐝', length: mm(13), speed: 1.1, unlock: 'ty-bees', seats: 3, cost: 1300, level: 6 },
-  { kind: 'dragonfly', name: 'Dragonfly', icon: '🪽', length: mm(20), speed: 1.4, unlock: 'ty-dragonfly', seats: 4, cost: 3500, level: 9 },
-  { kind: 'butterfly', name: 'Butterfly', icon: '🦋', length: mm(11), speed: 1.05, unlock: 'ty-butterfly', seats: 6, cost: 8000, level: 12 },
-  { kind: 'beetle', name: 'Beetle Freighter', icon: '🪲', length: mm(15), speed: 0.85, unlock: 'ty-beetle', seats: 8, cost: 15000, level: 15 },
-  { kind: 'moth', name: 'Moth Night-Liner', icon: '🌙', length: mm(15), speed: 1.0, unlock: 'ty-moth', seats: 10, cost: 28000, level: 18 },
+  { id: 'ladybug', kind: 'ladybug', name: 'Ladybug', icon: '🐞', length: mm(8), speed: 1, unlock: null, seats: 2, cost: 0, level: 1 },
+  { id: 'bee', kind: 'bee', name: 'Honey Bee', icon: '🐝', length: mm(13), speed: 1.1, unlock: 'ty-bees', seats: 3, cost: 1300, level: 6 },
+  { id: 'dragonfly', kind: 'dragonfly', name: 'Dragonfly', icon: '🪽', length: mm(20), speed: 1.4, unlock: 'ty-dragonfly', seats: 4, cost: 3500, level: 9 },
+  { id: 'butterfly', kind: 'butterfly', name: 'Butterfly', icon: '🦋', length: mm(11), speed: 1.05, unlock: 'ty-butterfly', seats: 6, cost: 8000, level: 12 },
+  { id: 'beetle', kind: 'beetle', name: 'Beetle Freighter', icon: '🪲', length: mm(15), speed: 0.85, unlock: 'ty-beetle', seats: 8, cost: 15000, level: 15 },
+  { id: 'moth', kind: 'moth', name: 'Moth Night-Liner', icon: '🌙', length: mm(15), speed: 1.0, unlock: 'ty-moth', seats: 10, cost: 28000, level: 18 },
+  // ---- v0.89: 🛬 THE JUMBOS (Joshua, of the bigger airport: "Yes! Keep going"). The biggest of three bugs you already
+  // fly, in a livery of their own: far more seats, for the far destinations. Each fills a gate's stand (9 × 11). ----
+  { id: 'goliath', kind: 'beetle', color: 0xc9962b, name: 'Goliath Beetle Jumbo', icon: '🛡️', length: mm(19), speed: 0.8, unlock: 'ty-goliath', seats: 16, cost: 90000, level: 20 },
+  { id: 'atlas', kind: 'moth', color: 0xc8632a, name: 'Atlas Moth Jumbo', icon: '🔥', length: mm(20), speed: 0.95, unlock: 'ty-atlas', seats: 20, cost: 180000, level: 24 },
+  { id: 'emperor', kind: 'dragonfly', color: 0x2f6fe0, name: 'Emperor Dragonfly Jumbo', icon: '💎', length: mm(22), speed: 1.35, unlock: 'ty-emperor', seats: 24, cost: 320000, level: 28 },
 ];
 
 /** The best plane `owns` has unlocked. */

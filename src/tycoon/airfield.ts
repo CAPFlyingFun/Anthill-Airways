@@ -999,12 +999,12 @@ export class Airfield {
       this.hangarStuff.push(m);
     };
     const flying = bestPlane((id) => this.owns(id));
-    park(artBug(flying.kind, flying.length, { seed: 21 }), at(0, -0.6), 0);
+    park(artBug(flying.kind, flying.length, { seed: 21, color: flying.color }), at(0, -0.6), 0);
     // (retired types: small models in an arc along the back wall, oldest on the left)
     const retired = FLEET.filter((t) => t !== flying && (!t.unlock || this.owns(t.unlock)));
     retired.forEach((t, i) => {
-      const a = Math.PI + (i - (retired.length - 1) / 2) * 0.42;
-      park(artBug(t.kind, Math.min(t.length, 4.5) * 0.6, { seed: 30 + i }), at(Math.sin(a) * 5.6, Math.cos(a) * 5.6), a + Math.PI);
+      const a = Math.PI + (i - (retired.length - 1) / 2) * Math.min(0.42, 2.3 / retired.length); // (v0.89: closer together once there are more than six)
+      park(artBug(t.kind, Math.min(t.length, 4.5) * 0.6, { seed: 30 + i, color: t.color }), at(Math.sin(a) * 5.6, Math.cos(a) * 5.6), a + Math.PI);
     });
     const mech = spawnCreature('worker', 2.1) ?? makeAnt(0x8e2f14);
     titleTag(mech, '🔧 MECHANIC', TITLE.ant);
@@ -1124,10 +1124,10 @@ export class Airfield {
         let nextShown = false;
         for (const t of FLEET) {
           const seats = `${t.seats + this.up('fleet.seats')} seats · ×${t.speed} speed`;
-          if (!t.unlock || this.owns(t.unlock)) rows.push({ id: t.kind, ic: t.icon, name: t.name, desc: seats, lv: mixed ? '✈️ IN THE MIX' : t === flying ? '✈️ FLYING NOW' : 'Retired', cost: null, done: 'OWNED' });
+          if (!t.unlock || this.owns(t.unlock)) rows.push({ id: t.id, ic: t.icon, name: t.name, desc: seats, lv: mixed ? '✈️ IN THE MIX' : t === flying ? '✈️ FLYING NOW' : 'Retired', cost: null, done: 'OWNED' });
           else {
             const lock = nextShown ? '🔒 Later' : this.save.level < t.level ? `🔒 Lv ${t.level}` : undefined;
-            rows.push({ id: t.kind, ic: t.icon, name: `Unlock ${t.name}`, desc: seats, lv: 'NEW AIRCRAFT', cost: t.cost, lock });
+            rows.push({ id: t.id, ic: t.icon, name: `Unlock ${t.name}`, desc: seats, lv: 'NEW AIRCRAFT', cost: t.cost, lock });
             nextShown = true;
           }
         }
@@ -1149,7 +1149,7 @@ export class Airfield {
           }
           return;
         }
-        const t = FLEET.find((f) => f.kind === id);
+        const t = FLEET.find((f) => f.id === id);
         if (!t?.unlock || this.owns(t.unlock) || this.save.level < t.level || !this.pay(t.cost)) return;
         this.save.unlocked.push(t.unlock);
         this.applyUnlock(t.unlock, true);
@@ -1270,29 +1270,29 @@ export class Airfield {
   private typeFor(i: number): PlaneType {
     const best = bestPlane((id) => this.owns(id));
     if (!this.mixed) return best;
-    const t = FLEET.find((f) => f.kind === this.st.types?.[i]);
+    const t = FLEET.find((f) => f.id === this.st.types?.[i]);
     return t && (!t.unlock || this.owns(t.unlock)) ? t : best;
   }
   /** Pick gate `i`'s next aircraft: any you've unlocked, but not the one it has, nor one another gate's flying
    *  (while there are enough to go round): so the apron's always a mix. */
   private rollType(i: number) {
     const types = (this.st.types ??= []);
-    if (!this.mixed) return void (types[i] = bestPlane((id) => this.owns(id)).kind);
+    if (!this.mixed) return void (types[i] = bestPlane((id) => this.owns(id)).id);
     const owned = FLEET.filter((f) => !f.unlock || this.owns(f.unlock));
     const taken = new Set<string | undefined>();
     this.gates.forEach((g, k) => {
       if (k !== i && g.open) taken.add(types[k]);
     });
-    let pool = owned.filter((f) => f.kind !== types[i] && !taken.has(f.kind));
-    if (!pool.length) pool = owned.filter((f) => f.kind !== types[i]);
+    let pool = owned.filter((f) => f.id !== types[i] && !taken.has(f.id));
+    if (!pool.length) pool = owned.filter((f) => f.id !== types[i]);
     if (!pool.length) pool = owned;
-    types[i] = pool[Math.floor(Math.random() * pool.length)].kind;
+    types[i] = pool[Math.floor(Math.random() * pool.length)].id;
   }
   private planeModel(i: number) {
     if (this.mixed && !this.st.types?.[i]) this.rollType(i); // (its first pick)
     const t = this.typeFor(i);
-    const m = artBug(t.kind, t.length, { seed: 3 + i * 4 });
-    m.root.userData.planeType = t.kind;
+    const m = artBug(t.kind, t.length, { seed: 3 + i * 4, color: t.color });
+    m.root.userData.planeType = t.id;
     // 💺 as many seats as its type has (+ the hangar's Extra Seat levels): extra ones sit between the model's own
     // seats, a little to each side
     const want = t.seats + this.up('fleet.seats');
@@ -1532,7 +1532,7 @@ export class Airfield {
       // (the next gate home gets the new one; with the fleet mixed, the others keep taking turns)
       this.gates.forEach((g, k) => {
         g.swap = true;
-        if (animate && k === 0) (this.st.types ??= [])[k] = t.kind;
+        if (animate && k === 0) (this.st.types ??= [])[k] = t.id;
       });
       if (this.owns('ty-hangar') && this.hangar) this.fillHangar();
       if (animate) this.hud.banner(`${t.icon} ${t.name} unlocked!`, this.st.mixed !== false ? 'It joins the mix: your gates take turns with every aircraft you own' : 'Nothing to assign: each gate switches to it as its plane comes home', 4200);
@@ -1784,7 +1784,7 @@ export class Airfield {
       const p = g.plane;
       const seats = p.model.seats.length;
       const kind = (p.model.root.userData.planeType as string | undefined) ?? 'ladybug';
-      const pt = FLEET.find((f) => f.kind === kind) ?? FLEET[0];
+      const pt = FLEET.find((f) => f.id === kind) ?? FLEET[0];
       const dep = p.state === 'parked' || p.state === 'taxiOut' || p.state === 'hold' || p.state === 'lineUp' || p.state === 'takeoff';
       const flight = dep ? p.outbound : p.inbound;
       const per = TY.fuelPerFlight;
@@ -2250,7 +2250,7 @@ export class Airfield {
       // (a new type at this gate: say so, once per gate and type)
       const type = this.typeFor(i);
       this.applyUps(); // (its seats and speed)
-      if (g.open && was && was !== type.kind && !mix) this.hud.banner(`${type.icon} Gate ${i + 1} now flies the ${type.name}`, `${plane.model.seats.length} seats`, 2600);
+      if (g.open && was && was !== type.id && !mix) this.hud.banner(`${type.icon} Gate ${i + 1} now flies the ${type.name}`, `${plane.model.seats.length} seats`, 2600);
     }
     const fuelled = this.fuelUnits(g) >= TY.fuelPerFlight;
     const nose = g.door;
@@ -2349,7 +2349,7 @@ export class Airfield {
       { x: AT.tower.x, z: AT.tower.z, icon: '🗼' },
       ...this.flowers.filter((f) => f.piece.root.visible).map((f) => ({ x: f.zone.x, z: f.zone.z, icon: '🌼', alert: f.stack.full })),
       ...this.gates.flatMap((g, i) => (g.open ? [{ x: g.fuelZone.x, z: g.fuelZone.z, icon: '⛽', label: `Gate ${i + 1}`, alert: this.fuelUnits(g) < TY.fuelPerFlight }] : [])),
-      ...this.gates.filter((g) => g.open && g.plane.inSight).map((g) => ({ x: g.plane.pos.x, z: g.plane.pos.z, icon: FLEET.find((f) => f.kind === g.plane.model.root.userData.planeType)?.icon ?? '🐞' })),
+      ...this.gates.filter((g) => g.open && g.plane.inSight).map((g) => ({ x: g.plane.pos.x, z: g.plane.pos.z, icon: FLEET.find((f) => f.id === g.plane.model.root.userData.planeType)?.icon ?? '🐞' })),
       { x: this.staffAt.x, z: this.staffAt.z, icon: '⬆️', label: 'Staff' },
       ...this.bins.map((b) => ({ x: b.bin.zone.x, z: b.bin.zone.z, icon: '🗑️', alert: b.litter.count >= TY.binFull })),
       ...(this.recycler.open ? [{ x: AT.recycler.x, z: AT.recycler.z, icon: '♻️', alert: this.recycler.output.full }] : []),
