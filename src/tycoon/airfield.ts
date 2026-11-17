@@ -42,6 +42,8 @@ import { SURFACE, artBaggageCart, artBackdrop, artBug, artDewTank, artFuelFlower
 import { Plane } from './plane';
 import { PEOPLE_FILES, Passengers, type Pax, type Stop } from './passengers';
 import { AutoDetail } from './autoDetail';
+import { SIZE as TRUE_SIZE } from './scale';
+const PERSON = TRUE_SIZE.person;
 import { hasModel, loadPeople, lodPeople } from '../actors/creatures';
 import { FLEET, bestPlane, openRoutes, routeOf, type PlaneType } from './fleet';
 import { STAFF, STAFF_MAX, buyStaff, staffCost, staffFx, type StaffId } from './staff';
@@ -1897,7 +1899,7 @@ export class Airfield {
     // 🎫 Check-in: you on the CHECK-IN pad, or the Check-in ant (it waits while the BAG DROP is full)
     this.pax.serving = (!!this.checkInAnt || this.deskZone.contains(p)) && !this.bagDrop.full;
     // 🎚️ (the tiny people's detail follows the frame rate: more while it holds, less the moment it falls)
-    if (this.people) { this.detail.step(); this.pax.shift = this.detail.shift; }
+    if (this.people) { this.detail.step(this.peopleInView()); this.pax.detail = this.detail.percent; }
     this.pax.update(dt);
     if (this.crowd && this.crowd !== 'loading') this.crowd.step(dt);
 
@@ -2284,9 +2286,25 @@ export class Airfield {
   /** 🎚️ The tiny people's automatic detail (autoDetail.ts), and what Settings says of it: "auto 20% · 58 fps". */
   readonly detail = new AutoDetail();
   detailText() {
-    const crowd = this.crowd && this.crowd !== 'loading' ? this.crowd : null;
-    const fps = this.detail.fps ? ` · ${Math.round(this.detail.fps)} fps` : '';
-    return crowd ? `detail auto ${crowd.detailAt(this.detail.shift)}%${fps}` : `detail auto${fps}`;
+    const d = this.detail;
+    return `${d.inView} in view · detail ${d.percent}%${d.guard ? ` (${d.guard} lower for fps)` : ''}${d.fps ? ` · ${Math.round(d.fps)} fps` : ''}`;
+  }
+  /** How many tiny people the camera can see right now (walking, queueing or riding a bug). */
+  private readonly viewBox = new THREE.Frustum();
+  private readonly viewMat = new THREE.Matrix4();
+  private readonly viewBall = new THREE.Sphere();
+  private peopleInView() {
+    this.camera.updateMatrixWorld();
+    this.viewBox.setFromProjectionMatrix(this.viewMat.multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse));
+    let n = 0;
+    for (const p of this.pax.all) {
+      const root = p.model.root;
+      if (!p.model.biped && !root.userData.crowd) continue; // (an aphid from before the switch)
+      root.getWorldPosition(this.viewBall.center).y += PERSON / 2;
+      this.viewBall.radius = PERSON * 0.55;
+      if (this.viewBox.intersectsSphere(this.viewBall)) n++;
+    }
+    return n;
   }
   /** The game's renderer (tycoonMain hands it over: the builder's crowd draws with it) and the crowd itself. */
   renderer: THREE.WebGLRenderer | null = null;
@@ -2301,7 +2319,7 @@ export class Airfield {
     if (!this.crowd && this.renderer) {
       this.crowd = 'loading';
       void import('../devRoom')
-        .then((room) => room.startDevRoom({ scene: this.scene, camera: this.camera, renderer: this.renderer!, shift: () => this.detail.shift }))
+        .then((room) => room.startDevRoom({ scene: this.scene, camera: this.camera, renderer: this.renderer!, level: () => this.detail.level }))
         .then(async (crowd) => {
           if (!crowd || !(await crowd.ready)) throw new Error('the builder\'s body did not load');
           this.crowd = crowd;
