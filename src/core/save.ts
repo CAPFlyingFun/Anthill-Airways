@@ -86,6 +86,13 @@ export interface TycoonSave {
   cargoPads?: number[];
   /** 🌙🌬️ The sky (v0.91, tycoon/weather.ts): seconds into the day, and which way the wind has the runways (+1 east). */
   sky?: { t: number; dir: number };
+  /** 👑 The Royal Charter (v0.92, tycoon/charter.ts): crowns to spend, crowns ever earned, charters taken, the
+   *  perks' levels, and what `tally.earned` stood at when this airfield was founded (it's worth what it has earned since). */
+  crowns?: number;
+  crownsAll?: number;
+  charters?: number;
+  perks?: Record<string, number>;
+  runBase?: number;
   /** 🧍 Passengers are TRADDOMIUM's tiny people instead of bugs (v0.77, ⚙️ Settings). */
   people?: boolean;
   /** 🎯 Quests (v0.73, tycoon/quests.ts): how many are done, and the random one that's on. */

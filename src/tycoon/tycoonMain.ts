@@ -75,6 +75,9 @@ const HOWTO_HTML = `
     <li>🎁 The <b>Gift Shop</b> sells pollen sweets to passengers; the 👑 <b>VIP Lounge</b> brings golden VIPs who pay ×3.</li>
     <li>🦎 Now and then something happens: a lizard sunbathing on the runway (walk up to shoo it), or a 🪶 feather
       to find.</li>
+    <li>👑 Once the <b>North Field</b> is open, the Queen offers a <b>Royal Charter</b> (the 👑 button): hand the
+      airfield over and found a new one. It pays <b>crowns</b>: each one makes everything pay +5% for good, and they
+      buy perks that stay. You keep your level and stats.</li>
     <li>🌙 The day turns to <b>night</b> every few minutes: the runway lights come on and night flights pay
       <b>+25%</b>. 🌧️ <b>Rain</b> fills the flowers twice as fast (planes go a little slower), and the 🌈
       <b>rainbow</b> after it pays <b>+50%</b> on every fare. 🌬️ When the <b>wind</b> turns, planes take off and
@@ -197,6 +200,12 @@ export async function startTycoon({ app, renderer, save, hud, sfx, input, progre
   const routesBtn = document.getElementById('routesBtn') as HTMLButtonElement;
   routesBtn.hidden = false;
   routesBtn.addEventListener('click', () => field.openRouteMap());
+  // 👑 the Royal Charter (the button is there once the Queen has offered one, or you hold crowns)
+  const charterBtn = document.getElementById('charterBtn') as HTMLButtonElement;
+  charterBtn.addEventListener('click', () => field.openCharter());
+  const showCharter = () => (charterBtn.hidden = !field.charterOffered);
+  showCharter();
+  window.setInterval(showCharter, 1000);
 
   // 3) First-person / third-person view
   const viewBtn = document.getElementById('viewBtn')!;
@@ -334,6 +343,7 @@ export async function startTycoon({ app, renderer, save, hud, sfx, input, progre
       { icon: '🛬', label: 'Landings', value: (t.landings ?? 0).toLocaleString() },
       { icon: '📅', label: 'Days flown', value: `${t.day?.stars.length ?? 0} · ⭐ ${field.goals.totalStars}` },
       { icon: '🐜', label: 'Ants working', value: String(field.workers.length + field.bankers.length + (save.unlocked.includes('ty-checkin') ? 1 : 0) + (save.unlocked.includes('ty-atc') ? 1 : 0)) },
+      { icon: '👑', label: 'Crowns earned', value: `${t.crownsAll ?? 0} · ${t.charters ?? 0} charter${t.charters === 1 ? '' : 's'}` },
       { icon: '💤', label: 'Idle income now', value: `${money(save.rate * 60)}/min` },
     ];
   });

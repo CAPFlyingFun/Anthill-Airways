@@ -55,6 +55,8 @@ import type { Crowd } from '../devRoom';
 import { trash } from '../world/trash';
 import { mat, mesh, PAL } from './kit';
 import { Weather } from './weather';
+import { CHARTER, CharterPanel, PERKS, PERK_FX, SEED, crownMult, crownsFor, earnedFor, perkCost, runEarned, takeCharter, type CharterState } from './charter';
+import { writeSave } from '../core/save';
 import { distToPath } from './airport/common';
 import { Goals, type GoalKind } from './goals';
 import type { PlaneInfo } from './flightUi';
@@ -1343,7 +1345,7 @@ export class Airfield {
       g.fuel.max = TY.fuelMax + 2 * this.up(`gate${i}.fuel`);
       this.pax.gateCap[i] = Math.max(6, g.plane.model.seats.length + 2) + 2 * this.up(`gate${i}.seats`);
       // (🌧️ a little slower in the rain; 🌬️ and it takes off and lands into the wind)
-      g.plane.boost = boost * this.typeFor(i).speed * this.weather.planeMult;
+      g.plane.boost = boost * this.typeFor(i).speed * this.weather.planeMult * (1 + PERK_FX.planes * this.perk('planes'));
       g.plane.wind = this.weather.dir;
     });
     this.flowers.forEach((f, i) => (f.stack.max = TY.flowerMax + 2 * this.up(`flower${i}.cap`)));
@@ -1358,7 +1360,7 @@ export class Airfield {
       const job = w.model.root.userData.job as StaffId | undefined;
       if (!job) continue;
       const lv = this.staffLv(job);
-      w.boost = staffFx.speed(lv);
+      w.boost = staffFx.speed(lv) * (1 + PERK_FX.ants * this.perk('ants'));
       w.stack.max = (w.model.root.userData.carry0 as number) + staffFx.carry(lv);
     }
     for (const b of this.bankers) b.boost = staffFx.grab(this.staffLv('banker'));
@@ -1831,7 +1833,8 @@ export class Airfield {
 
   /** A bill pops out at `from` and lands on the cash pad. */
   private bill(value: number, from: THREE.Vector3) {
-    const v = Math.round(value * this.progress.cashMult);
+    // (👑 every crown ever earned makes it pay more)
+    const v = Math.round(value * this.progress.cashMult * crownMult(this.st));
     this.count('earned', v);
     const pad = this.cashPad.stack;
     if (pad.full) {
@@ -1916,6 +1919,59 @@ export class Airfield {
       this.sfx.popup();
     }
   }
+  // --------------------------------------------------------------------------
+  // 👑 The Royal Charter (v0.92: charter.ts): hand the airfield over for crowns, and found a new one
+  // --------------------------------------------------------------------------
+  private charterPanel: CharterPanel | null = null;
+  /** The charter's been taken: nothing more happens here (the game is being loaded again). */
+  private chartered = false;
+  private perk(id: string) {
+    return this.st.perks?.[id] ?? 0;
+  }
+  /** The 👑 button is there once the Queen has offered a charter (the North Field is open), or you hold crowns. */
+  get charterOffered() {
+    return !this.learning && (this.owns(CHARTER.needs) || (this.st.crownsAll ?? 0) > 0);
+  }
+  private charterState(): CharterState {
+    const earned = runEarned(this.st);
+    const gain = crownsFor(earned);
+    const need = !this.owns(CHARTER.needs)
+      ? 'Open the North Field (Gate 5) first'
+      : gain < 1
+        ? `This airfield has to earn $${Math.ceil(earnedFor(1) - earned).toLocaleString('en-US')} more for its first crown`
+        : null;
+    return { crowns: this.st.crowns ?? 0, all: this.st.crownsAll ?? 0, charters: this.st.charters ?? 0, earned, gain, need, perks: { ...(this.st.perks ?? {}) } };
+  }
+  openCharter() {
+    this.charterPanel ??= new CharterPanel(document.getElementById('hud')!, {
+      state: () => this.charterState(),
+      buy: (id) => {
+        const def = PERKS.find((p) => p.id === id);
+        const lv = this.perk(id);
+        if (!def || lv >= def.max || (this.st.crowns ?? 0) < perkCost(lv)) return;
+        this.st.crowns = (this.st.crowns ?? 0) - perkCost(lv);
+        (this.st.perks ??= {})[id] = lv + 1;
+        // (💰 seed money is for the NEXT airfield: so that it's worth something today, this one gets the difference now)
+        if (id === 'seed') this.addCash(SEED[lv + 1] - SEED[lv]);
+        this.sfx.upgrade();
+        this.hud.banner(`${def.icon} ${def.name}`, def.says(lv + 1), 2200);
+      },
+      take: () => {
+        if (this.chartered || this.charterState().need) return;
+        // (the save becomes a new airfield's, and the game is loaded again on it: nothing here is taken down)
+        this.chartered = true;
+        const won = takeCharter(this.save);
+        writeSave(this.save);
+        this.sfx.unlocked();
+        this.charterPanel?.close();
+        this.hud.banner('👑 The Royal Charter!', `+${won} crowns · a new airfield awaits`, 2600);
+        window.setTimeout(() => location.reload(), 1500);
+      },
+    });
+    this.sfx.popup();
+    this.charterPanel.open();
+  }
+
   private routeMap: RouteMap | null = null;
   /** Open the 🗺️ map (on `pick`'s card, if given). */
   openRouteMap(pick?: string) {
@@ -2082,10 +2138,11 @@ export class Airfield {
   }
 
   update(dt: number, move: THREE.Vector2) {
+    if (this.chartered) return; // (👑 handed over: the new airfield is loading)
     const p = this.player.pos;
     const me = this.player;
     const prog = this.progress;
-    me.carryMax = CONFIG.player.baseCarry + prog.carryBonus + staffFx.backpack(this.staffLv('you'));
+    me.carryMax = CONFIG.player.baseCarry + prog.carryBonus + staffFx.backpack(this.staffLv('you')) + PERK_FX.pack * this.perk('pack');
     me.speedMult = prog.speedMult * 1.6; // (the airfield is big: you walk a bit faster than in the colony)
     me.update(dt, move, this.blockers, walkable);
     p.y = this.groundY(p.x, p.z);
@@ -2317,6 +2374,12 @@ export class Airfield {
     this.applyUps();
     // 🦎🪶 now and then, something happens
     this.events.update(dt, !this.learning);
+    // 👑 the Queen offers a Royal Charter, once this airfield is worth a crown (told once an airfield)
+    if (!this.save.paid['ty-charter'] && !this.learning && this.owns(CHARTER.needs) && crownsFor(runEarned(this.st)) >= 1) {
+      this.save.paid['ty-charter'] = 1;
+      this.hud.banner('👑 The Queen offers a Royal Charter!', 'Tap the 👑 button (top right): found a new airfield, and keep crowns for good', 5200);
+      this.sfx.unlocked();
+    }
     // 🌙🌧️🌬️ the sky turns (and the corner of the screen tells the time)
     this.weather.update(dt, !this.learning, p, FIELDS.filter((f) => this.fieldOpen(f)));
     this.st.sky = this.weather.saved();
