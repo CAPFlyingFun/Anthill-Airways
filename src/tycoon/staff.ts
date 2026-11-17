@@ -12,7 +12,7 @@
 // ============================================================================
 import type { UpPanelModel, UpRowModel } from '../ui/hud';
 
-export type StaffId = 'fuel' | 'bags' | 'cafe' | 'janitor' | 'checkin' | 'shop' | 'banker' | 'you';
+export type StaffId = 'fuel' | 'bags' | 'cafe' | 'janitor' | 'checkin' | 'shop' | 'banker' | 'cargo' | 'you';
 
 export interface StaffDef {
   id: StaffId;
@@ -34,6 +34,7 @@ export const STAFF: StaffDef[] = [
   { id: 'cafe', icon: '🍪', name: 'Café crew', needs: 'ty-crumbs', base: 140 },
   { id: 'banker', icon: '🏦', name: 'Banker', needs: 'ty-banker', base: 150 },
   { id: 'janitor', icon: '🧹', name: 'Janitor ant', needs: 'ty-janitor', base: 120 },
+  { id: 'cargo', icon: '📦', name: 'Cargo ants', needs: 'ty-cargoant', base: 400 },
   { id: 'you', icon: '🎒', name: 'Your backpack', needs: null, base: 70 },
 ];
 
@@ -66,6 +67,7 @@ function effect(id: StaffId, lv: number) {
     case 'bags':
     case 'cafe':
     case 'janitor':
+    case 'cargo':
       return `${x(staffFx.speed(lv))} speed · +${staffFx.carry(lv)} carry`;
     case 'checkin':
       return `${x(staffFx.quick(lv))} check-in speed`;

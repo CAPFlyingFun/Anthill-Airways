@@ -81,6 +81,9 @@ export interface TycoonSave {
   routeLv?: Record<string, number>;
   routeOff?: string[];
   routeFlown?: Record<string, number>;
+  /** 📦 Cargo (v0.90): crates waiting on the depot's dock, and on each gate's CARGO pad. */
+  cargo?: number;
+  cargoPads?: number[];
   /** 🧍 Passengers are TRADDOMIUM's tiny people instead of bugs (v0.77, ⚙️ Settings). */
   people?: boolean;
   /** 🎯 Quests (v0.73, tycoon/quests.ts): how many are done, and the random one that's on. */

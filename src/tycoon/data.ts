@@ -89,6 +89,13 @@ export const TY = {
   recycleEvery: 0.7,
   binFull: 8,
   binMax: 12,
+  /** 📦 Cargo (v0.90): what a crate pays at take-off (× the route's fare), how often the depot packs one, how many
+   *  wait on its dock, the most a gate's CARGO pad holds, and how many a Cargo ant carries. */
+  cargoPrice: 15,
+  cargoEvery: 2.4,
+  cargoMax: 12,
+  cargoPadMax: 14,
+  cargoCarry: 6,
   /** XP. */
   xpCheckIn: 3,
   xpFuel: 1,
@@ -119,6 +126,9 @@ export const AT = {
     // (v0.88: the north field's own nectar flower, east of Gate 8)
     { x: 64, z: -94 },
   ],
+  /** 📦 The cargo depot (v0.90): on the open ground south-west of the terminal, between the picnic crumbs and the
+   *  ANTHILL AIRWAYS sign (west of Gate 1 was tried first: the crumbs' bread crust lies over it). */
+  cargo: { x: -50, z: 23 },
   /** 🚸 The crossing over the runway and its taxiway (v0.88): where travellers and ants walk to the north field. */
   crossing: { x: -62, south: -29, north: -73 },
   /** 🍪 The café's kitchen (an oven outside the terminal's west wall) and its crumb pile (picnic crumbs). */
@@ -187,13 +197,17 @@ export const FIELDS: FieldDef[] = [
 export const fieldOf = (gate: number) => FIELDS[Math.min(FIELDS.length - 1, Math.floor(gate / GATES_PER_FIELD))];
 
 /** The bare-dirt clearings in the lawn (circles): the airfield, the camera side, and the runway strip. */
-export const CLEARINGS = [
+/** (The first field's own: as they were before the north field. What lies about on the dirt is still dealt by these.) */
+export const CLEARINGS_FIRST = [
   { x: 0, z: 0, r: 74 },
   { x: 0, z: 52, r: 56 },
   { x: 40, z: 30, r: 44 },
   // (v0.72.1: the 🛖 hangar's ground, so the grass doesn't lean in over its back wall)
   { x: 70, z: 6, r: 25 },
   ...[-100, -55, -10, 35, 80, 115].map((x) => ({ x, z: -58, r: 34 })),
+];
+export const CLEARINGS = [
+  ...CLEARINGS_FIRST,
   // (v0.88: the north field: its gates' apron, and its runway's strip)
   ...[-64, -22, 20, 62].map((x) => ({ x, z: -102, r: 38 })),
   ...[-100, -55, -10, 35, 80, 115].map((x) => ({ x, z: AT.runway.z + NORTH_BY, r: 34 })),
@@ -247,4 +261,9 @@ export const TY_UNLOCKS: UnlockDef[] = [
   { id: 'ty-bags4', name: 'Baggage Ant 4', icon: '🧳', cost: 12000, pos: [-52, -84], requires: ['ty-gate5'] },
   { id: 'ty-runner5', name: 'Fuel Runner 5', icon: '⛽', cost: 20000, pos: [48, -78], requires: ['ty-runner4', 'ty-gate7'] },
   { id: 'ty-bags5', name: 'Baggage Ant 5', icon: '🧳', cost: 20000, pos: [-44, -78], requires: ['ty-bags4', 'ty-gate7'] },
+  // ---- v0.90: 📦 cargo: every departing plane can carry freight in its hold ----
+  { id: 'ty-cargo', name: 'Cargo Depot (freight on every flight)', icon: '📦', cost: 50000, pos: [-50, 23], requires: ['ty-gate4'], level: 16 },
+  { id: 'ty-cargoant', name: 'Cargo Ant', icon: '📦', cost: 15000, pos: [-57, 18], requires: ['ty-cargo'] },
+  { id: 'ty-cargoant2', name: 'Cargo Ant 2', icon: '📦', cost: 25000, pos: [-52, 31], requires: ['ty-cargoant'] },
+  { id: 'ty-cargoant3', name: 'Cargo Ant 3', icon: '📦', cost: 40000, pos: [-58, 25], requires: ['ty-cargoant2', 'ty-gate5'] },
 ];

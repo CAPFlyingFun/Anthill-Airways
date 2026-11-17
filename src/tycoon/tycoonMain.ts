@@ -56,6 +56,8 @@ const HOWTO_HTML = `
       doing. 🎯 on the card points the camera at it until you walk. 📋 is the whole flight board.</li>
     <li>🛫 <b>The north field</b> (the Runway 2 + Gate 5 tile, beyond the runway): four more gates with a runway of
       their own. Walk over the 🚸 crossing west of Gate 1. Its planes never wait for the first runway.</li>
+    <li>📦 <b>Cargo</b> (the Cargo Depot tile, south-west of the terminal): carry its crates to a gate's <b>CARGO</b> pad. The next
+      plane to leave takes them and they pay at take-off, more on a far route.</li>
     <li>🗺️ <b>Destinations:</b> the 🗺️ button (top right) is a map of the garden. Open far-away places for cash:
       they pay a higher fare. 📣 Advertise a place to raise its fare, or switch its flights off and on.</li>
     <li>📅 <b>Daily goals</b> (the bar under the airfield's name): finish each day's goals quickly for ⭐⭐⭐

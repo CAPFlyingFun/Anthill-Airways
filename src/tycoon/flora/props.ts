@@ -723,7 +723,10 @@ export function scatter(
   area: { x: number; z: number; w: number; d: number },
   count: number,
   avoid?: (x: number, z: number) => boolean,
-  seed = 1
+  seed = 1,
+  /** Spots that are chosen as ever but not drawn (v0.90): something has since been built there. Leaving them in the
+   *  count keeps every other piece exactly where, and as big as, it was. */
+  hide?: (x: number, z: number) => boolean
 ): void {
   const R = rng(seed * 6007 + what.length);
   const spots: { x: number; z: number }[] = [];
@@ -750,7 +753,7 @@ export function scatter(
         const tm = p.tiltMax ?? 0;
         e.set((R.next() - 0.5) * tm, R.next() * TAU, (R.next() - 0.5) * tm);
         q.setFromEuler(e);
-        m4.compose(pv.set(spots[si].x, p.y ?? 0, spots[si].z), q, sv.set(...p.s));
+        m4.compose(pv.set(spots[si].x, p.y ?? 0, spots[si].z), q, hide?.(spots[si].x, spots[si].z) ? sv.set(1e-6, 1e-6, 1e-6) : sv.set(...p.s));
         im.setMatrixAt(n, m4);
       });
       im.castShadow = true;

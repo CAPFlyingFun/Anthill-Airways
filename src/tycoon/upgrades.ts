@@ -54,6 +54,11 @@ export const UPS = {
     { k: 'speed', ic: '♻️', name: 'Faster Wheel', desc: '+20% speed', max: 5, base: 160 },
     { k: 'pay', ic: '💵', name: 'Better Sorting', desc: '+$1 a piece', max: 8, base: 180 },
   ],
+  cargo: [
+    { k: 'speed', ic: '📦', name: 'Faster Packing', desc: '+15% packing speed', max: 6, base: 2000 },
+    { k: 'cap', ic: '🪵', name: 'Bigger Dock', desc: '+4 crates wait', max: 5, base: 1500 },
+    { k: 'price', ic: '💵', name: 'Better Deals', desc: '+$2 a crate', max: 10, base: 2500 },
+  ],
   tower: [{ k: 'boost', ic: '🗼', name: 'Sharper Controllers', desc: '+5% taxi & flight speed', max: 6, base: 500 }],
   /** Per aircraft type (in the 🛖 hangar). */
   plane: [

@@ -37,7 +37,7 @@ import { TextSprite, TITLE, makePad, titleTag } from '../world/labels';
 import { Bakery, CashPad, OVEN, ResourcePile, TrashBin, UnlockTile, Zone, gridLayout, type Blocker } from '../world/stations';
 import { TUTORIAL_DONE, Tutorial, type TutorialScript } from '../world/tutorial';
 import type { MapRect, MapView } from '../ui/minimap';
-import { AT, CLEARINGS, FIELDS, GATES_PER_FIELD, TY, TYCOON_SAVE_V, TY_UNLOCKS, fieldOf, walkable, type FieldDef } from './data';
+import { AT, CLEARINGS, CLEARINGS_FIRST, FIELDS, GATES_PER_FIELD, TY, TYCOON_SAVE_V, TY_UNLOCKS, fieldOf, walkable, type FieldDef } from './data';
 import { SURFACE, artBaggageCart, artBackdrop, artBug, artDewTank, artFuelFlower, artHangar, artScatter, artGate, artGround, artLawn, artRunway, artSign, artTaxiway, artTerminal, artTower, artWindsock, type ArtLawn, type ArtPiece } from './art';
 import { Plane } from './plane';
 import { PEOPLE_FILES, Passengers, type Pax, type Stop } from './passengers';
@@ -89,6 +89,12 @@ interface Gate {
   /** 🧳 Its BAGS pad: the passengers' seed-bags waiting to be loaded. */
   bags: Stack;
   bagZone: Zone;
+  /** 📦 Its CARGO pad (v0.90): crates for the next departure's hold, what makes it up (shown once there's a depot),
+   *  and how many crates are in the hold of the plane that's leaving. */
+  cargo: Stack;
+  cargoZone: Zone;
+  cargoParts: THREE.Object3D[];
+  cargoAboard: number;
 }
 
 /** Where a gate's own link joins the runway: just west of its stand (planes enter and leave there). */
@@ -286,6 +292,7 @@ export class Airfield {
     this.buildStaffPad(desk.staff);
     this.buildBins();
     this.buildRecycler();
+    this.buildCargo();
     this.events = new Events({
       scene: this.scene,
       camera: this.camera,
@@ -400,25 +407,36 @@ export class Airfield {
     s.add(artGround(SIZE, CLEARINGS));
     s.add(artBackdrop(480));
     // Pebbles, fallen leaves and twigs lying about the dirt (kept off the runway, paths and stations)
+    // (v0.90, a fault found and fixed: WHAT LIES ABOUT IS DEALT AS IT WAS BEFORE THE NORTH FIELD. Each piece's size
+    // and kind goes by its place in the deal, so one more spot ruled out, anywhere, reshuffled every pebble and
+    // leaf on the airfield: v0.88 and v0.89 had a boulder and a fallen leaf by Gate 3 that had been a small stone.
+    // So the deal is ruled by what stood before v0.88, to the letter, and whatever has been built since then
+    // HIDES the pieces that would lie on it: the north field, the crossing, the newer tiles, the cargo depot.)
+    const first = FIELDS[0], firstPaths = PATHS.filter((p) => p.field === first);
+    const dealtTiles = TY_UNLOCKS.slice(0, TY_UNLOCKS.findIndex((u) => u.id === 'ty-bags3') + 1), newerTiles = TY_UNLOCKS.slice(dealtTiles.length);
     const busy = (x: number, z: number) =>
-      FIELDS.some((f) => Math.abs(z - f.runway.z) < 16 || Math.abs(z - f.taxiZ) < 7) ||
-      (Math.abs(x - AT.crossing.x) < 10 && z < -10) || // (🚸 nor on the way to the crossing)
-      z < AT.runway.z - 12 || // (🛫 nothing lying about on the north field's apron: planes and travellers use all of it)
+      Math.abs(z - first.runway.z) < 16 ||
+      Math.abs(z - first.taxiZ) < 7 ||
       Math.hypot(x - AT.terminal.x, z - AT.terminal.z) < 34 ||
       Math.hypot(x - AT.nest.x, z - AT.nest.z) < 16 ||
-      AT.gates.some((g) => Math.abs(x - g.x) < 12 && z > g.z - 30 && z < g.z + 8) ||
-      AT.flowers.some((f) => Math.hypot(x - f.x, z - f.z) < 10) ||
+      AT.gates.slice(0, GATES_PER_FIELD).some((g) => Math.abs(x - g.x) < 12 && z > g.z - 30 && z < g.z + 8) ||
+      AT.flowers.slice(0, 2).some((f) => Math.hypot(x - f.x, z - f.z) < 10) ||
       Math.hypot(x - AT.recycler.x, z - AT.recycler.z) < 11 ||
       Math.hypot(x - AT.hangar.x, z - AT.hangar.z) < 19 ||
       AT.bins.some((b) => Math.hypot(x - b.x, z - b.z) < 6) ||
-      TY_UNLOCKS.some((u) => Math.hypot(x - u.pos[0], z - u.pos[1]) < 8) ||
-      !CLEARINGS.some((c) => Math.hypot(x - c.x, z - c.z) < c.r - 4);
+      dealtTiles.some((u) => Math.hypot(x - u.pos[0], z - u.pos[1]) < 8) ||
+      !CLEARINGS_FIRST.some((c) => Math.hypot(x - c.x, z - c.z) < c.r - 4);
+    const built = (x: number, z: number) =>
+      z < AT.runway.z - 12 || // (🛫 the north field's apron: planes and travellers use all of it)
+      (Math.abs(x - AT.crossing.x) < 10 && z < -10) || // (🚸 the way to the crossing)
+      Math.hypot(x - AT.cargo.x, z - AT.cargo.z) < 13 || // (📦 the depot and its dock)
+      newerTiles.some((u) => Math.hypot(x - u.pos[0], z - u.pos[1]) < 8);
     const area = { x: 0, z: 0, w: 240, d: 190 };
     // (and off every taxiway: no stones lying out on a path; a fallen leaf is big, so it stays well clear)
-    artScatter(s, 'pebbles', area, 46, (x, z) => busy(x, z) || onPaths(x, z, PATHS, 3), 3);
-    artScatter(s, 'leaves', area, 30, (x, z) => busy(x, z) || onPaths(x, z, PATHS, 10) || onRunway(x, z, 10), 4);
+    artScatter(s, 'pebbles', area, 46, (x, z) => busy(x, z) || onPaths(x, z, firstPaths, 3), 3, built);
+    artScatter(s, 'leaves', area, 30, (x, z) => busy(x, z) || onPaths(x, z, firstPaths, 10) || onRunway(x, z, 10, first), 4, built);
     // (twigs are long: only out by the edge, where they can't lie across a tile or a path)
-    artScatter(s, 'twigs', area, 8, (x, z) => busy(x, z) || Math.hypot(x, z - 10) < 70, 5);
+    artScatter(s, 'twigs', area, 8, (x, z) => busy(x, z) || Math.hypot(x, z - 10) < 70, 5, built);
   }
 
   /** 🐜 The colony's nest: a mound of dug-out soil with the entrance on top. */
@@ -900,6 +918,89 @@ export class Airfield {
   // of JET FUEL on its OUT pad (one drop on a FUEL pad fuels a whole flight; Fuel Runners fetch it too), and
   // anything else (crumbs, sweets, wrappers) pays cash onto the cash pad.
   // --------------------------------------------------------------------------
+  // --------------------------------------------------------------------------
+  // 📦 CARGO (v0.90; Joshua, of the five ideas for a maxed-out airport: "I do like all 5", this one third).
+  // The depot packs a crate every few seconds onto its dock. Carried to a gate's CARGO pad (by you, or a Cargo
+  // ant), the crates go into the hold of that gate's next departure, as many as the plane carries (half its seats,
+  // rounded up), and are paid for as it lifts off: a crate's price × the route's fare. A plane never waits for cargo.
+  // --------------------------------------------------------------------------
+  private cargoDepot!: { parts: THREE.Object3D[]; stock: Stack; zone: Zone; t: number; open: boolean };
+  /** 💵 A crate's price now, and how many crates gate `g`'s plane carries. */
+  private get cargoPrice() {
+    return TY.cargoPrice + 2 * this.up('cargo.price');
+  }
+  private cargoCap(g: Gate) {
+    return Math.min(TY.cargoPadMax, Math.ceil(g.plane.model.seats.length / 2));
+  }
+  private buildCargo() {
+    const { x, z } = AT.cargo;
+    const g = new THREE.Group();
+    g.position.set(x, 0, z);
+    // a twig pallet deck, crates stacked along its back, and a leaf awning on two twig posts
+    const wood = mat(0xb98a55, { rough: 0.8 }), dark = mat(0x8a6238, { rough: 0.85 }), tape = mat(0xe9dfc6, { rough: 0.7 });
+    const deck = mesh(new THREE.BoxGeometry(7.6, 0.36, 5), wood);
+    deck.position.y = 0.18;
+    g.add(deck);
+    for (const dz of [-1.6, 0, 1.6]) {
+      const slat = mesh(new THREE.BoxGeometry(7.7, 0.08, 0.16), dark, false);
+      slat.position.set(0, 0.38, dz);
+      g.add(slat);
+    }
+    const crate = (cx: number, cy: number, cz: number, s: number, ry: number) => {
+      const c = mesh(new THREE.BoxGeometry(s, s, s), wood);
+      c.position.set(cx, 0.36 + cy + s / 2, cz);
+      c.rotation.y = ry;
+      const band = mesh(new THREE.BoxGeometry(s + 0.04, s * 0.16, s + 0.04), tape, false);
+      c.add(band);
+      g.add(c);
+    };
+    crate(-2.6, 0, -1.4, 1.5, 0.1); crate(-0.9, 0, -1.5, 1.3, -0.15); crate(0.7, 0, -1.4, 1.5, 0.05); crate(-1.7, 1.45, -1.4, 1.2, 0.3); crate(-2.7, 0, 0.5, 1.1, -0.2);
+    for (const px of [-3.4, 3.4]) {
+      const post = mesh(new THREE.CylinderGeometry(0.14, 0.18, 4.6, 7), dark);
+      post.position.set(px, 2.3, -2.2);
+      g.add(post);
+    }
+    const awning = mesh(new THREE.SphereGeometry(1, 14, 8).scale(4.3, 0.14, 2.4), mat(0x6fb24a, { rough: 0.7 }));
+    awning.position.set(0, 4.5, -1.2);
+    awning.rotation.x = 0.22;
+    g.add(awning);
+    const pad = makePad(3, 2.6, 'OUT 📦', '#d39a4a');
+    pad.position.set(2.2, 0.42, 1.0);
+    const dock = new THREE.Group();
+    dock.position.set(2.2, 0.38, 0.6);
+    g.add(pad, dock);
+    this.scene.add(g);
+    const sign = new TextSprite(1.0, '#f2c98a');
+    sign.setText('📦 CARGO DEPOT');
+    sign.sprite.position.set(x, 6.4, z);
+    this.scene.add(sign.sprite);
+    const stock = new Stack(dock, gridLayout(3, 2, 0.7, 0.62, 0.06), TY.cargoMax);
+    for (let n = 0; n < (this.st.cargo ?? 0); n++) stock.addInstant('parcel');
+    // (you stand in front of the deck, by the dock)
+    this.cargoDepot = { parts: [g, sign.sprite], stock, zone: new Zone(x + 2.2, z + 3.6, 1.6, 1.2), t: 0, open: false };
+    for (const o of this.cargoDepot.parts) shown(o, false);
+  }
+  private openCargo(animate: boolean) {
+    const c = this.cargoDepot;
+    c.open = true;
+    for (const o of c.parts) {
+      shown(o, true);
+      if (animate) this.flyers.grow(o);
+    }
+    for (const g of this.gates) for (const o of g.cargoParts) shown(o, g.open);
+    this.blockers.push({ minX: AT.cargo.x - 3.9, maxX: AT.cargo.x + 3.9, minZ: AT.cargo.z - 2.6, maxZ: AT.cargo.z + 2.6 });
+  }
+  /** 📦 The depot's dock -> the open gate with the most room on its CARGO pad (nothing to carry: wait at the dock). */
+  private idleCargo = new Stack(new THREE.Group(), gridLayout(1, 1, 1, 1, 0), 1);
+  private cargoRoute() {
+    const c = this.cargoDepot;
+    const room = (g: Gate) => this.cargoCap(g) - g.cargo.count;
+    const gates = this.gates.filter((g) => g.open && room(g) > 0);
+    if (!gates.length || !c.stock.count) return { src: this.idleCargo, srcZone: c.zone, dst: c.stock, dstZone: c.zone };
+    const pick = gates.reduce((a, b) => (room(b) > room(a) ? b : a));
+    return { src: c.stock, srcZone: c.zone, dst: pick.cargo, dstZone: pick.cargoZone };
+  }
+
   private recycler!: { parts: THREE.Object3D[]; input: Stack; output: Stack; inZone: Zone; outZone: Zone; nectar: number; t: number; open: boolean; spin: THREE.Object3D };
   private buildRecycler() {
     const { x, z } = AT.recycler;
@@ -1092,11 +1193,12 @@ export class Airfield {
     this.addBuilding('cafe', 'Café kitchen', v(AT.oven.x, AT.oven.z + 3), 7, UPS.cafe, () => this.cafeOpen, 6);
     this.addBuilding('shop', 'Gift shop', this.shop.spot.clone().setY(0), 5, UPS.shop, () => this.shop.open, 8);
     this.addBuilding('lounge', 'VIP Lounge', this.lounge.spot.clone().setY(0), 7, UPS.lounge, () => this.lounge.open, 7);
+    this.addBuilding('cargo', 'Cargo Depot', v(AT.cargo.x + 2, AT.cargo.z + 2), 9, UPS.cargo, () => this.cargoDepot.open, 7);
     this.addBuilding('recycler', 'Recycler', v(AT.recycler.x, AT.recycler.z + 2), 8, UPS.recycler, () => this.recycler.open, 7);
     this.addBuilding('tower', 'Control Tower', v(AT.tower.x, AT.tower.z + 5), 10, UPS.tower, () => this.owns('ty-tower'), 9);
 
     // ⬆️ The Staff Office: a row per hired job (levels in save.tycoon.staff)
-    const staffDesc: Record<string, string> = { fuel: '+12% speed · +1 carry / 2 Lv', bags: '+12% speed · +1 carry / 2 Lv', cafe: '+12% speed · +1 carry / 2 Lv', janitor: '+12% speed · +1 carry / 2 Lv', checkin: '+15% check-in speed', banker: '+20% grab speed', you: '+1 carry' };
+    const staffDesc: Record<string, string> = { cargo: '+12% speed · +1 carry / 2 Lv', fuel: '+12% speed · +1 carry / 2 Lv', bags: '+12% speed · +1 carry / 2 Lv', cafe: '+12% speed · +1 carry / 2 Lv', janitor: '+12% speed · +1 carry / 2 Lv', checkin: '+15% check-in speed', banker: '+20% grab speed', you: '+1 carry' };
     this.addTarget(
       'staff', 'Staff upgrades', this.staffAt.clone(), 6, () => true,
       () => STAFF.filter((d) => !d.needs || this.owns(d.needs)).map((d) => {
@@ -1342,14 +1444,26 @@ export class Airfield {
     bg.position.copy(bagsAt);
     this.scene.add(bg);
     const bags = new Stack(bg, gridLayout(2, 4, 0.7, 0.62, 0.08), TY.bagPadMax);
+    // 📦 the CARGO pad (v0.90): beyond the BAGS pad, clear of the next gate's bridge
+    const cargoAt = stand.clone().add(new THREE.Vector3(11, 0, -5.5));
+    const cargoPad = makePad(3, 3, 'CARGO', '#d39a4a');
+    cargoPad.position.copy(cargoAt).setY(0.05);
+    this.scene.add(cargoPad);
+    const cg = new THREE.Group();
+    cg.position.copy(cargoAt);
+    this.scene.add(cg);
+    const cargo = new Stack(cg, gridLayout(3, 3, 0.62, 0.62, 0.08), TY.cargoPadMax);
+    for (let n = 0; n < (this.st.cargoPads?.[i] ?? 0); n++) cargo.addInstant('parcel');
     const door = this.worldSpot(piece, 'door', stand.clone().add(new THREE.Vector3(-3, 0, 0)));
     const path = [this.worldSpot(piece, 'rampFoot', door.clone().setY(0)), this.worldSpot(piece, 'rampTop', door), door];
     const gate: Gate = {
       door, path, piece, fuel, fuelZone: new Zone(fuelAt.x, fuelAt.z, 1.5, 1.5), plane, riders: [], boarding: [], boardT: 0, open, label,
       bags, bagZone: new Zone(bagsAt.x, bagsAt.z, 1.5, 1.5),
+      cargo, cargoZone: new Zone(cargoAt.x, cargoAt.z, 1.5, 1.5), cargoParts: [cargoPad, cg], cargoAboard: 0,
     };
     piece.root.userData.link = this.gateRoads[i] ?? [];
     piece.root.userData.bags = [bagPad, bg];
+    for (const o of gate.cargoParts) shown(o, open && this.owns('ty-cargo'));
     for (const o of [piece.root, model.root, pad, bagPad, bg, label.sprite, ...this.gateRoads[i]]) shown(o, open);
     pad.userData.gatePad = true;
     piece.root.userData.pad = pad;
@@ -1361,6 +1475,14 @@ export class Airfield {
       // 🗺️ a longer route's fare: the rest of each passenger's fare is paid as it lifts off
       const fare = plane.outbound?.fare ?? 1;
       const went = routeOf(plane.outbound?.place);
+      // 📦 the freight in its hold is paid for as it lifts off: each crate its price × the route's fare
+      if (gate.cargoAboard > 0) {
+        const paid = Math.round(gate.cargoAboard * this.cargoPrice * fare);
+        this.bill(paid, plane.pos);
+        (this.st.tally ??= {}).cargo = (this.st.tally.cargo ?? 0) + gate.cargoAboard;
+        if (this.near(plane.pos, 40)) this.hud.floatAt(plane.pos.clone().setY(plane.pos.y + 9), this.camera, `📦 ${gate.cargoAboard} crates +$${paid}`, 'gold');
+        gate.cargoAboard = 0;
+      }
       (this.st.routeFlown ??= {})[went.id] = (this.st.routeFlown[went.id] ?? 0) + 1;
       if (fare > 1 && plane.aboard > 0) {
         const bonus = Math.round(plane.aboard * this.ticket * (fare - 1));
@@ -1500,6 +1622,7 @@ export class Airfield {
       this.buildPaved(); // (open the runway's and the taxiway's borders where this gate's paths join them)
       g.open = true;
       for (const o of [g.piece.root, g.plane.model.root, g.piece.root.userData.pad as THREE.Object3D, g.label.sprite, ...(g.piece.root.userData.link as THREE.Object3D[]), ...(g.piece.root.userData.bags as THREE.Object3D[])]) shown(o, true);
+      for (const o of g.cargoParts) shown(o, this.cargoDepot.open);
       this.blockers.push(...(g.piece.root.userData.walls as Blocker[])); // (its bridge is solid now)
       this.pax.gates = this.gates.filter((x) => x.open).length;
       if (animate) {
@@ -1538,6 +1661,16 @@ export class Airfield {
       if (animate) this.hud.banner(`${t.icon} ${t.name} unlocked!`, this.st.mixed !== false ? 'It joins the mix: your gates take turns with every aircraft you own' : 'Nothing to assign: each gate switches to it as its plane comes home', 4200);
     } else if (id === 'ty-route-picnic' || id === 'ty-route-log' || id === 'ty-route-tide' || id === 'ty-route-lizard') {
       if (animate) this.hud.banner('🗺️ New route open!', 'Longer routes pay higher fares: some flights go there now', 3000);
+    } else if (id === 'ty-cargo') {
+      this.openCargo(animate);
+    } else if (/^ty-cargoant\d?$/.test(id)) {
+      // 📦 carries crates from the depot's dock to the gate with the most room for them
+      const w = new Worker(this.scene, nest.x, nest.z, () => this.cargoRoute(), { color: 0xc9853f }, 2.1);
+      w.baseCarry = w.stack.max = TY.cargoCarry;
+      Object.assign(w.model.root.userData, { job: 'cargo', carry0: w.baseCarry });
+      titleTag(w.model, '📦 CARGO', TITLE.ant);
+      this.workers.push(w);
+      if (animate) this.flyers.grow(w.model.root);
     } else if (id === 'ty-recycler') {
       this.openRecycler(animate);
     } else if (id === 'ty-janitor') {
@@ -1625,6 +1758,9 @@ export class Airfield {
     'ty-bags3': ['🧳 Baggage Ant 3 hired!', 'BAG DROP → the gate that needs bags most'],
     'ty-crumbs': ['🍪 Crumb Runner hired!', 'Picnic crumbs → the kitchen\'s IN pad: the café runs by itself now'],
     'ty-chef': ['🔥 Chef hired!', 'The oven bakes much faster'],
+    'ty-cargoant': ['📦 Cargo Ant hired!', 'Depot dock → the gate with the most room on its CARGO pad'],
+    'ty-cargoant2': ['📦 Cargo Ant 2 hired!', 'Depot dock → the gate with the most room on its CARGO pad'],
+    'ty-cargoant3': ['📦 Cargo Ant 3 hired!', 'Depot dock → the gate with the most room on its CARGO pad'],
     'ty-janitor': ['🧹 Janitor hired!', '🗑️ Bins → ♻️ Recycler IN: wrappers turn into cash by themselves'],
   };
   private unlock(tile: UnlockTile) {
@@ -1993,6 +2129,14 @@ export class Airfield {
           this.tutorial.did(STEP.bags);
         }
       });
+      // 📦 and your crates on its CARGO pad (it takes one plane-load)
+      if (this.cargoDepot.open) {
+        g.cargo.max = Math.max(g.cargo.count, this.cargoCap(g));
+        this.every(g.cargoZone, dt, g.cargoZone.contains(p) && me.stack.has('parcel'), iv, () => {
+          if (this.flyers.transferType(me.stack, g.cargo, 'parcel')) this.sfx.drop();
+        });
+        (this.st.cargoPads ??= [])[i] = g.cargo.count;
+      }
       this.st.fuel[i] = g.fuel.count;
       this.updateBoarding(g, dt);
       g.plane.update(dt);
@@ -2068,7 +2212,7 @@ export class Airfield {
       if (!b.bin.zone.contains(p)) continue;
       atBin = b.bin.mouth;
       // (not bags: they're luggage; not wrappers: they came out of a bin; not jet fuel: it's worth a whole flight)
-      const junk = me.stack.items.find((it) => !it.flying && it.type !== 'seedbag' && it.type !== 'leaf' && it.type !== 'fuel');
+      const junk = me.stack.items.find((it) => !it.flying && it.type !== 'seedbag' && it.type !== 'leaf' && it.type !== 'fuel' && it.type !== 'parcel');
       dumping = !!junk;
       if (!junk && (me.stack.has('fuel') || (me.stack.has('leaf') && !b.litter.count)) && (this.padHintT -= dt) <= 0) {
         this.padHintT = 5;
@@ -2088,11 +2232,28 @@ export class Airfield {
     }
     trash.wait(dt, dumping, atBin ?? p, this.camera);
 
+    // 📦 The cargo depot: it packs crates onto its dock; stand in front of it to pick them up
+    const cd = this.cargoDepot;
+    if (cd.open) {
+      cd.stock.max = Math.max(cd.stock.count, TY.cargoMax + 4 * this.up('cargo.cap'));
+      cd.t += dt;
+      if (cd.t >= TY.cargoEvery / (1 + 0.15 * this.up('cargo.speed')) && !cd.stock.full) {
+        cd.t = 0;
+        const it = cd.stock.addInstant('parcel');
+        this.flyers.grow(it.mesh, 0.25);
+      }
+      const wanted = this.gates.some((g) => g.open && g.cargo.count < this.cargoCap(g));
+      this.every(cd.zone, dt, cd.zone.contains(p) && wanted && me.canTake('parcel') && cd.stock.count > 0, iv, () => {
+        if (this.flyers.transfer(cd.stock, me.stack)) this.sfx.pickup();
+      });
+      this.st.cargo = cd.stock.count;
+    }
+
     // ♻️ The recycler: drop things on IN; 3 nectar -> 1 jet fuel on OUT, anything else -> cash
     const rc = this.recycler;
     if (rc.open) {
       rc.spin.rotation.y += dt * (rc.input.count ? 6 : 0.6);
-      const mine = me.stack.items.find((it) => !it.flying && it.type !== 'seedbag' && it.type !== 'fuel');
+      const mine = me.stack.items.find((it) => !it.flying && it.type !== 'seedbag' && it.type !== 'fuel' && it.type !== 'parcel');
       this.every(rc.inZone, dt, rc.inZone.contains(p) && !!mine && !rc.input.full, iv, () => {
         if (mine && this.flyers.transferType(me.stack, rc.input, mine.type)) this.sfx.drop();
       });
@@ -2294,6 +2455,14 @@ export class Airfield {
       }
       this.st.bagsLoaded = (this.st.bagsLoaded ?? 0) + loaded;
       this.count('bags', loaded);
+      // 📦 and whatever freight is on its CARGO pad goes in the hold, as much as it carries (it never waits for any)
+      g.cargoAboard = 0;
+      for (let n = 0; n < this.cargoCap(g); n++) {
+        const it = g.cargo.pop();
+        if (!it) break;
+        g.cargoAboard++;
+        this.flyers.fly(it.mesh, () => plane.pos.clone().setY(1.2), () => it.mesh.removeFromParent(), 0.35, 1.2);
+      }
       plane.depart();
       this.sfx.unlocked();
     }
@@ -2353,6 +2522,7 @@ export class Airfield {
       { x: this.staffAt.x, z: this.staffAt.z, icon: '⬆️', label: 'Staff' },
       ...this.bins.map((b) => ({ x: b.bin.zone.x, z: b.bin.zone.z, icon: '🗑️', alert: b.litter.count >= TY.binFull })),
       ...(this.recycler.open ? [{ x: AT.recycler.x, z: AT.recycler.z, icon: '♻️', alert: this.recycler.output.full }] : []),
+      ...(this.cargoDepot.open ? [{ x: AT.cargo.x, z: AT.cargo.z, icon: '📦', label: 'Cargo', alert: this.cargoDepot.stock.full }] : []),
       ...this.events.markers(),
       { x: this.cashPad.zone.x, z: this.cashPad.zone.z, icon: '💵', alert: this.cashPad.stack.count > 0 },
       { x: this.bagDropZone.x, z: this.bagDropZone.z, icon: '🧳', label: 'Bags', alert: this.bagDrop.count >= TY.bagDropMax - 2 },
@@ -2495,6 +2665,7 @@ export class Airfield {
       nextRoute: () => { const r = this.nextRoute(); return r ? { id: r.id, name: r.place, cost: r.cost! } : null; },
       routeOpen: (id) => { const r = ROUTES.find((x) => x.id === id); return !!r && this.routeOpen(r); },
       cafe: () => this.cafeOpen,
+      cargo: () => this.cargoDepot.open,
       recycler: () => this.recycler.open,
       fleetMaxed: () => UPS.plane.every((d) => this.up(`fleet.${d.k}`) >= d.max),
       level: () => this.save.level,
@@ -2515,6 +2686,7 @@ export class Airfield {
       case 'nectar': return rc ? 'a gate\'s FUEL pad · or 3 on ♻️ IN = jet fuel' : 'a gate\'s FUEL pad';
       case 'fuel': return 'any gate\'s FUEL pad (fuels a whole flight)';
       case 'seedbag': return 'a gate\'s BAGS pad';
+      case 'parcel': return 'a gate\'s 📦 CARGO pad (paid at take-off)';
       case 'crumb': return 'the 🍪 KITCHEN\'s IN pad';
       case 'leaf': return 'the ♻️ RECYCLER\'s IN pad (cash)';
       default: return rc ? 'a 🗑️ bin or ♻️ IN (cash)' : 'a 🗑️ bin (a little cash)';
@@ -2529,10 +2701,11 @@ export class Airfield {
     const open = this.gates.filter((g) => g.open);
     if (me.has('nectar') || me.has('fuel')) for (const g of open) if (!g.fuel.full && this.fuelUnits(g) < TY.fuelPerFlight * 2) out.push(g.fuelZone);
     if (me.has('seedbag')) for (const g of open) if (this.bagsNeeded(g) > 0) out.push(g.bagZone);
+    if (me.has('parcel')) for (const g of open) if (g.cargo.count < this.cargoCap(g)) out.push(g.cargoZone);
     if (me.has('crumb') && this.cafeOpen) out.push(this.cafe.oven.inZone);
     const rc = this.recycler;
     if (me.has('leaf') && rc.open) out.push(rc.inZone);
-    const junk = me.items.some((it) => !['nectar', 'fuel', 'seedbag', 'crumb', 'leaf'].includes(it.type));
+    const junk = me.items.some((it) => !['nectar', 'fuel', 'seedbag', 'crumb', 'leaf', 'parcel'].includes(it.type));
     if (junk) {
       for (const b of this.bins) out.push(b.bin.zone);
       if (rc.open) out.push(rc.inZone);
@@ -2588,6 +2761,7 @@ export class Airfield {
     ...Object.fromEntries(AT.gates.slice(1).map((g, i) => [`ty-gate${i + 2}`, { ...g, r: 9 }])),
     'ty-cafe': { ...AT.oven, r: 5 },
     'ty-recycler': { ...AT.recycler, r: 5.5 },
+    'ty-cargo': { ...AT.cargo, r: 5.5 },
     'ty-hangar': { ...AT.hangar, r: 16, dx: -1, dz: 0.45 },
     'ty-lounge': { ...AT.lounge, r: 6 },
   };
@@ -2633,6 +2807,21 @@ export class Airfield {
         text: 'A second plane! Each gate has its own <b>FUEL</b> and <b>BAGS</b> pads. Passengers and bags are shared out between the gates by themselves.',
         tip: 'A second ⛽ Fuel Runner and 🧳 Baggage ant (new tiles) keep both gates going.',
         steps: () => [{ text: () => '⛽ Fuel Gate 2: drop nectar on its FUEL pad', target: () => z(g2.fuelZone), done: () => this.fuelUnits(g2) >= TY.fuelPerFlight || !g2.plane.parked, progress: () => Math.min(1, this.fuelUnits(g2) / TY.fuelPerFlight) }],
+      },
+      {
+        id: 'ty-cargo',
+        title: '📦 Cargo Depot',
+        chain: ['📦 Depot OUT', '📦 a gate\'s CARGO pad', '🛫 paid at take-off'],
+        text: 'The depot packs <b>crates</b> onto its dock. Carry them to any gate\'s <b>CARGO</b> pad: the next plane to leave takes as many as it can hold (half its seats), and each one pays as it lifts off, more on a far route.',
+        tip: 'A plane never waits for cargo. The 📦 Cargo Ant tiles (by the depot) carry the crates for you.',
+        steps: () => {
+          const c = this.cargoDepot;
+          const onPad = () => this.gates.some((g) => g.open && g.cargo.count > 0) || (this.st.tally?.cargo ?? 0) > 0;
+          return [
+            { text: () => '📦 Pick up crates at the CARGO DEPOT (stand in front of it)', target: () => z(c.zone), done: () => me().has('parcel') || onPad() },
+            { text: () => '📦 Drop them on a gate\'s CARGO pad', target: () => z(this.gates.filter((g) => g.open).reduce((a, b) => (b.cargo.count < a.cargo.count ? b : a)).cargoZone), done: onPad },
+          ];
+        },
       },
       {
         id: 'ty-cafe',

@@ -33,6 +33,8 @@ export interface QuestHost {
   nextRoute: () => { id: string; name: string; cost: number } | null;
   routeOpen: (id: string) => boolean;
   cafe: () => boolean;
+  /** 📦 Is the cargo depot open? */
+  cargo: () => boolean;
   recycler: () => boolean;
   fleetMaxed: () => boolean;
   level: () => number;
@@ -169,6 +171,7 @@ export class Quests {
     ];
     if (this.h.cafe()) pool.push({ id: 'snacks', need: round(6 * grow, 1), reward: pay(60) });
     if (this.h.recycler()) pool.push({ id: 'recycled', need: round(6 * grow, 1), reward: pay(60) });
+    if (this.h.cargo()) pool.push({ id: 'cargo', need: round(8 * grow, 1), reward: pay(80) });
     if (this.h.owns('ty-hangar') && !this.h.fleetMaxed()) pool.push({ id: 'fleet', need: 1, reward: pay(150) });
     if (this.h.owns('ty-hangar') && plane) pool.push({ id: `plane:${plane.id}`, need: 1, reward: round(plane.cost * 0.1, 10) });
     if (tile) pool.push({ id: `tile:${tile.id}`, need: 1, reward: round(tile.cost * 0.15, 10) });
@@ -218,6 +221,8 @@ export class Quests {
         return { text: `🛬 Land ${need} flights`, need, reward, have: since('landings'), target: none };
       case 'snacks':
         return { text: `🍪 Sell ${need} snacks`, need, reward, have: since('snacks'), target: none };
+      case 'cargo':
+        return { text: `📦 Ship ${need} crates of cargo`, need, reward, have: since('cargo'), target: none };
       case 'recycled':
         return { text: `♻️ Recycle ${need} things`, need, reward, have: since('recycled'), target: none };
       case 'earned':
