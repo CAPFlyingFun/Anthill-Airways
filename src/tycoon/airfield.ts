@@ -54,6 +54,7 @@ import { seeThroughAll, setSee } from './seeThrough';
 import type { Crowd } from '../devRoom';
 import { trash } from '../world/trash';
 import { mat, mesh, PAL } from './kit';
+import { Weather } from './weather';
 import { distToPath } from './airport/common';
 import { Goals, type GoalKind } from './goals';
 import type { PlaneInfo } from './flightUi';
@@ -174,6 +175,12 @@ export class Airfield {
   flyers = new Flyers(this.scene);
   player: Player;
   sun = new THREE.DirectionalLight(0xffffff, 2.2);
+  /** The sky light (v0.91: the 🌙 day and night turn it, with the sun: tycoon/weather.ts). */
+  private hemi = new THREE.HemisphereLight(0xffffff, 0x8d6e4a, 1.6);
+  /** 🌙🌧️🌬️ Day and night, rain and wind (v0.91). */
+  weather!: Weather;
+  private windsock: ArtPiece | null = null;
+  private zoneShown = '';
   tiles: UnlockTile[] = [];
   cashPads: CashPad[] = [];
   workers: Worker[] = [];
@@ -336,6 +343,16 @@ export class Airfield {
     seeThroughAll(this.scene, [this.player.model.root]);
     hud.setCash(save.cash);
     hud.setZone('🛫 Anthill Airfield');
+    // 🌙🌧️🌬️ the sky: day and night, rain, and the wind the planes take off into
+    this.weather = new Weather({
+      scene: this.scene,
+      camera: this.camera,
+      sun: this.sun,
+      hemi: this.hemi,
+      hud,
+      ground: this.groundY,
+      sock: (yaw) => this.windsock && (this.windsock.root.userData.windYaw = yaw),
+    }, this.st.sky);
 
     // 🎯 The ring under the selected plane (a green target, like a tower's radar pick)
     this.selRing = new THREE.Group();
@@ -357,6 +374,11 @@ export class Airfield {
     if (!save.paid['ty-v69']) {
       save.paid['ty-v69'] = 1; // (a brand-new game learns it all in the tutorial)
       if (!this.learning) window.setTimeout(() => hud.banner('🆕 New at Anthill Airways!', '🧳 Bags · 🗼 Runway clearance · ✈️ Flight cards · 📅 Daily goals ⭐', 5200), 1500);
+    }
+    // (v0.91: and the sky, once, for a game that began before it had one)
+    if (!save.paid['ty-v91']) {
+      save.paid['ty-v91'] = 1;
+      if (!this.learning) window.setTimeout(() => hud.banner('🆕 The sky is new!', '🌙 Night flights pay +25% · 🌧️ rain, then a 🌈 rainbow +50% · 🌬️ the wind turns the runways', 6000), 1500);
     }
   }
 
@@ -392,7 +414,7 @@ export class Airfield {
     const s = this.scene;
     s.background = new THREE.Color(PAL.sky);
     s.fog = new THREE.Fog(PAL.sky, 220, 620);
-    s.add(new THREE.HemisphereLight(0xffffff, 0x8d6e4a, 1.6));
+    s.add(this.hemi);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(2048, 2048);
     const sc = this.sun.shadow.camera;
@@ -1320,7 +1342,9 @@ export class Airfield {
     this.gates.forEach((g, i) => {
       g.fuel.max = TY.fuelMax + 2 * this.up(`gate${i}.fuel`);
       this.pax.gateCap[i] = Math.max(6, g.plane.model.seats.length + 2) + 2 * this.up(`gate${i}.seats`);
-      g.plane.boost = boost * this.typeFor(i).speed;
+      // (🌧️ a little slower in the rain; 🌬️ and it takes off and lands into the wind)
+      g.plane.boost = boost * this.typeFor(i).speed * this.weather.planeMult;
+      g.plane.wind = this.weather.dir;
     });
     this.flowers.forEach((f, i) => (f.stack.max = TY.flowerMax + 2 * this.up(`flower${i}.cap`)));
     this.pax.queueMax = TY.queueMax + this.up('terminal.line');
@@ -1476,6 +1500,7 @@ export class Airfield {
       const fare = plane.outbound?.fare ?? 1;
       const went = routeOf(plane.outbound?.place);
       // 📦 the freight in its hold is paid for as it lifts off: each crate its price × the route's fare
+      const freight = gate.cargoAboard;
       if (gate.cargoAboard > 0) {
         const paid = Math.round(gate.cargoAboard * this.cargoPrice * fare);
         this.bill(paid, plane.pos);
@@ -1488,6 +1513,14 @@ export class Airfield {
         const bonus = Math.round(plane.aboard * this.ticket * (fare - 1));
         this.bill(bonus, plane.pos);
         if (this.near(plane.pos, 40)) this.hud.floatAt(plane.pos.clone().setY(plane.pos.y + 6), this.camera, `🗺️ ${routeOf(plane.outbound?.place).place} fares +$${bonus}`, 'gold');
+      }
+      // 🌙🌈 night flights, and flights under a rainbow, pay more: that share of every fare aboard (and of its freight)
+      const more = this.weather.bonus;
+      if (more > 0 && plane.aboard + freight > 0) {
+        const extra = Math.round((plane.aboard * this.ticket + freight * this.cargoPrice) * fare * more);
+        this.bill(extra, plane.pos);
+        (this.st.tally ??= {}).skyBonus = (this.st.tally.skyBonus ?? 0) + extra;
+        if (this.near(plane.pos, 40)) this.hud.floatAt(plane.pos.clone().setY(plane.pos.y + 12), this.camera, `${this.weather.bonusName} +$${extra}`, 'gold');
       }
       if (this.near(plane.pos, 40)) {
         this.hud.floatAt(plane.pos.clone().setY(plane.pos.y + 3), this.camera, '🛫 Take-off!', 'big');
@@ -1534,7 +1567,7 @@ export class Airfield {
 
   private buildDecor() {
     this.place(artTower(), AT.tower.x, AT.tower.z);
-    this.place(artWindsock(), AT.windsock.x, AT.windsock.z);
+    this.windsock = this.place(artWindsock(), AT.windsock.x, AT.windsock.z);
     // (🛖 the hangar is built with its tile: until then it's put away, and not solid)
     // (a bottle cap 27 across: big enough to park any aircraft inside; its door faces the field, west)
     const hangar = artHangar();
@@ -2086,7 +2119,7 @@ export class Airfield {
     this.flowers.forEach((f, i) => {
       if (!f.piece.root.visible) return;
       f.t += dt;
-      if (f.t >= TY.flowerEvery / (this.events.dew ? 2 : 1) / (1 + 0.15 * this.up(`flower${i}.speed`)) && !f.stack.full) {
+      if (f.t >= TY.flowerEvery / this.weather.flowerMult / (1 + 0.15 * this.up(`flower${i}.speed`)) && !f.stack.full) {
         f.t = 0;
         const it = f.stack.addInstant('nectar');
         this.flyers.grow(it.mesh, 0.25);
@@ -2282,8 +2315,13 @@ export class Airfield {
     this.updateTargets(dt);
     this.applyStaff();
     this.applyUps();
-    // 🦎🌧️🪶 now and then, something happens
+    // 🦎🪶 now and then, something happens
     this.events.update(dt, !this.learning);
+    // 🌙🌧️🌬️ the sky turns (and the corner of the screen tells the time)
+    this.weather.update(dt, !this.learning, p, FIELDS.filter((f) => this.fieldOpen(f)));
+    this.st.sky = this.weather.saved();
+    const zone = `🛫 Anthill Airfield · ${this.weather.label()}`;
+    if (zone !== this.zoneShown) this.hud.setZone((this.zoneShown = zone));
 
     for (const w of this.workers) w.update(dt, this.flyers);
     for (const b of this.bankers) b.update(dt, this.flyers);
@@ -2487,6 +2525,7 @@ export class Airfield {
     }
     this.sun.position.set(target.x + 22, 60, target.z + 26);
     this.sun.target.position.copy(target);
+    this.weather?.follow(target);
   }
   private tmpCam = new THREE.Vector3();
   private setFov(fov: number) {

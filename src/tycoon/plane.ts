@@ -51,6 +51,17 @@ export class Plane {
   riders: (THREE.Object3D | null)[];
   /** x on taxi and route speed (the 🗼 Control Tower). */
   boost = 1;
+  /**
+   * 🌬️ The wind (v0.91, tycoon/weather.ts): +1 = planes take off and land toward the EAST (+x), -1 = toward the
+   * WEST. The airfield sets it every frame; a plane reads it once as it's given the runway to take off (`dOut`)
+   * and once as it comes back from its route (`dIn`: its holding circle is at the end it lands from), so the wind
+   * turning never changes a take-off or a landing that's under way.
+   */
+  wind: 1 | -1 = 1;
+  private dOut: 1 | -1 = 1;
+  private dIn: 1 | -1 = 1;
+  /** How long its take-off run is (it lifts off about two thirds of the way along it). */
+  private run = 44;
   /** 🗼 Cleared (by you or the Tower ant) and waiting for the runway to be free; and in what order. */
   cleared = false;
   clearedAt = 0;
@@ -212,14 +223,17 @@ export class Plane {
     const rz = this.field.runway.z;
     if (this.state === 'hold') {
       this.state = 'lineUp';
-      this.path = [v3(this.link, 0, rz), v3(this.link + 2, 0, rz)];
+      const d = (this.dOut = this.wind); // (🌬️ into the wind)
+      this.path = [v3(this.link, 0, rz), v3(this.link + 2 * d, 0, rz)];
     } else if (this.state === 'holding') {
       // Out of the circle, down onto the final approach, touch down past the threshold, roll to its link
       this.state = 'landing';
       this.orbiting = false;
       this.speed = TY.cruiseSpeed * 0.8 * this.boost;
-      const top = this.ground(this.rwStart, rz);
-      this.path = [v3(this.rwStart - 34, 12, rz), v3(this.rwStart + 6, top, rz), v3(this.exitX(), top, rz)];
+      const d = this.dIn;
+      const thr = d > 0 ? this.rwStart : this.rwEnd;
+      const top = this.ground(thr, rz);
+      this.path = [v3(thr - 34 * d, 12, rz), v3(thr + 6 * d, top, rz), v3(this.exitX(), top, rz)];
     }
   }
 
@@ -247,10 +261,15 @@ export class Plane {
           } else if (this.state === 'lineUp') {
             this.state = 'takeoff';
             this.speed = 2;
+            const d = this.dOut;
+            const far = d > 0 ? this.rwEnd : this.rwStart;
+            // (its run: 44 along the runway, or as much as there is from its link to that end: in a west wind
+            // Gate 1's link is only 25 from it, and a full run took it off the end before it climbed)
+            const run = (this.run = Math.min(44, Math.abs(far - this.link)));
             this.path = [
-              v3(this.link + 44, this.ground(this.link + 44, this.field.runway.z), this.field.runway.z),
-              v3(this.rwEnd + 40, TY.cruiseAlt * 0.6, this.field.runway.z - 10),
-              v3(this.rwEnd + 140, TY.cruiseAlt, this.field.runway.z - 120),
+              v3(this.link + run * d, this.ground(this.link + run * d, this.field.runway.z), this.field.runway.z),
+              v3(far + 40 * d, TY.cruiseAlt * 0.6, this.field.runway.z - 10),
+              v3(far + 140 * d, TY.cruiseAlt, this.field.runway.z - 120),
             ];
           } else {
             this.park();
@@ -260,9 +279,9 @@ export class Plane {
         return;
       }
       case 'takeoff': {
-        // A run along the runway (legs, then wings), then climbing out to the north-east
+        // A run along the runway (legs, then wings), then climbing out to the north-east (north-west in a west wind)
         this.speed = Math.min(TY.takeoffSpeed * this.boost, this.speed + dt * 16);
-        const airborne = this.pos.x > this.link + 30;
+        const airborne = (this.pos.x - this.link) * this.dOut > this.run * 0.68;
         m.flying = airborne;
         const done = this.follow(dt, this.speed, false);
         animateCreature(m, dt, airborne ? 0 : this.speed * 0.5);
@@ -283,7 +302,7 @@ export class Plane {
       case 'route':
         this.routeT -= dt;
         if (this.routeT <= 0) {
-          // Back from the west, flying in to the holding pattern (it lands as soon as it's cleared)
+          // Back from the west (the east in a west wind), flying in to the holding pattern (it lands as soon as it's cleared)
           this.state = 'holding';
           this.wasUp = false;
           this.waitT = 0;
@@ -291,9 +310,11 @@ export class Plane {
           this.setInSight(true);
           m.flying = true;
           m.bob.rotation.x = 0;
+          const d = (this.dIn = this.wind);
           const c = this.field.hold;
-          this.pos.set(c.x - 44, TY.cruiseAlt + 4, c.z + 6); // (in over the grass tops, down into the clearing)
+          this.pos.set(this.holdX() - 44 * d, TY.cruiseAlt + 4, c.z + 6); // (in over the grass tops, down into the clearing)
           this.holdA = Math.PI * 0.75 + this.slot * (Math.PI / 2);
+          if (d < 0) this.holdA = Math.PI - this.holdA; // (mirrored: it joins the circle on the side it flew in from)
           this.path = [this.holdPoint(this.holdA, new THREE.Vector3())];
           this.onApproach();
         }
@@ -339,7 +360,12 @@ export class Plane {
   /** A point on this plane's holding circle (its own height, so two planes never share a spot). */
   private holdPoint(a: number, out: THREE.Vector3) {
     const c = this.field.hold;
-    return out.set(c.x + Math.cos(a) * TY.holdRadius, TY.holdAlt + this.slot * 3, c.z + Math.sin(a) * TY.holdRadius);
+    return out.set(this.holdX() + Math.cos(a) * TY.holdRadius, TY.holdAlt + this.slot * 3, c.z + Math.sin(a) * TY.holdRadius);
+  }
+  /** 🌬️ The holding circle is off the end of the runway it lands from: the field's own (west), or its mirror (east). */
+  private holdX() {
+    const c = this.field.hold;
+    return this.dIn > 0 ? c.x : 2 * this.field.runway.x - c.x;
   }
 
   /** Where it waits for take-off clearance: behind the HOLD line on its link, just short of the runway. */
@@ -372,7 +398,7 @@ export class Plane {
     const lineUp = (Math.abs(this.holdZ - this.field.runway.z) + 2) / (TY.taxiSpeed * this.boost);
     if (this.state === 'taxiOut') return this.left() / (TY.taxiSpeed * this.boost) + lineUp + 3;
     if (this.state === 'lineUp') return this.left() / (TY.taxiSpeed * this.boost) + 3;
-    if (this.state === 'takeoff') return this.wasUp ? 0 : Math.max(0, (this.link + 30 - this.pos.x) / Math.max(this.speed, 8));
+    if (this.state === 'takeoff') return this.wasUp ? 0 : Math.max(0, (this.run * 0.68 - (this.pos.x - this.link) * this.dOut) / Math.max(this.speed, 8));
     return null;
   }
   /** Seconds until it's parked at its gate again (null: it's parked, or waiting for clearance). */

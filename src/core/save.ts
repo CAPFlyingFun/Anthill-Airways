@@ -84,6 +84,8 @@ export interface TycoonSave {
   /** 📦 Cargo (v0.90): crates waiting on the depot's dock, and on each gate's CARGO pad. */
   cargo?: number;
   cargoPads?: number[];
+  /** 🌙🌬️ The sky (v0.91, tycoon/weather.ts): seconds into the day, and which way the wind has the runways (+1 east). */
+  sky?: { t: number; dir: number };
   /** 🧍 Passengers are TRADDOMIUM's tiny people instead of bugs (v0.77, ⚙️ Settings). */
   people?: boolean;
   /** 🎯 Quests (v0.73, tycoon/quests.ts): how many are done, and the random one that's on. */

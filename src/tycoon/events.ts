@@ -4,11 +4,11 @@
 //   🦎 LIZARD ON THE RUNWAY — a young anole wanders out of the lawn and lies down across the runway to sunbathe
 //      (flashing its dewlap). Nothing can take off or land until it goes: walk up to it to shoo it away (a reward),
 //      or wait about 40 s and it wanders off by itself (no reward).
-//   🌧️ DEW SHOWER — a soft shower for 35 s: the nectar flowers fill twice as fast while it lasts.
+//   (🌧️ the DEW SHOWER that was here is the sky's RAIN since v0.91: tycoon/weather.ts)
 //   🪶 BIRD FLYOVER — a huge shadow sweeps over the field and a bird drops a FEATHER somewhere on the airfield:
 //      walk over it within a minute for a bonus.
 //
-// The airfield asks: is the runway blocked (`runwayBlocked`), are the flowers boosted (`dew`), and what to show on
+// The airfield asks: is the runway blocked (`runwayBlocked`), and what to show on
 // the minimap (`markers`). Only played time counts, and nothing happens during the tutorial.
 // ============================================================================
 import * as THREE from 'three';
@@ -32,7 +32,7 @@ export interface EventHooks {
   level: () => number;
 }
 
-type Kind = 'lizard' | 'dew' | 'feather';
+type Kind = 'lizard' | 'feather';
 
 const v3 = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
 /** Where a dropped feather can land: open ground around the airfield (not on buildings or the runway). */
@@ -41,8 +41,6 @@ const FEATHER_SPOTS = [v3(-46, 0, 20), v3(24, 0, 2), v3(-4, 0, 36), v3(50, 0, 18
 export class Events {
   /** 🦎 The runway is closed (the lizard is on it). */
   runwayBlocked = false;
-  /** 🌧️ The dew shower is on (flowers fill twice as fast). */
-  dew = false;
   private wait = 100;
   private last: Kind | null = null;
   private kind: Kind | null = null;
@@ -57,7 +55,6 @@ export class Events {
   // 🪶
   private feather: THREE.Group | null = null;
   private shadow: THREE.Mesh | null = null;
-  private storm = document.getElementById('storm');
 
   constructor(private h: EventHooks) {}
 
@@ -75,7 +72,6 @@ export class Events {
   alert(): { text: string; at: THREE.Vector3 | null; bad: boolean } | null {
     if (this.lizard && this.lizState !== 'out') return { text: '⚠️ 🦎 LIZARD ON THE RUNWAY · walk up to it to shoo it!', at: this.lizard.root.position, bad: true };
     if (this.feather) return { text: '🪶 A feather dropped · find it for a bonus', at: this.feather.position, bad: false };
-    if (this.dew) return { text: `🌧️ Dew shower · flowers fill ×2 · ${Math.max(0, Math.ceil(35 - this.t))}s`, at: null, bad: false };
     return null;
   }
 
@@ -94,17 +90,12 @@ export class Events {
     }
     this.t += dt;
     if (this.kind === 'lizard') this.updateLizard(dt);
-    else if (this.kind === 'dew') {
-      if (this.t > 35) {
-        this.dew = false;
-        this.storm?.classList.remove('on', 'dew');
-        this.end();
-      }
-    } else this.updateFeather(dt);
+    else this.updateFeather(dt);
   }
 
   private start() {
-    const kinds: Kind[] = (['lizard', 'dew', 'feather'] as Kind[]).filter((k) => k !== this.last);
+    // (with two kinds it would only ever take turns: so the same one may come twice, one time in three)
+    const kinds: Kind[] = (['lizard', 'feather'] as Kind[]).filter((k) => k !== this.last || Math.random() < 0.34);
     const k = kinds[Math.floor(Math.random() * kinds.length)];
     this.kind = this.last = k;
     this.t = 0;
@@ -123,10 +114,6 @@ export class Events {
       this.shooed = false;
       this.h.hud.banner('🦎 Lizard on the runway!', 'Nothing can take off or land: walk up to it to shoo it away', 4200);
       this.h.sfx.risky();
-    } else if (k === 'dew') {
-      this.dew = true;
-      this.storm?.classList.add('on', 'dew');
-      this.h.hud.banner('🌧️ Dew shower!', 'The nectar flowers fill twice as fast while it lasts', 3600);
     } else {
       // a big shadow sweeps over the field first, then the feather drifts down
       const sh = new THREE.Mesh(new THREE.CircleGeometry(1, 28).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x1a1a1a, transparent: true, opacity: 0.32, depthWrite: false }));

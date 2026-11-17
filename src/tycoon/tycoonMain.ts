@@ -73,8 +73,12 @@ const HOWTO_HTML = `
       🧹 <b>Janitor ant</b>.</li>
     <li>🗺️ <b>Route</b> tiles open longer routes that pay higher fares.</li>
     <li>🎁 The <b>Gift Shop</b> sells pollen sweets to passengers; the 👑 <b>VIP Lounge</b> brings golden VIPs who pay ×3.</li>
-    <li>🦎 Now and then something happens: a lizard sunbathing on the runway (walk up to shoo it), a 🌧️ dew shower
-      (flowers fill twice as fast), or a 🪶 feather to find.</li>
+    <li>🦎 Now and then something happens: a lizard sunbathing on the runway (walk up to shoo it), or a 🪶 feather
+      to find.</li>
+    <li>🌙 The day turns to <b>night</b> every few minutes: the runway lights come on and night flights pay
+      <b>+25%</b>. 🌧️ <b>Rain</b> fills the flowers twice as fast (planes go a little slower), and the 🌈
+      <b>rainbow</b> after it pays <b>+50%</b> on every fare. 🌬️ When the <b>wind</b> turns, planes take off and
+      land the other way (watch the windsock).</li>
     <li>💵 Walk over the <b>cash pad</b> to collect. Spend it on the <b>glowing tiles</b>: ants who fuel the planes,
       check passengers in and collect the cash for you.</li>
     <li>🎯 <b>Quests</b> (the card under the airfield's name): there's always one, with a cash reward. The yellow
@@ -146,9 +150,9 @@ export async function startTycoon({ app, renderer, save, hud, sfx, input, progre
     },
     board: openBoard,
     fleet: () => field.openTarget('hangar'),
-    // ⚠️ what's happening right now (the lizard, a feather, the dew): tap it to look there
+    // ⚠️ what's happening right now (the lizard, a feather: tap it to look there; else the rain or its rainbow)
     alert: () => {
-      const a = field.events.alert();
+      const a = field.events.alert() ?? field.weather.alert();
       return a && { text: a.text, bad: a.bad };
     },
     alertTap: () => {

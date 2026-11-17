@@ -85,7 +85,12 @@ export function makeWindsock(): Piece {
     update(dt: number) {
       t += dt;
       // the wind slowly wanders round, gusting now and then
-      const dir = 0.7 + 0.9 * Math.sin(t * 0.23) + 0.25 * Math.sin(t * 0.71);
+      // (🌬️ v0.91: where the airfield's wind blows, when it has one: `userData.windYaw`, and it only wavers about it)
+      const set = root.userData.windYaw as number | undefined;
+      let dir = set === undefined ? 0.7 + 0.9 * Math.sin(t * 0.23) + 0.25 * Math.sin(t * 0.71) : set + 0.28 * Math.sin(t * 0.23) + 0.1 * Math.sin(t * 0.71);
+      // (round the short way)
+      while (dir - swing.rotation.y > Math.PI) dir -= Math.PI * 2;
+      while (dir - swing.rotation.y < -Math.PI) dir += Math.PI * 2;
       const gust = 0.5 + 0.5 * Math.sin(t * 0.9) * Math.sin(t * 0.37 + 1);
       swing.rotation.y += (dir - swing.rotation.y) * Math.min(1, dt * 1.4);
       const droop = -0.12 - 0.5 * (1 - gust);
