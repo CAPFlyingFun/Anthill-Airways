@@ -333,10 +333,12 @@ const lodGeos = new WeakMap<THREE.BufferGeometry, THREE.BufferGeometry[]>();
 const lodReady = new Set<string>();
 /** Make these people's lighter triangle lists (once each; safe to call again). */
 export async function lodPeople(names: HumanKind[]) {
-  await MeshoptSimplifier.ready;
+  await MeshoptSimplifier.ready.catch((e) => console.warn('No simplifier on this device', e));
   for (const name of names) {
     const t = templates.get(name);
     if (!t || lodReady.has(name)) continue;
+    // (if the lighter lists can't be made on this device, the person still turns up: drawn in full at any distance)
+    try {
     t.traverse((o) => {
       const mesh = o as THREE.Mesh;
       const g = mesh.geometry;
@@ -358,7 +360,12 @@ export async function lodPeople(names: HumanKind[]) {
         return ng;
       }));
     });
+    } catch (e) {
+      console.warn(`No lighter versions for "${name}"`, e);
+    }
     lodReady.add(name);
+    // (one model at a time, with a breath between: making the lists is heavy work for a phone)
+    await new Promise((r) => setTimeout(r, 60));
   }
 }
 export function hasLods(name: string) {
@@ -367,17 +374,19 @@ export function hasLods(name: string) {
 /** Draw this person at `level` of PEOPLE_LOD (0 = the full model). Only the nearer two levels cast shadows. */
 export function setPersonLod(model: CreatureModel, level: number) {
   if (model.root.userData.lod === level) return;
-  model.root.userData.lod = level;
+  let done = true;
   model.root.traverse((o) => {
     const mesh = o as THREE.Mesh;
     if (!mesh.isMesh) return;
     const full = (mesh.userData.fullGeo as THREE.BufferGeometry | undefined) ?? mesh.geometry;
     const levels = lodGeos.get(full);
-    if (!levels) return;
+    // (her lighter lists aren't made yet: she's drawn in full for now, and asks again next time)
+    if (!levels) return void (done = false);
     mesh.userData.fullGeo = full;
     mesh.geometry = levels[Math.min(level, levels.length - 1)];
     mesh.castShadow = level <= 1;
   });
+  if (done) model.root.userData.lod = level;
 }
 
 /** A walking human `height` units tall. Null if the model is missing. */

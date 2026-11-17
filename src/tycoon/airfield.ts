@@ -41,7 +41,7 @@ import { AT, CLEARINGS, TY, TYCOON_SAVE_V, TY_UNLOCKS, walkable } from './data';
 import { SURFACE, artBaggageCart, artBackdrop, artBug, artDewTank, artFuelFlower, artHangar, artScatter, artGate, artGround, artLawn, artRunway, artSign, artTaxiway, artTerminal, artTower, artWindsock, type ArtLawn, type ArtPiece } from './art';
 import { Plane } from './plane';
 import { PEOPLE_FILES, Passengers, type Pax, type Stop } from './passengers';
-import { loadPeople, lodPeople } from '../actors/creatures';
+import { hasModel, loadPeople, lodPeople } from '../actors/creatures';
 import { FLEET, bestPlane, openRoutes, routeOf, type PlaneType } from './fleet';
 import { STAFF, STAFF_MAX, buyStaff, staffCost, staffFx, type StaffId } from './staff';
 import { UPS, UpMenu, upPrice, type MenuRow, type UpDef } from './upgrades';
@@ -2271,13 +2271,31 @@ export class Airfield {
   get people() {
     return !!this.st.people;
   }
+  /** "12/17": how many of the people's models are ready. */
+  peopleReady() {
+    return `${PEOPLE_FILES.filter((f) => hasModel(f)).length}/${PEOPLE_FILES.length}`;
+  }
   setPeople(on: boolean, quiet = false) {
     this.st.people = on;
     this.pax.people = on;
     if (!on) return;
     if (!quiet) this.hud.banner('🧍 Tiny people are on their way', 'New passengers are miniature people: they join as their models arrive', 4200);
     // (each one as it arrives: downloaded, then its lighter triangle lists made for when it's far from the camera)
-    for (const f of PEOPLE_FILES) void loadPeople([f]).then(() => lodPeople([f]));
+    let told = false;
+    // (a person joins the moment her model has downloaded; her lighter far-away versions are made afterwards, one
+    // model at a time, so the game never waits on them)
+    let chain = Promise.resolve();
+    for (const f of PEOPLE_FILES) {
+      void loadPeople([f])
+        .then(() => {
+          chain = chain.then(() => lodPeople([f]));
+          // (the first one's here: say so, and send one walking in straight away so there's something to see)
+          if (told || !this.pax.people || !hasModel(f)) return;
+          told = true;
+          this.pax.hurry();
+          if (!quiet) this.hud.banner('🧍 The first tiny people are here!', "Watch the lawn's edge: the rest of the cast joins as it downloads", 4200);
+        });
+    }
   }
 
   /** 👀 Point the camera at a spot until you walk (a guide's "Show me"). */

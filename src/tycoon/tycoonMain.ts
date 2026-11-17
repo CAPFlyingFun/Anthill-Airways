@@ -198,6 +198,21 @@ export async function startTycoon({ app, renderer, save, hud, sfx, input, progre
   applyView();
 
   // 4) ⚙️ Settings → 📖 How to play
+  // 🧍 Passengers: bugs or TRADDOMIUM's tiny people (v0.77.1: its own button in Settings, with how many are ready)
+  const peopleBtn = document.getElementById('peopleBtn') as HTMLButtonElement;
+  peopleBtn.hidden = false;
+  const peopleLabel = () => {
+    peopleBtn.textContent = field.people ? `🧍 Passengers: tiny people (${field.peopleReady()} ready)` : '🐛 Passengers: bugs';
+  };
+  peopleLabel();
+  window.setInterval(peopleLabel, 1000);
+  peopleBtn.addEventListener('click', () => {
+    field.setPeople(!field.people);
+    if (!field.people) hud.banner('🐛 Bugs are back', 'New passengers are aphids again', 2600);
+    writeSave(save);
+    peopleLabel();
+  });
+
   document.getElementById('howtoBtn')!.addEventListener('click', () => {
     document.getElementById('settings')!.classList.add('hidden');
     hud.showGuide(HOWTO_TITLE, HOWTO_HTML, [
@@ -208,15 +223,6 @@ export async function startTycoon({ app, renderer, save, hud, sfx, input, progre
           field.tutorial.replay();
           writeSave(save);
           hud.banner('🎓 Tutorial restarted', 'Follow the yellow arrow 🔽', 4000);
-        },
-      },
-      {
-        label: field.people ? '🐛 Passengers: back to bugs' : '🧍 Passengers: tiny people (TRADDOMIUM)',
-        cls: 'menu-btn',
-        onClick: () => {
-          field.setPeople(!field.people);
-          if (!field.people) hud.banner('🐛 Bugs are back', 'New passengers are aphids again', 2600);
-          writeSave(save);
         },
       },
       {

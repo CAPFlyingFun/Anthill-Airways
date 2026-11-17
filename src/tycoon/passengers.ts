@@ -9,7 +9,7 @@
 // They're small aphids for now (a giant aphid is ~4–5 mm: they fit two to a ladybug). Bigger planes later will
 // carry bigger travellers.
 // ============================================================================
-import { PEOPLE_LOD, hasLods, setPersonLod, spawnHuman, type HumanKind } from '../actors/creatures';
+import { PEOPLE_LOD, hasModel, setPersonLod, spawnHuman, type HumanKind } from '../actors/creatures';
 import type { CreatureModel } from '../actors/models';
 import { SIZE } from './scale';
 import * as THREE from 'three';
@@ -120,7 +120,7 @@ export class Passengers {
   eye = new THREE.Vector3();
   private lodT = 0;
   private person(): (CreatureModel & { seats: THREE.Object3D[] }) | null {
-    const ready = PEOPLE.filter((k) => hasLods(k.file));
+    const ready = PEOPLE.filter((k) => hasModel(k.file));
     if (!this.people || !ready.length) return null;
     let roll = Math.random() * ready.reduce((a, k) => a + k.weight, 0);
     const pick = ready.find((k) => (roll -= k.weight) <= 0) ?? ready[0];
@@ -129,6 +129,11 @@ export class Passengers {
     setPersonLod(m, PEOPLE_LOD.length - 1); // (the lightest until the next look at how far away she is)
     m.root.userData.sitDrop = (m.biped?.legLen ?? m.height * 0.47) * 0.82; // (astride the bug: see Plane.seat)
     return Object.assign(m, { seats: [] as THREE.Object3D[] });
+  }
+
+  /** The next traveller walks in now (the tiny people have just arrived: something to see straight away). */
+  hurry() {
+    this.arriveT = 0;
   }
 
   /** A new traveller: an aphid, or one of the tiny people. */
