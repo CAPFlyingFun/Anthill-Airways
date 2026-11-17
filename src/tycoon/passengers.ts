@@ -140,21 +140,24 @@ export class Passengers {
   }
 
   /** Climbed down off a plane: walk away into the lawn. */
-  leave(p: Pax) {
+  leave(p: Pax, path: THREE.Vector3[] = []) {
     p.state = 'leaving';
-    p.target.copy(this.spots.exit);
+    // (off the plane along the bridge and down its ramp, then out)
+    p.via = [...path.map((v) => v.clone()), this.spots.exit.clone()];
+    p.target.copy(p.via[0]);
     p.there = false;
   }
 
-  /** The next passengers to board at gate `g` (up to `n`), walking out to `to`. */
-  callToBoard(g: number, n: number, to: THREE.Vector3) {
+  /** The next passengers to board at gate `g` (up to `n`), walking `path`: the ramp's foot, its top, the plane's door. */
+  callToBoard(g: number, n: number, path: THREE.Vector3[]) {
     const q = this.atGate[g];
     // (only those already waiting at the gate: not ones still at the café or on their way; 👑 VIPs first)
     const called = q.filter((p) => p.state === 'waiting').sort((a, b) => Number(b.vip) - Number(a.vip)).slice(0, n);
     for (const p of called) q.splice(q.indexOf(p), 1);
     for (const p of called) {
       p.state = 'boarding';
-      p.target.copy(to);
+      p.via = path.map((v) => v.clone());
+      p.target.copy(p.via[0]);
       p.there = false;
     }
     return called;
@@ -239,8 +242,9 @@ export class Passengers {
     for (let i = this.all.length - 1; i >= 0; i--) {
       const p = this.all[i];
       if (p.state === 'seated') continue;
+      if (p.state === 'boarding' || p.state === 'leaving') this.followVia(p); // (along the bridge, one waypoint at a time)
       this.walk(p, dt);
-      if (p.state === 'leaving' && p.there) {
+      if (p.state === 'leaving' && p.there && !p.via.length) {
         p.model.root.removeFromParent();
         this.all.splice(i, 1);
       }
@@ -282,7 +286,10 @@ export class Passengers {
     p.there = false;
     const step = Math.min(dist, TY.passengerSpeed * dt);
     p.pos.addScaledVector(d.normalize(), step);
-    p.pos.y = Math.max(p.target.y * (1 - Math.min(1, dist / 3)), this.ground(p.pos.x, p.pos.z)); // (up the ramp near the end)
+    if (p.state === 'boarding' || p.state === 'leaving') {
+      // (on the bridge: its height runs straight from one waypoint to the next: up the ramp, level along the deck)
+      p.pos.y = Math.max(p.pos.y + (p.target.y - p.pos.y) * Math.min(1, step / dist), this.ground(p.pos.x, p.pos.z));
+    } else p.pos.y = Math.max(p.target.y * (1 - Math.min(1, dist / 3)), this.ground(p.pos.x, p.pos.z)); // (up the ramp near the end)
     faceToward(p.model, d.x, d.z, dt, 10);
     animateCreature(p.model, dt, TY.passengerSpeed);
   }

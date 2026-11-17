@@ -67,6 +67,8 @@ interface Gate {
   piece: ArtPiece;
   /** The bridge's end beside the plane: passengers walk here, then hop aboard. */
   door: THREE.Vector3;
+  /** The walk aboard: the foot of the bridge's ramp, its top, the door (v0.76: on the walkway, not through it). */
+  path: THREE.Vector3[];
   fuel: Stack;
   fuelZone: Zone;
   plane: Plane;
@@ -1293,8 +1295,9 @@ export class Airfield {
     this.scene.add(bg);
     const bags = new Stack(bg, gridLayout(2, 4, 0.7, 0.62, 0.08), TY.bagPadMax);
     const door = this.worldSpot(piece, 'door', stand.clone().add(new THREE.Vector3(-3, 0, 0)));
+    const path = [this.worldSpot(piece, 'rampFoot', door.clone().setY(0)), this.worldSpot(piece, 'rampTop', door), door];
     const gate: Gate = {
-      door, piece, fuel, fuelZone: new Zone(fuelAt.x, fuelAt.z, 1.5, 1.5), plane, riders: [], boarding: [], boardT: 0, open, label,
+      door, path, piece, fuel, fuelZone: new Zone(fuelAt.x, fuelAt.z, 1.5, 1.5), plane, riders: [], boarding: [], boardT: 0, open, label,
       bags, bagZone: new Zone(bagsAt.x, bagsAt.z, 1.5, 1.5),
     };
     piece.root.userData.link = this.gateRoads[i] ?? [];
@@ -1342,7 +1345,7 @@ export class Airfield {
       plane.unseat(this.scene);
       for (const p of gate.riders) {
         p.state = 'leaving';
-        this.pax.leave(p);
+        this.pax.leave(p, [...gate.path].reverse());
         this.bill(TY.landingFee * (plane.inbound?.fare ?? 1), plane.pos);
       }
       gate.riders = [];
@@ -2111,11 +2114,11 @@ export class Airfield {
     const free = plane.freeSeats - g.boarding.length;
     if (fuelled && free > 0 && this.pax.atGate[this.gates.indexOf(g)].length) {
       plane.outbound ??= this.newFlight();
-      g.boarding.push(...this.pax.callToBoard(this.gates.indexOf(g), free, nose));
+      g.boarding.push(...this.pax.callToBoard(this.gates.indexOf(g), free, g.path));
     }
     for (let i = g.boarding.length - 1; i >= 0; i--) {
       const p = g.boarding[i];
-      if (!p.there) continue;
+      if (!p.there || p.via.length) continue; // (still on the bridge)
       g.boarding.splice(i, 1);
       if (plane.seat(p.model.root)) {
         p.state = 'seated';

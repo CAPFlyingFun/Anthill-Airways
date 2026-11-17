@@ -12,7 +12,8 @@
 // Size: stand ~9 × 11; whole gate ~25 (X) × 11 (Z); bridge deck 1.1 above the ground, 2.4 wide, 9.6 long.
 // Triangles: ~2,700. Meshes: ~11.
 // Spots: 'gate' (where passengers wait, foot of the ramp), 'plane' (where the plane parks, facing +Z),
-//        'door' (the end of the bridge at the plane's side door, up on the deck).
+//        'door' (the end of the bridge at the plane's side door, up on the deck),
+//        'rampFoot' and 'rampTop' (the two ends of the ramp: passengers walk foot → top → door).
 // ============================================================================
 import * as THREE from 'three';
 import { mat } from '../kit';
@@ -122,6 +123,9 @@ export function makeGate(opts: GateOpts = {}): Piece {
       gate: v3(DECK_X0 - rampLen - 1.6, 0, 0),
       plane: v3(0, 0.3, 0),
       door: v3(DECK_X1 - 0.3, DECK_Y + 0.3, 0),
+      // (the walk aboard, v0.76: the foot of the leaf ramp on the ground, then its top, on the deck)
+      rampFoot: v3(DECK_X0 - rampLen + 0.1, 0, 0),
+      rampTop: v3(DECK_X0 + 0.3, DECK_Y + 0.3, 0),
     },
   };
 }
