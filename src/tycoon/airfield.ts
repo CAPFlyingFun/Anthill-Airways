@@ -40,7 +40,8 @@ import type { MapRect, MapView } from '../ui/minimap';
 import { AT, CLEARINGS, TY, TYCOON_SAVE_V, TY_UNLOCKS, walkable } from './data';
 import { SURFACE, artBaggageCart, artBackdrop, artBug, artDewTank, artFuelFlower, artHangar, artScatter, artGate, artGround, artLawn, artRunway, artSign, artTaxiway, artTerminal, artTower, artWindsock, type ArtLawn, type ArtPiece } from './art';
 import { Plane } from './plane';
-import { Passengers, type Pax, type Stop } from './passengers';
+import { PEOPLE_FILES, Passengers, type Pax, type Stop } from './passengers';
+import { loadPeople, lodPeople } from '../actors/creatures';
 import { FLEET, bestPlane, openRoutes, routeOf, type PlaneType } from './fleet';
 import { STAFF, STAFF_MAX, buyStaff, staffCost, staffFx, type StaffId } from './staff';
 import { UPS, UpMenu, upPrice, type MenuRow, type UpDef } from './upgrades';
@@ -311,6 +312,7 @@ export class Airfield {
     this.refreshTiles(false);
 
     this.tutorial = new Tutorial(this, hud, save, this.script());
+    if (this.st.people) this.setPeople(true, true);
     this.buildGuides();
     // 👀 nothing tall hides your ant (flowers, leaves, signs, walls: seeThrough.ts)
     seeThroughAll(this.scene, [this.player.model.root]);
@@ -1799,6 +1801,7 @@ export class Airfield {
     const see = this.player.firstPerson ? undefined : (this.watchAt ?? this.focus);
     this.lawn.update(dt, this.camera, see);
     setSee(this.camera, see);
+    this.camera.getWorldPosition(this.pax.eye);
 
     const iv = CONFIG.player.pickupInterval / prog.workMult;
 
@@ -2262,6 +2265,19 @@ export class Airfield {
   private count(kind: GoalKind | 'recycled', n: number) {
     if (kind !== 'recycled') this.goals.add(kind, n);
     if (kind === 'snacks' || kind === 'earned' || kind === 'recycled') (this.st.tally ??= {})[kind] = (this.st.tally?.[kind] ?? 0) + n;
+  }
+
+  /** 🧍 Tiny people or bugs as passengers (⚙️ Settings). Their models download the first time it's switched on. */
+  get people() {
+    return !!this.st.people;
+  }
+  setPeople(on: boolean, quiet = false) {
+    this.st.people = on;
+    this.pax.people = on;
+    if (!on) return;
+    if (!quiet) this.hud.banner('🧍 Tiny people are on their way', 'New passengers are miniature people: they join as their models arrive', 4200);
+    // (each one as it arrives: downloaded, then its lighter triangle lists made for when it's far from the camera)
+    for (const f of PEOPLE_FILES) void loadPeople([f]).then(() => lodPeople([f]));
   }
 
   /** 👀 Point the camera at a spot until you walk (a guide's "Show me"). */

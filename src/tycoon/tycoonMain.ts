@@ -211,6 +211,15 @@ export async function startTycoon({ app, renderer, save, hud, sfx, input, progre
         },
       },
       {
+        label: field.people ? '🐛 Passengers: back to bugs' : '🧍 Passengers: tiny people (TRADDOMIUM)',
+        cls: 'menu-btn',
+        onClick: () => {
+          field.setPeople(!field.people);
+          if (!field.people) hud.banner('🐛 Bugs are back', 'New passengers are aphids again', 2600);
+          writeSave(save);
+        },
+      },
+      {
         label: '📖 How things work',
         cls: 'menu-btn',
         onClick: () => hud.showGuide('📖 How things work', field.guideList(), [{ label: 'Close', cls: 'big-btn' }]),

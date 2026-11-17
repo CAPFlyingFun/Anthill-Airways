@@ -9,6 +9,9 @@
 // They're small aphids for now (a giant aphid is ~4–5 mm: they fit two to a ladybug). Bigger planes later will
 // carry bigger travellers.
 // ============================================================================
+import { PEOPLE_LOD, hasLods, setPersonLod, spawnHuman, type HumanKind } from '../actors/creatures';
+import type { CreatureModel } from '../actors/models';
+import { SIZE } from './scale';
 import * as THREE from 'three';
 import { animateCreature, faceToward } from '../actors/models';
 import { artBug, type ArtBug } from './art';
@@ -70,6 +73,14 @@ export interface Stop {
   maxWait: number;
 }
 
+/** 🧍 Everyone who flies (the story's cast: actors/cast.ts). The expecting looks come up less often: about 1 in 8. */
+const PEOPLE: { file: HumanKind; weight: number }[] = [
+  ...(['h-jack', 'h-jacklab', 'h-cadet', 'h-director', 'h-enigma', 'h-balance', 'h-azure', 'h-ember', 'h-crew1', 'h-crew2', 'h-crew3', 'h-crew4'] as HumanKind[]).map((file) => ({ file, weight: 1 })),
+  ...(['h-sarah', 'h-sarah2', 'h-grace', 'h-exec', 'h-balance2'] as HumanKind[]).map((file) => ({ file, weight: 0.35 })),
+];
+/** Every model the tiny people need (downloaded when the switch goes on). */
+export const PEOPLE_FILES = PEOPLE.map((p) => p.file);
+
 export class Passengers {
   /** Everyone around (any state). */
   all: Pax[] = [];
@@ -100,9 +111,29 @@ export class Passengers {
     this.atGate = Array.from({ length: gateCount }, () => []);
   }
 
-  /** A new aphid. */
+  /**
+   * 🧍 TINY PEOPLE (v0.77): travellers are TRADDOMIUM's miniature people (the story's cast, at their true 1:180
+   * size) instead of aphids. Whoever's model has arrived is in the mix; until one has, they're aphids.
+   */
+  people = false;
+  /** Where the camera is (the airfield keeps it up to date): people are drawn by their distance from it. */
+  eye = new THREE.Vector3();
+  private lodT = 0;
+  private person(): (CreatureModel & { seats: THREE.Object3D[] }) | null {
+    const ready = PEOPLE.filter((k) => hasLods(k.file));
+    if (!this.people || !ready.length) return null;
+    let roll = Math.random() * ready.reduce((a, k) => a + k.weight, 0);
+    const pick = ready.find((k) => (roll -= k.weight) <= 0) ?? ready[0];
+    const m = spawnHuman(pick.file, SIZE.person * (0.93 + Math.random() * 0.12));
+    if (!m) return null;
+    setPersonLod(m, PEOPLE_LOD.length - 1); // (the lightest until the next look at how far away she is)
+    m.root.userData.sitDrop = (m.biped?.legLen ?? m.height * 0.47) * 0.82; // (astride the bug: see Plane.seat)
+    return Object.assign(m, { seats: [] as THREE.Object3D[] });
+  }
+
+  /** A new traveller: an aphid, or one of the tiny people. */
   private spawn(at: THREE.Vector3) {
-    const m = artBug('aphid', TY.aphidLength * (0.9 + Math.random() * 0.2), { color: TINTS[Math.floor(Math.random() * TINTS.length)], seed: Math.floor(Math.random() * 1000) });
+    const m = this.person() ?? artBug('aphid', TY.aphidLength * (0.9 + Math.random() * 0.2), { color: TINTS[Math.floor(Math.random() * TINTS.length)], seed: Math.floor(Math.random() * 1000) });
     m.root.position.copy(at);
     this.scene.add(m.root);
     const p = new Pax(m);
@@ -237,6 +268,18 @@ export class Passengers {
       this.gateSpot(g, i, p.target);
       if (p.state === 'toGate' && p.there) p.state = 'waiting';
     }));
+
+    // 🧍 People are drawn by how far they are from the camera (a few times a second): the full model up close,
+    // lighter triangle lists further off (creatures.ts PEOPLE_LOD: the DEV Room's "Auto", in the people's own metres)
+    if ((this.lodT -= dt) <= 0) {
+      this.lodT = 0.25;
+      const metre = SIZE.person / 1.7;
+      for (const p of this.all) {
+        if (!p.model.biped) continue;
+        const d = p.model.root.getWorldPosition(this.tmp).distanceTo(this.eye) / metre;
+        setPersonLod(p.model, PEOPLE_LOD.findIndex((lv) => d <= lv.within));
+      }
+    }
 
     // Everyone walks (seated riders are carried by their plane)
     for (let i = this.all.length - 1; i >= 0; i--) {

@@ -33,6 +33,8 @@ export const SIZE = {
   dragonflyWingspan: mm(100),
   butterfly: mm(25),         // (approx.) body
   butterflyWingspan: mm(80), // (approx.) 65–95 mm
+  // 🧍 TRADDOMIUM's miniature people (v0.77): 1:180, so a 1.70 m adult stands about 9.4 mm tall
+  person: mm(1700 / 180),
   // 🐞 other bugs (procedural): passengers, wild traffic, predators
   aphid: mm(2.5),
   pillbug: mm(10),

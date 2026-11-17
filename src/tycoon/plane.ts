@@ -161,6 +161,8 @@ export class Plane {
     // (seats sit inside the plane's own scale: undo it so the rider keeps its size)
     const parent = s.getWorldScale(new THREE.Vector3()).x;
     rider.scale.setScalar(world / parent);
+    // (🧍 a person sits astride: sunk to the hips, legs down the bug's sides. `sitDrop` is in world units)
+    rider.position.y = -((rider.userData.sitDrop as number | undefined) ?? 0) / parent;
     this.riders[i] = rider;
     return true;
   }

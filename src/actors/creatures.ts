@@ -15,6 +15,7 @@
 //
 // If a model fails to load, the game falls back to the simple shape-built bugs.
 // ============================================================================
+import { MeshoptSimplifier } from 'meshoptimizer/simplifier';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
@@ -314,6 +315,70 @@ function findLegs(model: CreatureModel, skip: string[] = []) {
 // models.ts (animateBiped) then walks them: planted feet that don't slide,
 // knees that lift the foot, arms that swing (or hold what they carry).
 // ============================================================================
+
+/**
+ * 🧍 DISTANCE LOD for people (v0.77, the tycoon's tiny passengers; the same idea as the DEV Room's "Auto").
+ * The model itself is never changed: up close a person is drawn with every triangle. Further from the camera she's
+ * drawn with a lighter TRIANGLE LIST over the very same points, skin and textures (made once per model with the
+ * careful simplifier, which keeps the silhouette). PEOPLE_LOD says how light at what distance.
+ */
+export const PEOPLE_LOD = [
+  { within: 5, detail: 100 },  // 0-5 m from the camera (first person, zoomed in): the full model, untouched
+  { within: 10, detail: 30 },  // 5-10 m
+  { within: 18, detail: 15 },  // 10-18 m (most of what you see in the usual view from above)
+  { within: Infinity, detail: 8 },
+];
+/** Each model's lighter versions, by its own (full) geometry: [full, 30%, 15%, 8%]. */
+const lodGeos = new WeakMap<THREE.BufferGeometry, THREE.BufferGeometry[]>();
+const lodReady = new Set<string>();
+/** Make these people's lighter triangle lists (once each; safe to call again). */
+export async function lodPeople(names: HumanKind[]) {
+  await MeshoptSimplifier.ready;
+  for (const name of names) {
+    const t = templates.get(name);
+    if (!t || lodReady.has(name)) continue;
+    t.traverse((o) => {
+      const mesh = o as THREE.Mesh;
+      const g = mesh.geometry;
+      if (!mesh.isMesh || !g?.index || g.groups.length > 1 || lodGeos.has(g)) return;
+      const pos = g.attributes.position;
+      const points = new Float32Array(pos.count * 3);
+      for (let i = 0; i < pos.count; i++) points.set([pos.getX(i), pos.getY(i), pos.getZ(i)], i * 3);
+      const all = Uint32Array.from(g.index.array as ArrayLike<number>);
+      lodGeos.set(g, PEOPLE_LOD.map((lv) => {
+        if (lv.detail >= 100) return g;
+        const target = Math.floor((all.length * lv.detail) / 300) * 3;
+        const [fewer] = MeshoptSimplifier.simplify(all, points, 3, target, 0.05);
+        const ng = new THREE.BufferGeometry();
+        for (const k of Object.keys(g.attributes)) ng.setAttribute(k, g.attributes[k]);
+        ng.morphAttributes = g.morphAttributes;
+        ng.setIndex(new THREE.BufferAttribute(fewer, 1));
+        ng.boundingBox = g.boundingBox;
+        ng.boundingSphere = g.boundingSphere;
+        return ng;
+      }));
+    });
+    lodReady.add(name);
+  }
+}
+export function hasLods(name: string) {
+  return lodReady.has(name);
+}
+/** Draw this person at `level` of PEOPLE_LOD (0 = the full model). Only the nearer two levels cast shadows. */
+export function setPersonLod(model: CreatureModel, level: number) {
+  if (model.root.userData.lod === level) return;
+  model.root.userData.lod = level;
+  model.root.traverse((o) => {
+    const mesh = o as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    const full = (mesh.userData.fullGeo as THREE.BufferGeometry | undefined) ?? mesh.geometry;
+    const levels = lodGeos.get(full);
+    if (!levels) return;
+    mesh.userData.fullGeo = full;
+    mesh.geometry = levels[Math.min(level, levels.length - 1)];
+    mesh.castShadow = level <= 1;
+  });
+}
 
 /** A walking human `height` units tall. Null if the model is missing. */
 export function spawnHuman(name: HumanKind, height: number): CreatureModel | null {

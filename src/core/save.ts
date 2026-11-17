@@ -75,6 +75,8 @@ export interface TycoonSave {
    *  gate flies your best aircraft). */
   types?: string[];
   mixed?: boolean;
+  /** 🧍 Passengers are TRADDOMIUM's tiny people instead of bugs (v0.77, ⚙️ Settings). */
+  people?: boolean;
   /** 🎯 Quests (v0.73, tycoon/quests.ts): how many are done, and the random one that's on. */
   quest?: { n: number; id?: string; need?: number; reward?: number; base?: number; last?: string };
   /** Lifetime counts by kind (v0.73: the quests count from these): flights, pax, bags, landings, snacks, earned, recycled. */
