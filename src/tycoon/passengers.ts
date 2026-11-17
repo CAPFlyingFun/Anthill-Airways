@@ -214,6 +214,15 @@ export class Passengers {
     const crown = new TextSprite(1.15, '#ffd166');
     crown.setText('👑');
     crown.sprite.position.y = 2.6;
+    const person = p.model.biped || !!p.model.root.userData.crowd;
+    if (person) {
+      // (v0.83, Joshua: "Can we place the crowns or hats on top of their head so it looks better?" The crown was
+      // at an aphid's height, in the middle of a person's chest or face. A person's sits on the top of her head:
+      // its lower edge just into her hair, in the world's units whatever her own root is scaled by)
+      const k = p.model.root.scale.y || 1, tall = SIZE.person * 0.24;
+      crown.sprite.scale.set((tall * 2) / k, tall / k, 1);
+      crown.sprite.position.y = (SIZE.person * 0.99 + tall * 0.3) / k;
+    }
     p.model.root.add(crown.sprite);
   }
 
