@@ -24,6 +24,8 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { Sneakers, SNEAKER_COLOURS, SNEAKER_PARTS } from './vendor/ccbs/sarahlab/sneakers';
 import { ClothTest, SARAH_TEE } from './devRoomCloth';
 import { VERSION } from './core/updater';
 import { MeshoptSimplifier } from 'meshoptimizer/simplifier';
@@ -197,6 +199,8 @@ interface Look {
   longSleeves: boolean; // teeLong or teeShort
   /** Her head (v0.57): a hairstyle of the builder's, how long (0 its shortest to 1), its colour ('#rrggbb', or null: her own copper), and her face as FACE_TYPES' weights. */
   head?: { style: string; length: number; colour: string | null; face: Record<string, number> };
+  /** Her sneakers' colour (v0.84): which of SHOE_COLOURS; the builder's own navy without one. */
+  shoe?: number;
   /** (the crowd in a game) her tee is painted on even where the cloth tee is worn. */
   paint?: boolean;
 }
@@ -262,6 +266,82 @@ const LOOKS: Look[] = [
 const PLAIN: Look = { name: 'Base', bump: 0, heightCm: 0, top: 0xd8473f, legs: 0x33343f, capri: false, longSleeves: false };
 const STANDARD_CM = 168;
 const SNEAKERS = 0xf2f2f2;
+/**
+ * 👟 HER SNEAKERS (v0.84; Joshua, of the painted white feet in random colours: "the shoes you have appear fixed and
+ * not the shoes that are already enabled in the CCBS room"). The Character Builder's own pair (vendor/ccbs/sarahlab/
+ * sneakers.ts: built round her foot, carried by her foot's bones), in these colours for the upper: the builder's
+ * dusty navy first, then a wardrobe's worth. The midsole stays the builder's white. GAME TUNING.
+ */
+const SHOE_COLOURS = [SNEAKER_COLOURS.upper, 0x26262b, 0xf0f0f0, 0x8d9096, 0xc23b3b, 0xe0709f, 0x1f8a99, 0x3f8f4a, 0x6f3fa3, 0xe08a2a, 0xe2c23a, 0x6fb1e0];
+/**
+ * How much of the builder's sneakers' triangles a crowd's pair keeps. MEASURED: the builder's pair is 33,884
+ * triangles, and a whole woman at the 1% she is drawn at from the game's camera (some 15 of her metres off) is
+ * about 2,000. A pair is a few millimetres of a phone's screen there.
+ */
+const SHOE_DETAIL = 0.03;
+interface CrowdShoes { geos: THREE.BufferGeometry[]; material: THREE.MeshStandardMaterial; triangles: number }
+/**
+ * The pair, made ONCE for everybody: the builder's two shoes built on the body file's own skin, joined into one
+ * mesh with one material (a part's colour is in its points: the builder's seven materials would be fourteen draw
+ * calls a woman), lightened, and given one colouring for each of SHOE_COLOURS over the same points.
+ */
+function makeCrowdShoes(template: THREE.SkinnedMesh, modelRoot: THREE.Object3D, ankles: number[]): CrowdShoes {
+  modelRoot.updateWorldMatrix(true, true);
+  const sk = template.skeleton;
+  // (the builder's restOfMesh: her mesh's own units to her rest frame, +y up, as her bones were bound)
+  const skinned = new THREE.Matrix4().copy(template.bindMatrixInverse).multiply(sk.bones[0].matrixWorld).multiply(sk.boneInverses[0]).multiply(template.bindMatrix);
+  const toRest = new THREE.Matrix4().copy(modelRoot.matrixWorld).invert().multiply(template.matrixWorld).multiply(skinned);
+  const P = template.geometry.getAttribute('position'), basePos = new Float32Array(P.count * 3);
+  for (let i = 0; i < P.count; i++) { basePos[3 * i] = P.getX(i); basePos[3 * i + 1] = P.getY(i); basePos[3 * i + 2] = P.getZ(i); }
+  const pair = new Sneakers(template, basePos, toRest, ankles);
+  // each point's part (its material's group) and, on the knit, how dark its overlay is: read back from the builder's tint
+  const navy = new THREE.Color(SNEAKER_COLOURS.upper), over = new THREE.Color(SNEAKER_COLOURS.overlay);
+  const parts: number[] = [], shades: number[] = [];
+  const singles = pair.meshes.map((mesh) => {
+    const g = mesh.geometry, n = g.getAttribute('position').count, part = new Uint8Array(n), index = g.index!, col = g.getAttribute('color');
+    for (const gr of g.groups) for (let k = gr.start; k < gr.start + gr.count; k++) part[index.getX(k)] = gr.materialIndex ?? 0;
+    for (let i = 0; i < n; i++) { parts.push(part[i]); shades.push(THREE.MathUtils.clamp((col.getX(i) - navy.r) / (over.r - navy.r || 1), 0, 1)); }
+    const one = g.clone();
+    one.clearGroups();
+    return one;
+  });
+  const joined = mergeGeometries(singles, false);
+  for (const g of singles) g.dispose();
+  pair.dispose(); // (the builder's own two meshes, off the body file again)
+  // lighter: the same points, fewer triangles between them
+  let index = joined.index!.array as Uint32Array;
+  const full = index.length / 3;
+  try {
+    const target = Math.floor((index.length * SHOE_DETAIL) / 3) * 3;
+    const [lighter] = MeshoptSimplifier.simplify(new Uint32Array(index), joined.getAttribute('position').array as Float32Array, 3, target, 0.5);
+    if (lighter.length >= 300) index = lighter;
+  } catch (e) { console.warn('[devroom] her sneakers are left whole', e); }
+  const n = parts.length, idOf = (name: string) => SNEAKER_PARTS.indexOf(name as typeof SNEAKER_PARTS[number]);
+  const upper = idOf('upper'), tongue = idOf('tongue'), laces = idOf('laces'), collar = idOf('collar'), midsole = idOf('midsole'), outsole = idOf('outsole');
+  const c = new THREE.Color(), dark = new THREE.Color();
+  const geos = SHOE_COLOURS.map((hex) => {
+    const colour = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) {
+      const part = parts[i];
+      if (part === upper || part === tongue) c.set(hex).lerp(dark.set(hex).multiplyScalar(0.7), shades[i]);
+      else if (part === laces) c.set(hex).multiplyScalar(0.55);
+      else if (part === collar) c.set(hex).multiplyScalar(0.72);
+      else if (part === midsole) c.set(SNEAKER_COLOURS.midsole);
+      else if (part === outsole) c.set(SNEAKER_COLOURS.outsole);
+      else c.set(SNEAKER_COLOURS.label);
+      c.toArray(colour, 3 * i);
+    }
+    const g = new THREE.BufferGeometry();
+    for (const name of ['position', 'normal', 'uv', 'skinIndex', 'skinWeight']) g.setAttribute(name, joined.getAttribute(name));
+    g.setAttribute('color', new THREE.BufferAttribute(colour, 3));
+    g.setIndex(new THREE.BufferAttribute(index, 1));
+    g.userData.devRoomShared = true;
+    return g;
+  });
+  const material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.75, metalness: 0, side: THREE.DoubleSide });
+  console.info(`[devroom] sneakers: ${full} triangles a pair as the builder makes them, ${index.length / 3} in the crowd`);
+  return { geos, material, triangles: index.length / 3 };
+}
 
 /**
  * The builder's belly sizes (its sarahLabTool.ts BELLY_KEYS): the file itself is the 100%
@@ -475,6 +555,8 @@ function randomLook(i: number, seed: number): Look {
     longSleeves: r() < 0.4,
     // (v0.57: her head. Drawn last, so everything above is as it was for the same person.)
     head: randomHead(r),
+    // (v0.84: her sneakers' colour, one of SHOE_COLOURS. Drawn after her head, so she is otherwise who she was.)
+    shoe: Math.min(SHOE_COLOURS.length - 1, Math.floor(r() * SHOE_COLOURS.length)),
   };
 }
 /**
@@ -518,7 +600,7 @@ function paintedMaterial(base: THREE.Material, box: THREE.Box3, look: Look, fine
   const uniforms = {
     uTop: { value: new THREE.Color(look.top) },
     uLegs: { value: new THREE.Color(look.legs) },
-    uShoe: { value: new THREE.Color(SNEAKERS) },
+    uShoe: { value: new THREE.Color(SHOE_COLOURS[look.shoe ?? 0] ?? SNEAKERS) }, // (under her sneakers, and in their place far off)
     uLegEnd: { value: look.legLength !== undefined ? 0.57 - Math.min(1, Math.max(0.1, look.legLength)) * 0.53 : look.capri ? 0.17 : 0.04 },      // where the leggings end (height up her body)
     uSleeveEnd: { value: look.longSleeves ? 0.56 : 0.71 }, // where the sleeves end
     uY0: { value: box.min.y },
@@ -581,6 +663,8 @@ interface Person {
   lods: PersonLod[];
   /** The builder's cloth tee on her (the 'Cloth tee' option), and how to put it on her when her turn comes. */
   cloth?: ClothTest;
+  /** 👟 Her sneakers (the builder's pair, one mesh on her own skeleton). */
+  shoes?: THREE.SkinnedMesh;
   clothMake?: (freeze: boolean) => ClothTest;
   /** How far she is from the camera (to her middle), as of this frame. */
   dist?: number;
@@ -768,7 +852,7 @@ export async function startDevRoom(embed?: CrowdHost): Promise<Crowd | void> {
 
   // ---- Loading a model (once), then cloning it per person ----
   const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
-  interface Loaded { hairs: Map<string, THREE.Object3D>; parts: THREE.Object3D[]; scale: number; minY: number; box: THREE.Box3; tris: number; mb: number; ms: number }
+  interface Loaded { shoes?: CrowdShoes | null; hairs: Map<string, THREE.Object3D>; parts: THREE.Object3D[]; scale: number; minY: number; box: THREE.Box3; tris: number; mb: number; ms: number }
   const cache = new Map<string, Promise<Loaded>>();
   const load = (def: ModelDef) => {
     let p = cache.get(def.key);
@@ -1230,6 +1314,25 @@ export async function startDevRoom(embed?: CrowdHost): Promise<Crowd | void> {
           });
         }
         const measure = measureHuman(rig.bind);
+        // 👟 her sneakers: the pair is made once on the body file, then each woman has it on her own bones
+        const mine = skin as { mesh: THREE.SkinnedMesh } | undefined;
+        if (mine && src.shoes !== null) {
+          try {
+            if (!src.shoes) {
+              let template: THREE.SkinnedMesh | undefined;
+              src.parts[0].traverse((o) => { const m = o as THREE.SkinnedMesh; if (m.isSkinnedMesh && m.geometry.getAttribute('_cloth_cover')) template = m; });
+              if (!template) throw new Error('no skin to build them on');
+              src.shoes = makeCrowdShoes(template, src.parts[0], [measure.joints.ankleL, measure.joints.ankleR]);
+            }
+            const shoes = new THREE.SkinnedMesh(src.shoes.geos[look.shoe ?? 0] ?? src.shoes.geos[0], fade ? fadedMaterial(src.shoes.material, fade) : src.shoes.material);
+            shoes.name = 'sneakers';
+            shoes.frustumCulled = false;
+            mine.mesh.add(shoes);
+            shoes.bindMode = mine.mesh.bindMode;
+            shoes.bind(mine.mesh.skeleton, mine.mesh.bindMatrix);
+            person.shoes = shoes;
+          } catch (e) { src.shoes = null; console.error('[devroom] no sneakers', e); }
+        }
         // How big her skeleton's units are in the room: two of her joints, measured both ways
         root.updateWorldMatrix(true, true);
         const bones = (body.getObjectByProperty('isSkinnedMesh', true as unknown as string) as THREE.SkinnedMesh).skeleton.bones;
