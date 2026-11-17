@@ -87,6 +87,8 @@ const CLOTH_SHARE = 0.7;
 export const PEOPLE_FILES = MEN.map((p) => p.file);
 
 export class Passengers {
+  /** 🎚️ Levels of detail to add to everyone's by distance (the airfield's AutoDetail). */
+  shift = 0;
   /** Everyone around (any state). */
   all: Pax[] = [];
   /** The check-in line, front first. */
@@ -326,7 +328,10 @@ export class Passengers {
         if (her && p.state === 'seated') her.speed = 0;
         if (!p.model.biped) continue;
         const d = p.model.root.getWorldPosition(this.tmp).distanceTo(this.eye) / metre;
-        setPersonLod(p.model, PEOPLE_LOD.findIndex((lv) => d <= lv.within));
+        // (and a level up or down as the frame rate allows: autoDetail.ts. The story's men have four levels, and
+        // the full model stays for close up: "Don't cut the vertices smaller on the people")
+        const byDistance = PEOPLE_LOD.findIndex((lv) => d <= lv.within);
+        setPersonLod(p.model, byDistance === 0 ? 0 : Math.min(PEOPLE_LOD.length - 1, Math.max(1, byDistance + Math.max(-1, this.shift))));
       }
     }
 

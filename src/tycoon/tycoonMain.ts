@@ -205,7 +205,7 @@ export async function startTycoon({ app, renderer, save, hud, sfx, input, progre
   const peopleBtn = document.getElementById('peopleBtn') as HTMLButtonElement;
   peopleBtn.hidden = false;
   const peopleLabel = () => {
-    peopleBtn.textContent = field.people ? `🧍 Passengers: tiny people (${field.peopleReady()} ready)` : '🐛 Passengers: bugs';
+    peopleBtn.textContent = field.people ? `🧍 Passengers: tiny people (${field.peopleReady()} ready · ${field.detailText()})` : '🐛 Passengers: bugs';
   };
   peopleLabel();
   window.setInterval(peopleLabel, 1000);

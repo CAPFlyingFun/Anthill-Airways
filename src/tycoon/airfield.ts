@@ -41,6 +41,7 @@ import { AT, CLEARINGS, TY, TYCOON_SAVE_V, TY_UNLOCKS, walkable } from './data';
 import { SURFACE, artBaggageCart, artBackdrop, artBug, artDewTank, artFuelFlower, artHangar, artScatter, artGate, artGround, artLawn, artRunway, artSign, artTaxiway, artTerminal, artTower, artWindsock, type ArtLawn, type ArtPiece } from './art';
 import { Plane } from './plane';
 import { PEOPLE_FILES, Passengers, type Pax, type Stop } from './passengers';
+import { AutoDetail } from './autoDetail';
 import { hasModel, loadPeople, lodPeople } from '../actors/creatures';
 import { FLEET, bestPlane, openRoutes, routeOf, type PlaneType } from './fleet';
 import { STAFF, STAFF_MAX, buyStaff, staffCost, staffFx, type StaffId } from './staff';
@@ -1895,6 +1896,8 @@ export class Airfield {
 
     // 🎫 Check-in: you on the CHECK-IN pad, or the Check-in ant (it waits while the BAG DROP is full)
     this.pax.serving = (!!this.checkInAnt || this.deskZone.contains(p)) && !this.bagDrop.full;
+    // 🎚️ (the tiny people's detail follows the frame rate: more while it holds, less the moment it falls)
+    if (this.people) { this.detail.step(); this.pax.shift = this.detail.shift; }
     this.pax.update(dt);
     if (this.crowd && this.crowd !== 'loading') this.crowd.step(dt);
 
@@ -2278,6 +2281,13 @@ export class Airfield {
   peopleReady() {
     return `${PEOPLE_FILES.filter((f) => hasModel(f)).length}/${PEOPLE_FILES.length}`;
   }
+  /** 🎚️ The tiny people's automatic detail (autoDetail.ts), and what Settings says of it: "auto 20% · 58 fps". */
+  readonly detail = new AutoDetail();
+  detailText() {
+    const crowd = this.crowd && this.crowd !== 'loading' ? this.crowd : null;
+    const fps = this.detail.fps ? ` · ${Math.round(this.detail.fps)} fps` : '';
+    return crowd ? `detail auto ${crowd.detailAt(this.detail.shift)}%${fps}` : `detail auto${fps}`;
+  }
   /** The game's renderer (tycoonMain hands it over: the builder's crowd draws with it) and the crowd itself. */
   renderer: THREE.WebGLRenderer | null = null;
   private crowd: Crowd | 'loading' | null = null;
@@ -2291,7 +2301,7 @@ export class Airfield {
     if (!this.crowd && this.renderer) {
       this.crowd = 'loading';
       void import('../devRoom')
-        .then((room) => room.startDevRoom({ scene: this.scene, camera: this.camera, renderer: this.renderer! }))
+        .then((room) => room.startDevRoom({ scene: this.scene, camera: this.camera, renderer: this.renderer!, shift: () => this.detail.shift }))
         .then(async (crowd) => {
           if (!crowd || !(await crowd.ready)) throw new Error('the builder\'s body did not load');
           this.crowd = crowd;

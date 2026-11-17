@@ -53,7 +53,11 @@ const BUILDER = import.meta.env.DEV && new URLSearchParams(location.search).has(
  * the game's own scene: the airport's female passengers. Given a host, startDevRoom() builds no page, no camera and no
  * loop of its own; the game adds people one at a time, says how fast each is walking, and calls step() every frame.
  */
-export interface CrowdHost { scene: THREE.Scene; camera: THREE.Camera; renderer: THREE.WebGLRenderer }
+export interface CrowdHost {
+  scene: THREE.Scene; camera: THREE.Camera; renderer: THREE.WebGLRenderer;
+  /** Levels to add to everyone's level by distance (below 0: more detail), as the game's frame rate allows. */
+  shift?: () => number;
+}
 export interface CrowdPerson {
   /** Put this in the scene and move it. She stands 2.8 units tall at scale 1 (HEIGHT), feet at its origin. */
   root: THREE.Group;
@@ -68,6 +72,8 @@ export interface Crowd {
   add(opts: { bump: number; cloth: boolean }): CrowdPerson | null;
   /** One frame: everybody's detail, pose, tee. */
   step(dt: number): void;
+  /** The detail (%) someone in the game's usual view is drawn at, for a shift of that many levels. */
+  detailAt(shift: number): number;
 }
 /** A person is this tall at scale 1. */
 export const CROWD_HEIGHT = 2.8;
@@ -152,7 +158,23 @@ function fadedMaterial(base: THREE.Material, fade: { value: number }) {
  * Auto lite's distances and detail, with every level's shapes live.
  */
 const AUTO_LIVE: { within: number; detail: number; live?: boolean }[] = AUTO_LITE.map((a) => ({ ...a, live: true }));
-/** The table in use: AUTO, AUTO_LITE or AUTO_LIVE (their buttons). */
+/**
+ * IN A GAME (v0.79; Joshua: "Can we try 30%… automatic… if it starts falling, will lower it if needed down to 1%"):
+ * the whole ladder from 30% to 1%, by her distance in her own metres, and the game's SHIFT moves everyone up or
+ * down it by its frame rate (tycoon/autoDetail.ts). The heavy levels are her own baked body (a live 30% body's
+ * shapes would be some 50 MB on the graphics chip); 3% and lighter are the shared live ones, as in AUTO LIVE.
+ * The airport's usual view from above has people 10 to 18 m off. GAME TUNING.
+ */
+const CROWD_TABLE: { within: number; detail: number; live?: boolean }[] = [
+  { within: 6 * METRE, detail: 30 },
+  { within: 12 * METRE, detail: 20 },
+  { within: 20 * METRE, detail: 10 },
+  { within: 30 * METRE, detail: 5 },
+  { within: 45 * METRE, detail: 3, live: true },
+  { within: 70 * METRE, detail: 2, live: true },
+  { within: Infinity, detail: 1, live: true },
+];
+/** The table in use: AUTO, AUTO_LITE or AUTO_LIVE (their buttons), or CROWD_TABLE in a game. */
 // (v0.48: the room opens on AUTO LIVE with SMART FPS on, as Joshua ran his stress tests.)
 // (v0.43.1, the room's defaults, as Joshua tested them on his phone at 54-56 FPS with 40 walking and about 16 in
 // view: "Set these settings as default": Auto lite, body shapes LIVE, shadows on, cloth tee off, out of view not drawn.
@@ -742,7 +764,7 @@ export async function startDevRoom(embed?: CrowdHost): Promise<Crowd | void> {
   const state = { model: MODELS[0], count: 40, looks: 'random' as 'random' | 'saved' | 'off', seed: 0, shadows: true, detail: 3, shapes: 'baked' as 'live' | 'baked' | 'off', underwear: false, auto: true, fps: true, smart: true, cull: true, fade: true, heads: true, target: 30 as 30 | 45 | 60, cloth: 'off' as 'off' | 'live' | 'freeze' | 'near', perChar: 0, motion: 'walk' as 'walk' | 'idle' | 'off', plain: false, sharp: true, loading: '', error: '', info: null as Loaded | null };
   // (in a game: nobody until the game adds her; no draw range or fade of this room's (the game's camera is far off:
   // they would hide everyone); the cloth tee frozen once dressed, as Joshua's settings have it)
-  if (embed) Object.assign(state, { count: 0, fps: false, fade: false, cloth: 'freeze' });
+  if (embed) { Object.assign(state, { count: 0, fps: false, fade: false, cloth: 'freeze' }); TABLE = CROWD_TABLE; }
   const resize = () => {
     if (embed) return;
     renderer.setPixelRatio(state.sharp ? Math.min(window.devicePixelRatio, 2) : 1);
@@ -1710,6 +1732,7 @@ export async function startDevRoom(embed?: CrowdHost): Promise<Crowd | void> {
     const dt = Math.min(0.05, ms / 1000);
     t += dt;
     let simulating = 0;
+    let bakedNow = false;
     // (in a game she may be anywhere, at any size, even riding a bug: where she is and how big, in the world)
     if (embed) camera.getWorldPosition(camAt); else camAt.copy(camera.position);
     for (const p of people) {
@@ -1724,7 +1747,13 @@ export async function startDevRoom(embed?: CrowdHost): Promise<Crowd | void> {
         while (band > 0 && d < TABLE[band - 1].within * 0.95) band--;
         while (band < TABLE.length - 1 && d > TABLE[band].within * 1.05) band++;
         p.band = band;
-        const level = band;
+        let level = band;
+        if (embed?.shift) {
+          level = THREE.MathUtils.clamp(band + Math.round(embed.shift()), 0, TABLE.length - 1);
+          // (a heavy level is her own body, baked the first time she needs it: one of those a frame, so a step
+          // up for everyone at once is spread over a few frames and not one long one)
+          if (level !== p.level && p.lods.some((l) => !l.geos[level] && !TABLE[level].live)) { if (bakedNow) level = p.level; else bakedNow = true; }
+        }
         if (level !== p.level) {
           p.level = level;
           for (const l of p.lods) {
@@ -1739,7 +1768,7 @@ export async function startDevRoom(embed?: CrowdHost): Promise<Crowd | void> {
               l.mesh.morphTargetInfluences = set?.influences;
               if (l.soft) { l.soft.influences = set?.influences ?? []; l.soft.at = MOTION_TARGETS.map((name) => set?.dict[name] ?? -1); }
             }
-            if (TABLE === AUTO && level >= AUTO_DROP_FROM) for (let k = 0; k < 2; k++) { l.geos[k]?.dispose(); l.geos[k] = null; }
+            if ((TABLE === AUTO || TABLE === CROWD_TABLE) && level >= AUTO_DROP_FROM) for (let k = 0; k < 2; k++) { l.geos[k]?.dispose(); l.geos[k] = null; }
           }
         }
       }
@@ -1956,6 +1985,7 @@ export async function startDevRoom(embed?: CrowdHost): Promise<Crowd | void> {
         };
       },
       step: (dt) => tick(performance.now(), dt),
+      detailAt: (shift) => TABLE[THREE.MathUtils.clamp(2 + Math.round(shift), 0, TABLE.length - 1)].detail,
     };
   }
   requestAnimationFrame(tick);
