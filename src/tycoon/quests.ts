@@ -29,6 +29,9 @@ export interface QuestHost {
   /** The cheapest tile that's out, and the next aircraft to unlock (null: none). */
   cheapestTile: () => UnlockDef | null;
   nextPlane: () => { id: string; name: string; icon: string; cost: number } | null;
+  /** 🗺️ The next destination you could open on the map (null: none), and whether one is open. */
+  nextRoute: () => { id: string; name: string; cost: number } | null;
+  routeOpen: (id: string) => boolean;
   cafe: () => boolean;
   recycler: () => boolean;
   fleetMaxed: () => boolean;
@@ -169,6 +172,8 @@ export class Quests {
     if (this.h.owns('ty-hangar') && !this.h.fleetMaxed()) pool.push({ id: 'fleet', need: 1, reward: pay(150) });
     if (this.h.owns('ty-hangar') && plane) pool.push({ id: `plane:${plane.id}`, need: 1, reward: round(plane.cost * 0.1, 10) });
     if (tile) pool.push({ id: `tile:${tile.id}`, need: 1, reward: round(tile.cost * 0.15, 10) });
+    const dest = this.h.nextRoute();
+    if (dest) pool.push({ id: `route:${dest.id}`, need: 1, reward: round(dest.cost * 0.08, 10) });
     const fresh = pool.filter((p) => p.id.split(':')[0] !== q.last);
     const pick = fresh[Math.floor(Math.random() * fresh.length)] ?? pool[0];
     q.id = pick.id;
@@ -196,6 +201,10 @@ export class Quests {
       case 'plane': {
         const p = this.h.nextPlane();
         return { text: `🛖 Unlock the ${p?.id === arg ? `${p.icon} ${p.name}` : 'next aircraft'} in the hangar`, need: 1, reward, have: () => (this.h.owns(arg) ? 1 : 0), target: () => this.h.spot('hangar') };
+      }
+      case 'route': {
+        const d = this.h.nextRoute();
+        return { text: `🗺️ Open ${d?.id === arg ? d.name : 'a new destination'} on the map (the 🗺️ button, top right)`, need: 1, reward, have: () => (this.h.routeOpen(arg) ? 1 : 0), target: none };
       }
       case 'fleet':
         return { text: '🛖 Upgrade your fleet in the hangar (💺 seats or 💨 speed)', need, reward, have: since('fleet'), target: () => this.h.spot('hangar') };

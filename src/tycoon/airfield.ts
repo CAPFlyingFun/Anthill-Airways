@@ -43,7 +43,8 @@ import { Plane } from './plane';
 import { PEOPLE_FILES, Passengers, type Pax, type Stop } from './passengers';
 import { Nav } from './nav';
 import { hasModel, loadPeople, lodPeople } from '../actors/creatures';
-import { FLEET, bestPlane, openRoutes, routeOf, type PlaneType } from './fleet';
+import { FLEET, ROUTES, ROUTE_LV_MAX, bestPlane, routeFare, routeLvCost, routeOf, type PlaneType, type RouteDef } from './fleet';
+import { RouteMap, type RoutePin } from './routeMap';
 import { STAFF, STAFF_MAX, buyStaff, staffCost, staffFx, type StaffId } from './staff';
 import { UPS, UpMenu, upPrice, type MenuRow, type UpDef } from './upgrades';
 import { Events } from './events';
@@ -1318,6 +1319,8 @@ export class Airfield {
       this.tutorial.did(STEP.takeoff);
       // 🗺️ a longer route's fare: the rest of each passenger's fare is paid as it lifts off
       const fare = plane.outbound?.fare ?? 1;
+      const went = routeOf(plane.outbound?.place);
+      (this.st.routeFlown ??= {})[went.id] = (this.st.routeFlown[went.id] ?? 0) + 1;
       if (fare > 1 && plane.aboard > 0) {
         const bonus = Math.round(plane.aboard * this.ticket * (fare - 1));
         this.bill(bonus, plane.pos);
@@ -1621,9 +1624,81 @@ export class Airfield {
   /** Book a flight: a number and one of the 🗺️ routes you've opened (with its fare and length). */
   private newFlight() {
     this.st.seq ??= 101;
-    const routes = openRoutes((id) => this.owns(id));
-    const r = routes[Math.floor(Math.random() * routes.length)];
-    return { no: this.st.seq++, place: r.place, fare: r.fare, extra: r.extra };
+    // (one of the destinations that are open and switched on: the 🗺️ map)
+    const on = ROUTES.filter((x) => this.routeOn(x));
+    const routes = on.length ? on : ROUTES.filter((x) => this.routeOpen(x));
+    const r = routes[Math.floor(Math.random() * routes.length)] ?? ROUTES[0];
+    return { no: this.st.seq++, place: r.place, fare: routeFare(r, this.routeLv(r)), extra: r.extra };
+  }
+
+  // --------------------------------------------------------------------------
+  // 🗺️ The destinations map (v0.87: fleet.ts ROUTES, routeMap.ts)
+  // --------------------------------------------------------------------------
+  /** Is this destination open: from the start, by its tile out on the field, or bought on the map? */
+  routeOpen(r: RouteDef) {
+    return r.unlock ? this.owns(r.unlock) : !r.cost || !!this.st.routes?.includes(r.id);
+  }
+  private routeLv(r: RouteDef) {
+    return this.st.routeLv?.[r.id] ?? 0;
+  }
+  /** Open, and not switched off on the map. */
+  private routeOn(r: RouteDef) {
+    return this.routeOpen(r) && !this.st.routeOff?.includes(r.id);
+  }
+  /** The next destination to open on the map that your level allows (the cheapest), or null. */
+  nextRoute() {
+    return ROUTES.filter((r) => r.cost && !this.routeOpen(r) && this.save.level >= (r.level ?? 0)).sort((a, b) => a.cost! - b.cost!)[0] ?? null;
+  }
+  /** What the map shows of each destination. */
+  private routePins(): RoutePin[] {
+    return ROUTES.map((r) => {
+      const open = this.routeOpen(r), lv = this.routeLv(r);
+      let need: string | null = null;
+      if (!open && r.unlock) {
+        const tile = this.tiles.find((t) => t.def.id === r.unlock)?.def;
+        need = `🗺️ Opened by its glowing tile out on the field${tile ? ` ($${tile.cost.toLocaleString('en-US')}, level ${tile.level ?? 1})` : ''}`;
+      } else if (!open && this.save.level < (r.level ?? 0)) need = `🔒 Reach level ${r.level} to open it (you are level ${this.save.level}) · $${r.cost!.toLocaleString('en-US')}`;
+      return {
+        id: r.id, icon: r.icon, name: r.name, at: r.at, blurb: r.blurb,
+        state: !open ? 'locked' : this.routeOn(r) ? 'open' : 'off',
+        fare: routeFare(r, lv), fareNext: lv < ROUTE_LV_MAX ? routeFare(r, lv + 1) : null,
+        extra: r.extra, flown: this.st.routeFlown?.[r.id] ?? 0, lv, lvMax: ROUTE_LV_MAX,
+        upCost: open && lv < ROUTE_LV_MAX ? routeLvCost(r, lv) : null,
+        openCost: !open && r.cost ? r.cost : null, need,
+      };
+    });
+  }
+  /** A button on a destination's card: open it, 📣 advertise it, or switch its flights off and on. */
+  private routeAct(id: string, what: 'open' | 'up' | 'toggle') {
+    const r = ROUTES.find((x) => x.id === id);
+    if (!r) return;
+    if (what === 'open') {
+      if (this.routeOpen(r) || !r.cost || this.save.level < (r.level ?? 0) || !this.pay(r.cost)) return;
+      (this.st.routes ??= []).push(r.id);
+      this.progress.addXp(TY.xpFlight * 4);
+      this.sfx.unlocked();
+      this.hud.banner(`🗺️ ${r.place} is open!`, `Fare ×${r.fare}: some of your flights go there now`, 3200);
+    } else if (what === 'up') {
+      const lv = this.routeLv(r);
+      if (!this.routeOpen(r) || lv >= ROUTE_LV_MAX || !this.pay(routeLvCost(r, lv))) return;
+      (this.st.routeLv ??= {})[r.id] = lv + 1; // (an upgrade, for the quests: `tally('ups')` adds these up)
+    } else {
+      if (!this.routeOpen(r)) return;
+      const off = (this.st.routeOff ??= []);
+      const k = off.indexOf(r.id);
+      if (k >= 0) off.splice(k, 1);
+      // (one has to stay on: the planes have to go somewhere)
+      else if (ROUTES.filter((x) => this.routeOn(x)).length > 1) off.push(r.id);
+      else this.hud.banner('🗺️ One destination has to stay on', 'Switch another one on first', 2200);
+      this.sfx.popup();
+    }
+  }
+  private routeMap: RouteMap | null = null;
+  /** Open the 🗺️ map (on `pick`'s card, if given). */
+  openRouteMap(pick?: string) {
+    this.routeMap ??= new RouteMap(document.getElementById('hud')!, { pins: () => this.routePins(), cash: () => this.save.cash, act: (id, what) => this.routeAct(id, what) });
+    this.sfx.popup();
+    this.routeMap.open(pick);
   }
 
   // --------------------------------------------------------------------------
@@ -2265,7 +2340,7 @@ export class Airfield {
       case 'pax': return this.st.passengers;
       case 'bags': return this.st.bagsLoaded ?? 0;
       case 'landings': return this.st.landings ?? 0;
-      case 'ups': return sum(this.st.ups) + sum(this.st.staff);
+      case 'ups': return sum(this.st.ups) + sum(this.st.staff) + sum(this.st.routeLv);
       case 'fleet': return this.up('fleet.seats') + this.up('fleet.speed');
       default: return this.st.tally?.[kind] ?? 0;
     }
@@ -2361,6 +2436,8 @@ export class Airfield {
         const t = FLEET.find((f) => f.unlock && !this.owns(f.unlock));
         return t ? { id: t.unlock!, name: t.name, icon: t.icon, cost: t.cost } : null;
       },
+      nextRoute: () => { const r = this.nextRoute(); return r ? { id: r.id, name: r.place, cost: r.cost! } : null; },
+      routeOpen: (id) => { const r = ROUTES.find((x) => x.id === id); return !!r && this.routeOpen(r); },
       cafe: () => this.cafeOpen,
       recycler: () => this.recycler.open,
       fleetMaxed: () => UPS.plane.every((d) => this.up(`fleet.${d.k}`) >= d.max),

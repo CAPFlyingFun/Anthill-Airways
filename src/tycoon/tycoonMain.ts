@@ -54,6 +54,8 @@ const HOWTO_HTML = `
       before landing. The arriving passengers pay a landing fee.</li>
     <li>✈️ Tap a chip at the bottom (or a plane) for its <b>flight card</b>: passengers, bags, nectar and what it's
       doing. 🎯 on the card points the camera at it until you walk. 📋 is the whole flight board.</li>
+    <li>🗺️ <b>Destinations:</b> the 🗺️ button (top right) is a map of the garden. Open far-away places for cash:
+      they pay a higher fare. 📣 Advertise a place to raise its fare, or switch its flights off and on.</li>
     <li>📅 <b>Daily goals</b> (the bar under the airfield's name): finish each day's goals quickly for ⭐⭐⭐
       and a cash bonus.</li>
     <li>⬆️ <b>Upgrades:</b> a bouncing green arrow floats over anything you can afford to upgrade. Tap the building
@@ -182,6 +184,11 @@ export async function startTycoon({ app, renderer, save, hud, sfx, input, progre
     flights.update();
     hud.setNext(field.goals.barText());
   }, 250);
+
+  // 🗺️ The destinations map
+  const routesBtn = document.getElementById('routesBtn') as HTMLButtonElement;
+  routesBtn.hidden = false;
+  routesBtn.addEventListener('click', () => field.openRouteMap());
 
   // 3) First-person / third-person view
   const viewBtn = document.getElementById('viewBtn')!;

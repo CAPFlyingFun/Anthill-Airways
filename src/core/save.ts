@@ -75,6 +75,12 @@ export interface TycoonSave {
    *  gate flies your best aircraft). */
   types?: string[];
   mixed?: boolean;
+  /** 🗺️ The destinations map (v0.87, tycoon/fleet.ts ROUTES): the ones opened on the map, each one's 📣 advertising
+   *  level, the ones switched off, and how many flights have left for each. By route id. */
+  routes?: string[];
+  routeLv?: Record<string, number>;
+  routeOff?: string[];
+  routeFlown?: Record<string, number>;
   /** 🧍 Passengers are TRADDOMIUM's tiny people instead of bugs (v0.77, ⚙️ Settings). */
   people?: boolean;
   /** 🎯 Quests (v0.73, tycoon/quests.ts): how many are done, and the random one that's on. */

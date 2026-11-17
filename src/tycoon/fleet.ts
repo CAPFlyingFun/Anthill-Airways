@@ -10,7 +10,8 @@
 // plane comes home (no two gates the same while there are enough to go round). The hangar's menu switches it off
 // (then every gate flies the biggest one again, for the most income).
 //
-// THE ROUTES: where the flights go. Two short hops are open from the start; the 🗺️ route tiles open longer ones
+// THE ROUTES: where the flights go (v0.87: the 🗺️ DESTINATIONS MAP opens eight more, below). Two short hops are
+// open from the start; the 🗺️ route tiles open longer ones
 // that pay a higher FARE. A departure earns its fare bonus as it lifts off (on top of the tickets paid at check-in:
 // tickets × (fare − 1)), and an arrival from far away pays bigger landing fees (× fare). Longer routes keep the plane
 // away for longer (`extra` seconds), so a new route is a trade: more money per flight, fewer flights.
@@ -53,27 +54,64 @@ export function bestPlane(owns: (id: string) => boolean): PlaneType {
 }
 
 export interface RouteDef {
+  /** Its name in the save (v0.87). */
+  id: string;
+  icon: string;
+  name: string;
+  /** "🧺 Picnic Table": what a flight carries (older saves' flights have only this). */
   place: string;
   /** x the ticket: the fare bonus at take-off is tickets × (fare − 1); arrivals pay landing fees × fare. */
   fare: number;
   /** Extra seconds out on the route. */
   extra: number;
-  /** The tile that opens it (null: open from the start). */
+  /** The tile that opens it (null: not a tile's). */
   unlock: string | null;
+  /** Opened on the 🗺️ DESTINATIONS MAP instead (v0.87): what that costs, and the level you need. */
+  cost?: number;
+  level?: number;
+  /** Where its pin is on the map (0..100 across, 0..100 down), and a line about the place. */
+  at: [number, number];
+  blurb: string;
 }
 
+const route = (id: string, icon: string, name: string, fare: number, extra: number, at: [number, number], blurb: string, how: { unlock?: string; cost?: number; level?: number } = {}): RouteDef =>
+  ({ id, icon, name, place: `${icon} ${name}`, fare, extra, unlock: how.unlock ?? null, cost: how.cost, level: how.level, at, blurb });
+
+/**
+ * v0.87 🗺️ THE DESTINATIONS MAP (Joshua, maxed out at level 26 with everything bought: "we should add more to the
+ * game"; of the five ideas offered, this one first). The garden round the anthill, drawn as a map: the first six
+ * places are as they were (two open from the start, four opened by their 🗺️ tiles out on the field), and eight
+ * further ones are opened ON THE MAP for cash, each further away, dearer, and better paid. An open destination can
+ * be ADVERTISED (📣, up to ROUTE_LV_MAX levels: its fare a little higher each time) and switched off and on
+ * (flights pick at random among the ones that are on). All GAME TUNING.
+ */
 export const ROUTES: RouteDef[] = [
-  { place: '🌼 Flower Field', fare: 1, extra: 0, unlock: null },
-  { place: '🍄 Mushroom Ring', fare: 1, extra: 0, unlock: null },
-  { place: '🧺 Picnic Table', fare: 1.5, extra: 3, unlock: 'ty-route-picnic' },
-  { place: '🪵 Fallen Log Town', fare: 2, extra: 5, unlock: 'ty-route-log' },
-  { place: '🐚 Tide Pool', fare: 2.6, extra: 7, unlock: 'ty-route-tide' },
-  { place: '🦎 Lizard Rock', fare: 3.3, extra: 9, unlock: 'ty-route-lizard' },
+  route('flowers', '🌼', 'Flower Field', 1, 0, [41, 56], 'A short hop over the daisies. Everyone\'s first flight.'),
+  route('mushrooms', '🍄', 'Mushroom Ring', 1, 0, [60, 58], 'A shady circle of toadstools just past the lawn\'s edge.'),
+  route('picnic', '🧺', 'Picnic Table', 1.5, 3, [27, 44], 'Crumbs for days. Busy at lunchtime.', { unlock: 'ty-route-picnic' }),
+  route('log', '🪵', 'Fallen Log Town', 2, 5, [76, 45], 'A whole town of beetles living in one old log.', { unlock: 'ty-route-log' }),
+  route('tide', '🐚', 'Tide Pool', 2.6, 7, [15, 79], 'Where the creek slows down: shells, snails and a sea breeze.', { unlock: 'ty-route-tide' }),
+  route('lizard', '🦎', 'Lizard Rock', 3.3, 9, [85, 66], 'Warm stones, and a landlord who naps all day. Mostly.', { unlock: 'ty-route-lizard' }),
+  route('pond', '🌊', 'Garden Pond', 3.8, 10, [78, 29], 'Lily pads for runways and dragonflies for neighbours.', { cost: 40000, level: 14 }),
+  route('veg', '🥕', 'Vegetable Patch', 4.3, 11, [16, 30], 'Rows of carrots and lettuce: the farmers\' market of the garden.', { cost: 65000, level: 16 }),
+  route('shed', '🛖', 'Garden Shed', 4.9, 12, [14, 12], 'Dusty, dark and full of spiders who love to travel.', { cost: 100000, level: 18 }),
+  route('birdbath', '⛲', 'Bird Bath', 5.5, 13, [52, 30], 'A spa in the sky. Check for birds before landing.', { cost: 150000, level: 20 }),
+  route('oak', '🌳', 'Old Oak', 6.2, 14, [86, 87], 'A city in a tree: a thousand floors, no elevator.', { cost: 220000, level: 22 }),
+  route('porch', '💡', 'Porch Light', 7, 15, [50, 8], 'The brightest nightlife in the garden. Moths can\'t stay away.', { cost: 320000, level: 24 }),
+  route('driveway', '🚗', 'Driveway', 7.9, 16, [88, 10], 'A hot grey desert with one giant, sleeping machine.', { cost: 450000, level: 26 }),
+  route('creek', '🏞️', 'Creek Crossing', 9, 18, [44, 92], 'The far bank. Nobody has flown further and come back.', { cost: 600000, level: 28 }),
 ];
 
-/** The routes `owns` has opened. */
-export function openRoutes(owns: (id: string) => boolean) {
-  return ROUTES.filter((r) => !r.unlock || owns(r.unlock));
+/** 📣 Advertising a destination: its levels, what each adds to its fare, and what the next one costs. */
+export const ROUTE_LV_MAX = 5;
+export const ROUTE_LV_FARE = 0.08;
+export function routeFare(r: RouteDef, lv: number) {
+  return Math.round(r.fare * (1 + ROUTE_LV_FARE * lv) * 100) / 100;
+}
+export function routeLvCost(r: RouteDef, lv: number) {
+  // (a fifth of what the place cost to open, more each level; the near ones by what their tile cost)
+  const base = r.cost ?? ({ 'ty-route-picnic': 450, 'ty-route-log': 1100, 'ty-route-tide': 2600, 'ty-route-lizard': 5500 } as Record<string, number>)[r.unlock ?? ''] ?? 300;
+  return Math.round((Math.max(300, base) * 0.2 * (lv + 1)) / 10) * 10;
 }
 
 /** A route by its place name (older saves' flights have only the place). */
