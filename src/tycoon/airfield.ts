@@ -41,6 +41,7 @@ import { AT, CLEARINGS, TY, TYCOON_SAVE_V, TY_UNLOCKS, walkable } from './data';
 import { SURFACE, artBaggageCart, artBackdrop, artBug, artDewTank, artFuelFlower, artHangar, artScatter, artGate, artGround, artLawn, artRunway, artSign, artTaxiway, artTerminal, artTower, artWindsock, type ArtLawn, type ArtPiece } from './art';
 import { Plane } from './plane';
 import { PEOPLE_FILES, Passengers, type Pax, type Stop } from './passengers';
+import { Nav } from './nav';
 import { hasModel, loadPeople, lodPeople } from '../actors/creatures';
 import { FLEET, bestPlane, openRoutes, routeOf, type PlaneType } from './fleet';
 import { STAFF, STAFF_MAX, buyStaff, staffCost, staffFx, type StaffId } from './staff';
@@ -189,6 +190,8 @@ export class Airfield {
   private lawn: ArtLawn;
   private pieces: ArtPiece[] = [];
   private blockers: Blocker[] = [];
+  /** 🧭 The travellers' way round the blockers (nav.ts). */
+  readonly nav = new Nav();
   private flowers: Flower[] = [];
   private gates: Gate[] = [];
   private pax: Passengers;
@@ -1895,6 +1898,9 @@ export class Airfield {
 
     // 🎫 Check-in: you on the CHECK-IN pad, or the Check-in ant (it waits while the BAG DROP is full)
     this.pax.serving = (!!this.checkInAnt || this.deskZone.contains(p)) && !this.bagDrop.full;
+    // 🧭 (the travellers' grid follows what is built and shown)
+    this.nav.sync(this.blockers);
+    this.pax.nav = this.nav;
     this.pax.update(dt);
     if (this.crowd && this.crowd !== 'loading') this.crowd.step(dt);
 

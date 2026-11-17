@@ -13,6 +13,7 @@ import { PEOPLE_LOD, hasModel, setPersonLod, spawnHuman, type HumanKind } from '
 import { newModel, type CreatureModel } from '../actors/models';
 import { CROWD_HEIGHT, type Crowd, type CrowdPerson } from '../devRoom';
 import { SIZE } from './scale';
+import type { Nav } from './nav';
 import * as THREE from 'three';
 import { animateCreature, faceToward } from '../actors/models';
 import { artBug, type ArtBug } from './art';
@@ -39,6 +40,10 @@ export class Pax {
   stopT = 0;
   /** 👑 A VIP (v0.70): pays more, relaxes in the lounge, boards first. */
   vip = false;
+  /** 🧭 Its way round things to its target (nav.ts): the places to walk to in turn, where that was planned for, and on which grid. */
+  route: THREE.Vector3[] | null = null;
+  routeTo = new THREE.Vector3();
+  routeOn = -1;
   constructor(public model: ArtBug) {}
   get pos() {
     return this.model.root.position;
@@ -81,6 +86,8 @@ export interface Stop {
  * v0.78), h-ember and h-cadet are men.
  */
 const MEN: { file: HumanKind; weight: number }[] = (['h-jack', 'h-jacklab', 'h-cadet', 'h-director', 'h-ember', 'h-crew1', 'h-crew2'] as HumanKind[]).map((file) => ({ file, weight: 1 }));
+/** 🧍 How near two travellers come before the walking one is eased aside (world units; a person is about 1.3 across the shoulders). GAME TUNING. */
+const PERSONAL = 1.25;
 /** How many of the builder's women wear the cloth tee (the rest a painted one). 0 since v0.82: the DEV Room's own
  * settings, "Cloth tee: off" (Joshua: "Match the settings exactly"); it was 0.7. */
 const CLOTH_SHARE = 0;
@@ -378,7 +385,10 @@ export class Passengers {
     return best;
   }
 
-  /** Step toward its target (legs going), turning to face where it walks. */
+  /** 🧭 The airport's grid (the airfield hands it over): without one, travellers walk straight as they did. */
+  nav: Nav | null = null;
+
+  /** Step toward its target (legs going), turning to face where it walks: round what is in the way (nav.ts). */
   private walk(p: Pax, dt: number) {
     const d = this.tmp.subVectors(p.target, p.pos).setY(0);
     const dist = d.length();
@@ -389,8 +399,34 @@ export class Passengers {
       return;
     }
     p.there = false;
-    const step = Math.min(dist, TY.passengerSpeed * dt);
-    p.pos.addScaledVector(d.normalize(), step);
+    // 🧭 on the ground it follows a path; on a gate's bridge and ramp (boarding, climbing down) its waypoints are the way
+    const onGround = p.state !== 'boarding' && !(p.state === 'leaving' && p.via.length > 1);
+    if (this.nav && onGround) {
+      if (!p.route || p.routeOn !== this.nav.version || p.routeTo.distanceToSquared(p.target) > 0.04) {
+        p.route = this.nav.path(p.pos, p.target);
+        p.routeTo.copy(p.target);
+        p.routeOn = this.nav.version;
+      }
+      while (p.route.length > 1 && Math.hypot(p.route[0].x - p.pos.x, p.route[0].z - p.pos.z) < 0.3) p.route.shift();
+      if (p.route.length > 1) d.subVectors(p.route[0], p.pos).setY(0);
+    } else p.route = null;
+    const leg = d.length();
+    const step = Math.min(leg, TY.passengerSpeed * dt);
+    if (leg > 1e-6) p.pos.addScaledVector(d.normalize(), step);
+    // 🧍 not through one another: a walker is eased aside from anybody within a shoulder's width (never into a wall)
+    // (not on its last steps: a place at a counter is closer to its neighbours than that, and it has to get there)
+    if (this.nav && onGround && dist > PERSONAL * 1.4) {
+      let px = 0, pz = 0;
+      for (const q of this.all) {
+        if (q === p || q.state === 'seated' || Math.abs(q.pos.y - p.pos.y) > 1) continue;
+        const dx = p.pos.x - q.pos.x, dz = p.pos.z - q.pos.z, gap = Math.hypot(dx, dz);
+        if (gap < PERSONAL && gap > 1e-4) { px += (dx / gap) * (PERSONAL - gap); pz += (dz / gap) * (PERSONAL - gap); }
+      }
+      if (px || pz) {
+        const nx = p.pos.x + px * Math.min(1, dt * 6), nz = p.pos.z + pz * Math.min(1, dt * 6);
+        if (this.nav.free(nx, nz)) { p.pos.x = nx; p.pos.z = nz; }
+      }
+    }
     if (p.state === 'boarding' || p.state === 'leaving') {
       // (on the bridge: its height runs straight from one waypoint to the next: up the ramp, level along the deck)
       p.pos.y = Math.max(p.pos.y + (p.target.y - p.pos.y) * Math.min(1, step / dist), this.ground(p.pos.x, p.pos.z));
