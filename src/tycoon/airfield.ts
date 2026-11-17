@@ -41,9 +41,6 @@ import { AT, CLEARINGS, TY, TYCOON_SAVE_V, TY_UNLOCKS, walkable } from './data';
 import { SURFACE, artBaggageCart, artBackdrop, artBug, artDewTank, artFuelFlower, artHangar, artScatter, artGate, artGround, artLawn, artRunway, artSign, artTaxiway, artTerminal, artTower, artWindsock, type ArtLawn, type ArtPiece } from './art';
 import { Plane } from './plane';
 import { PEOPLE_FILES, Passengers, type Pax, type Stop } from './passengers';
-import { AUTO_DETAIL, AutoDetail, CROWD_DETAILS, stepAt, stepFor } from './autoDetail';
-import { SIZE as TRUE_SIZE } from './scale';
-const PERSON = TRUE_SIZE.person;
 import { hasModel, loadPeople, lodPeople } from '../actors/creatures';
 import { FLEET, bestPlane, openRoutes, routeOf, type PlaneType } from './fleet';
 import { STAFF, STAFF_MAX, buyStaff, staffCost, staffFx, type StaffId } from './staff';
@@ -1898,8 +1895,6 @@ export class Airfield {
 
     // 🎫 Check-in: you on the CHECK-IN pad, or the Check-in ant (it waits while the BAG DROP is full)
     this.pax.serving = (!!this.checkInAnt || this.deskZone.contains(p)) && !this.bagDrop.full;
-    // 🎚️ (the tiny people's detail follows the frame rate: more while it holds, less the moment it falls)
-    if (this.people) this.detail.step(this.rankPeople());
     this.pax.update(dt);
     if (this.crowd && this.crowd !== 'loading') this.crowd.step(dt);
 
@@ -2283,51 +2278,9 @@ export class Airfield {
   peopleReady() {
     return `${PEOPLE_FILES.filter((f) => hasModel(f)).length}/${PEOPLE_FILES.length}`;
   }
-  /** 🎚️ The tiny people's automatic detail (autoDetail.ts), and what Settings says of it: "auto 20% · 58 fps". */
-  readonly detail = new AutoDetail();
+  /** What Settings says of the builder's women: the DEV Room's own readout (how many drawn, smart FPS, the frame rate). */
   detailText() {
-    const d = this.detail, last = CROWD_DETAILS.length - 1;
-    const top = CROWD_DETAILS[Math.min(last, stepFor(d.inView) + d.guard)];
-    return `${d.inView} in view · detail up to ${top}%${d.guard ? ` (${d.guard} lower for fps)` : ''}${d.fps ? ` · ${Math.round(d.fps)} fps` : ''}`;
-  }
-  /**
-   * 🎚️ WHO GETS HOW MUCH DETAIL (v0.81, Joshua's hybrid: autoDetail.ts). Each person the camera can see is drawn at
-   * the lower of what the COUNT in view allows and what her DISTANCE FROM THE PLAYER'S ANT allows. A person
-   * changes step once the new one has held a moment (someone walking along a boundary would otherwise swap
-   * bodies over and over). Returns how many are in view.
-   */
-  private readonly viewBox = new THREE.Frustum();
-  private readonly viewMat = new THREE.Matrix4();
-  private readonly viewBall = new THREE.Sphere();
-  private readonly ranked: { root: THREE.Object3D; far: number }[] = [];
-  private rankPeople() {
-    this.camera.updateMatrixWorld();
-    this.viewBox.setFromProjectionMatrix(this.viewMat.multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse));
-    const ant = this.player.pos, seen = this.ranked;
-    seen.length = 0;
-    for (const p of this.pax.all) {
-      const root = p.model.root;
-      if (!p.model.biped && !root.userData.crowd) continue; // (an aphid from before the switch)
-      const at = root.getWorldPosition(this.viewBall.center);
-      const far = Math.hypot(at.x - ant.x, at.z - ant.z);
-      at.y += PERSON / 2;
-      this.viewBall.radius = PERSON * 0.55;
-      if (this.viewBox.intersectsSphere(this.viewBall)) seen.push({ root, far });
-    }
-    const now = performance.now(), last = CROWD_DETAILS.length - 1, metre = PERSON / 1.7;
-    const byCount = stepFor(seen.length);
-    seen.forEach(({ root, far }) => {
-      const ud = root.userData, want = Math.min(last, Math.max(byCount, stepAt(far / metre)) + this.detail.guard);
-      if (want !== ud.wantStep) { ud.wantStep = want; ud.wantSince = now; }
-      // (someone new takes her step at once; a change of place has to hold)
-      if (ud.step === undefined || (want !== ud.step && now - ud.wantSince >= AUTO_DETAIL.hold * 1000)) {
-        ud.step = want;
-        ud.detailPct = CROWD_DETAILS[want];
-        const her = ud.crowd as { level: number } | undefined;
-        if (her) her.level = want;
-      }
-    });
-    return seen.length;
+    return this.crowd && this.crowd !== 'loading' ? this.crowd.info() : 'the builder\'s women are loading';
   }
   /** The game's renderer (tycoonMain hands it over: the builder's crowd draws with it) and the crowd itself. */
   renderer: THREE.WebGLRenderer | null = null;
@@ -2342,7 +2295,7 @@ export class Airfield {
     if (!this.crowd && this.renderer) {
       this.crowd = 'loading';
       void import('../devRoom')
-        .then((room) => room.startDevRoom({ scene: this.scene, camera: this.camera, renderer: this.renderer! }))
+        .then((room) => room.startDevRoom({ scene: this.scene, camera: this.camera, renderer: this.renderer!, focus: () => this.player.pos }))
         .then(async (crowd) => {
           if (!crowd || !(await crowd.ready)) throw new Error('the builder\'s body did not load');
           this.crowd = crowd;

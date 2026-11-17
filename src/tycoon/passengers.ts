@@ -81,8 +81,9 @@ export interface Stop {
  * v0.78), h-ember and h-cadet are men.
  */
 const MEN: { file: HumanKind; weight: number }[] = (['h-jack', 'h-jacklab', 'h-cadet', 'h-director', 'h-ember', 'h-crew1', 'h-crew2'] as HumanKind[]).map((file) => ({ file, weight: 1 }));
-/** How many of the builder's women wear the cloth tee (the rest a painted one). GAME TUNING. */
-const CLOTH_SHARE = 0.7;
+/** How many of the builder's women wear the cloth tee (the rest a painted one). 0 since v0.82: the DEV Room's own
+ * settings, "Cloth tee: off" (Joshua: "Match the settings exactly"); it was 0.7. */
+const CLOTH_SHARE = 0;
 /** Every model the tiny people need (downloaded when the switch goes on). */
 export const PEOPLE_FILES = MEN.map((p) => p.file);
 
@@ -326,12 +327,8 @@ export class Passengers {
         if (her && p.state === 'seated') her.speed = 0;
         if (!p.model.biped) continue;
         const d = p.model.root.getWorldPosition(this.tmp).distanceTo(this.eye) / metre;
-        // (v0.81: by how near she is to the player's ant among the people in view: the airfield's rankPeople
-        // says her detail. The story's men have four triangle lists, 100, 30, 15 and 8%: the nearest to it)
-        void d;
-        const want = (p.model.root.userData.detailPct as number | undefined) ?? 8;
-        let nearest = 0;
-        PEOPLE_LOD.forEach((lv, k) => { if (Math.abs(lv.detail - want) < Math.abs(PEOPLE_LOD[nearest].detail - want)) nearest = k; });
+        // (the story's men: by how far from the camera, as in v0.77.1. The full model up close)
+        const found = PEOPLE_LOD.findIndex((lv) => d <= lv.within), nearest = found < 0 ? PEOPLE_LOD.length - 1 : found;
         setPersonLod(p.model, nearest);
       }
     }

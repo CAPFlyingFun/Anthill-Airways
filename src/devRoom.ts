@@ -38,7 +38,6 @@ import { HAIR_STYLES, HAIR_LENGTH_MORPH } from './vendor/ccbs/sarahlab/hairStyle
 import { HAIR_COLOURS } from './vendor/ccbs/sarahlab/hairColours';
 import { patchHairMaterial, setHairColour } from './vendor/ccbs/sarahlab/hairMaterial';
 import { FACE_TYPES } from './vendor/ccbs/sarahlab/faceShapes';
-import { CROWD_DETAILS } from './tycoon/autoDetail';
 import { faceFieldOn, headPoints } from './vendor/ccbs/sarahlab/faceShapeFields';
 import { MOTION_TARGETS, motionWeights, restingBellySpring, stepBellySpring, stepBreastSpring, walkBounceAccel, walkSwayAccel, type BellySpring } from './vendor/ccbs/bellyMotion';
 
@@ -56,14 +55,14 @@ const BUILDER = import.meta.env.DEV && new URLSearchParams(location.search).has(
  */
 export interface CrowdHost {
   scene: THREE.Scene; camera: THREE.Camera; renderer: THREE.WebGLRenderer;
+  /** Where the player's own character is (world): people are drawn out to a range from there (smart FPS, the fade). */
+  focus?: () => THREE.Vector3;
 }
 export interface CrowdPerson {
   /** Put this in the scene and move it. She stands 2.8 units tall at scale 1 (HEIGHT), feet at its origin. */
   root: THREE.Group;
   /** How fast she is walking right now, in the game's units a second (0: standing). */
   speed: number;
-  /** The step of the detail ladder she is drawn at (tycoon/autoDetail.ts CROWD_DETAILS: 0 is 100%). */
-  level: number;
   dispose(): void;
 }
 export interface Crowd {
@@ -73,6 +72,8 @@ export interface Crowd {
   add(opts: { bump: number; cloth: boolean }): CrowdPerson | null;
   /** One frame: everybody's detail, pose, tee. */
   step(dt: number): void;
+  /** What the room's own readout says, for the game's Settings. */
+  info(): string;
 }
 /** A person is this tall at scale 1. */
 export const CROWD_HEIGHT = 2.8;
@@ -157,13 +158,7 @@ function fadedMaterial(base: THREE.Material, fade: { value: number }) {
  * Auto lite's distances and detail, with every level's shapes live.
  */
 const AUTO_LIVE: { within: number; detail: number; live?: boolean }[] = AUTO_LITE.map((a) => ({ ...a, live: true }));
-/**
- * IN A GAME: the ladder Joshua set (tycoon/autoDetail.ts CROWD_DETAILS, 30% down to 1% since v0.81). The game says
- * which step each person is on. The heavy steps are her own baked body (a live 30% body's shapes would be some
- * 50 MB on the graphics chip); 5% and lighter are the shared live ones, as in AUTO LIVE.
- */
-const CROWD_TABLE: { within: number; detail: number; live?: boolean }[] = CROWD_DETAILS.map((detail) => ({ within: Infinity, detail, live: detail <= 5 }));
-/** The table in use: AUTO, AUTO_LITE or AUTO_LIVE (their buttons), or CROWD_TABLE in a game. */
+/** The table in use: AUTO, AUTO_LITE or AUTO_LIVE (their buttons). */
 // (v0.48: the room opens on AUTO LIVE with SMART FPS on, as Joshua ran his stress tests.)
 // (v0.43.1, the room's defaults, as Joshua tested them on his phone at 54-56 FPS with 40 walking and about 16 in
 // view: "Set these settings as default": Auto lite, body shapes LIVE, shadows on, cloth tee off, out of view not drawn.
@@ -595,8 +590,6 @@ interface Person {
   fade: { value: number };
   /** (the crowd in a game) how fast the game says she is walking, and where she is in the world. */
   speedNow?: number;
-  /** In a game: the step of CROWD_DETAILS the game wants her drawn at (0: 100%). */
-  stepNow?: number;
   at?: THREE.Vector3;
   /** She is in the scene (someone not drawn is taken out of it, so her 80 bones cost nothing: v0.50). */
   shown: boolean;
@@ -755,7 +748,10 @@ export async function startDevRoom(embed?: CrowdHost): Promise<Crowd | void> {
   const state = { model: MODELS[0], count: 40, looks: 'random' as 'random' | 'saved' | 'off', seed: 0, shadows: true, detail: 3, shapes: 'baked' as 'live' | 'baked' | 'off', underwear: false, auto: true, fps: true, smart: true, cull: true, fade: true, heads: true, target: 30 as 30 | 45 | 60, cloth: 'off' as 'off' | 'live' | 'freeze' | 'near', perChar: 0, motion: 'walk' as 'walk' | 'idle' | 'off', plain: false, sharp: true, loading: '', error: '', info: null as Loaded | null };
   // (in a game: nobody until the game adds her; no draw range or fade of this room's (the game's camera is far off:
   // they would hide everyone); the cloth tee frozen once dressed, as Joshua's settings have it)
-  if (embed) { Object.assign(state, { count: 0, fps: false, fade: false, cloth: 'freeze' }); TABLE = CROWD_TABLE; }
+  // (v0.82, Joshua, of the game still a little laggy: "Match the settings exactly… I am able to get a lot of people
+  // with amazing fps" in this room. So in a game everything is as this room opens: AUTO LIVE (3%, 2%, 1%), smart FPS
+  // on with its target of 30, far away fades out, shadows on, no cloth tee. Only the room's own crowd is not made.)
+  if (embed) state.count = 0;
   const resize = () => {
     if (embed) return;
     renderer.setPixelRatio(state.sharp ? Math.min(window.devicePixelRatio, 2) : 1);
@@ -1715,6 +1711,7 @@ export async function startDevRoom(embed?: CrowdHost): Promise<Crowd | void> {
   let worstShown = 0;
   let t = 0;
   const camAt = new THREE.Vector3(), scaleAt = new THREE.Vector3();
+  let lastReal = 0;
   const tick = (now: number, gameDt?: number) => {
     if (!embed) requestAnimationFrame(tick);
     const ms = gameDt !== undefined ? gameDt * 1000 : Math.max(0, now - last);
@@ -1723,7 +1720,6 @@ export async function startDevRoom(embed?: CrowdHost): Promise<Crowd | void> {
     const dt = Math.min(0.05, ms / 1000);
     t += dt;
     let simulating = 0;
-    let bakedNow = false;
     // (in a game she may be anywhere, at any size, even riding a bug: where she is and how big, in the world)
     if (embed) camera.getWorldPosition(camAt); else camAt.copy(camera.position);
     for (const p of people) {
@@ -1738,14 +1734,7 @@ export async function startDevRoom(embed?: CrowdHost): Promise<Crowd | void> {
         while (band > 0 && d < TABLE[band - 1].within * 0.95) band--;
         while (band < TABLE.length - 1 && d > TABLE[band].within * 1.05) band++;
         p.band = band;
-        let level = band;
-        if (embed) {
-          // (the game says which step each person is on: the airport, by how near she is to the player's ant)
-          level = THREE.MathUtils.clamp(Math.round(p.stepNow ?? TABLE.length - 1), 0, TABLE.length - 1);
-          // (a heavy level is her own body, baked when she needs it: one of those a frame, so a step for
-          // everyone at once is spread over a few frames and not one long one)
-          if (level !== p.level && p.lods.some((l) => !l.geos[level] && !TABLE[level].live)) { if (bakedNow) level = p.level; else bakedNow = true; }
-        }
+        const level = band;
         if (level !== p.level) {
           p.level = level;
           for (const l of p.lods) {
@@ -1761,9 +1750,6 @@ export async function startDevRoom(embed?: CrowdHost): Promise<Crowd | void> {
               if (l.soft) { l.soft.influences = set?.influences ?? []; l.soft.at = MOTION_TARGETS.map((name) => set?.dict[name] ?? -1); }
             }
             if (TABLE === AUTO && level >= AUTO_DROP_FROM) for (let k = 0; k < 2; k++) { l.geos[k]?.dispose(); l.geos[k] = null; }
-            // (in a game: only the body she is drawn with is kept. A full baked body is several megabytes, and
-            // thirteen steps of them each would not fit a phone. The shared live ones are not hers to let go)
-            if (TABLE === CROWD_TABLE) for (let k = 0; k < l.geos.length; k++) if (k !== level && l.geos[k] && !l.geos[k]!.userData.devRoomShared) { l.geos[k]!.dispose(); l.geos[k] = null; }
           }
         }
       }
@@ -1846,7 +1832,15 @@ export async function startDevRoom(embed?: CrowdHost): Promise<Crowd | void> {
     const fadeBand = !fading ? 0 : ranging ? smart.edge : FADE.end - FADE.start;
     near.length = 0;
     let reach = 0;
-    {
+    let fadeUnit = 1;
+    if (embed) {
+      // (in a game the spot is the player's own character, and a metre is a person's own: the camera itself while
+      // it is within 4 of her metres of the player, otherwise the point 4 m from the player on the way to it)
+      fadeUnit = people.length ? people[0].root.getWorldScale(scaleAt).x || 1 : 1;
+      const spot = embed.focus?.() ?? camAt;
+      const d = camAt.distanceTo(spot), k = Math.min(1, (4 * METRE * fadeUnit) / Math.max(0.001, d));
+      fadeFrom.copy(spot).lerp(camAt, k);
+    } else {
       const d = Math.hypot(camera.position.x, camera.position.y - 1.2, camera.position.z), k = Math.min(1, (4 * METRE) / Math.max(0.001, d));
       fadeFrom.set(camera.position.x * k, 1.2 + (camera.position.y - 1.2) * k, camera.position.z * k);
     }
@@ -1866,7 +1860,7 @@ export async function startDevRoom(embed?: CrowdHost): Promise<Crowd | void> {
         // round the middle, and someone between them faded while people behind her didn't. Now it is ONE point,
         // `fadeFrom`: the camera itself while it is within 4 m of the spot it looks at, and otherwise the point
         // 4 m from that spot on the way to the camera. So from the camera's side, nearer is always more solid.)
-        p.far = Math.hypot(fadeFrom.x - p.root.position.x, fadeFrom.y - 1.4, fadeFrom.z - p.root.position.z);
+        p.far = embed ? Math.hypot(fadeFrom.x - at.x, fadeFrom.y - (at.y + 1.4 * unit), fadeFrom.z - at.z) / unit : Math.hypot(fadeFrom.x - p.root.position.x, fadeFrom.y - 1.4, fadeFrom.z - p.root.position.z);
         if (show) { near.push(p); if (p.far > reach) reach = p.far; }
         f = fadeBand > 0 ? THREE.MathUtils.clamp((fadeEnd - p.far) / fadeBand, 0, 1) : p.far < fadeEnd ? 1 : 0;
         if (f <= 0) show = false;
@@ -1896,7 +1890,13 @@ export async function startDevRoom(embed?: CrowdHost): Promise<Crowd | void> {
       if (on !== p.shown) { p.shown = on; if (on) scene.add(p.root); else scene.remove(p.root); }
     }
     for (const p of people) p.cloth?.show(p.root.visible);
-    if (embed) return; // (the game draws its own picture)
+    if (embed) {
+      // (the game draws its own picture; smart FPS judges by the clock's own time between its frames)
+      const real = performance.now();
+      if (lastReal) smartTick(real - lastReal, real - frameStart);
+      lastReal = real;
+      return;
+    }
     renderer.info.reset();
     renderer.render(scene, camera);
     // (how long this frame's own work took, start to end: unlike the frame rate, the screen's refresh doesn't round it)
@@ -1976,12 +1976,11 @@ export async function startDevRoom(embed?: CrowdHost): Promise<Crowd | void> {
           root: p.root,
           get speed() { return p.speedNow ?? 0; },
           set speed(v: number) { p.speedNow = v; },
-          get level() { return p.stepNow ?? TABLE.length - 1; },
-          set level(v: number) { p.stepNow = v; },
           dispose: () => { const k = people.indexOf(p); if (k >= 0) people.splice(k, 1); disposePerson(p); },
         };
       },
       step: (dt) => tick(performance.now(), dt),
+      info: () => `${drawn} of ${people.length} women drawn · smart FPS ${smart.doing}, up to ${smart.count} to ${(smart.range / METRE).toFixed(0)} m · ${smart.rate.toFixed(0)} fps`,
 
     };
   }
