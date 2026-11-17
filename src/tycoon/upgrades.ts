@@ -81,6 +81,8 @@ export interface MenuRow {
   done?: string;
   /** Why it can't be bought yet ("🔒 Lv 9"), if so. */
   lock?: string;
+  /** A free switch (🎲 Mixed fleet): what its button says instead of a price. */
+  tap?: string;
 }
 export interface MenuModel {
   title: string;
@@ -164,10 +166,10 @@ export class UpMenu {
     m.rows.forEach((r, i) => {
       const el = this.rows.children[i] as HTMLElement;
       const maxed = r.cost === null;
-      const ok = !maxed && !r.lock && m.cash >= r.cost!;
+      const ok = !maxed && !r.lock && (!!r.tap || m.cash >= r.cost!);
       el.className = `gm-row ${maxed ? 'max' : r.lock ? 'lock' : ok ? 'ok' : 'no'}`;
       put(el.querySelector('.nm')!, `${r.ic}  ${r.name}`);
-      put(el.querySelector('.pr')!, maxed ? (r.done ?? 'MAX') : r.lock ? r.lock : `💵 ${r.cost!.toLocaleString()}`);
+      put(el.querySelector('.pr')!, maxed ? (r.done ?? 'MAX') : r.lock ? r.lock : r.tap ? r.tap : `💵 ${r.cost!.toLocaleString()}`);
       put(el.querySelector('.lv')!, r.lv);
       put(el.querySelector('.ds')!, r.desc);
     });

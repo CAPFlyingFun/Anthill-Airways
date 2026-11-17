@@ -6,6 +6,10 @@
 //   🐞 Ladybug (2 seats) → 🐝 Honey Bee (3) → 🪽 Dragonfly (4, fast) → 🦋 Butterfly (6) → 🪲 Beetle Freighter (8, slow)
 //   → Moth Night-Liner (10). v0.72: they're unlocked (and upgraded: 💺 seats, 💨 speed) in the 🛖 HANGAR's menu.
 //
+// v0.74 🎲 MIXED FLEET: with two or more aircraft unlocked, each gate picks a different one of them every time its
+// plane comes home (no two gates the same while there are enough to go round). The hangar's menu switches it off
+// (then every gate flies the biggest one again, for the most income).
+//
 // THE ROUTES: where the flights go. Two short hops are open from the start; the 🗺️ route tiles open longer ones
 // that pay a higher FARE. A departure earns its fare bonus as it lifts off (on top of the tickets paid at check-in:
 // tickets × (fare − 1)), and an arrival from far away pays bigger landing fees (× fare). Longer routes keep the plane

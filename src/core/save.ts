@@ -71,6 +71,10 @@ export interface TycoonSave {
   staff?: Record<string, number>;
   /** ⬆️ Building upgrade levels (v0.72), by "<building>.<upgrade>": see tycoon/upgrades.ts. */
   ups?: Record<string, number>;
+  /** 🎲 Mixed fleet (v0.74): which aircraft each gate is flying right now (by kind), and the switch (false = every
+   *  gate flies your best aircraft). */
+  types?: string[];
+  mixed?: boolean;
   /** 🎯 Quests (v0.73, tycoon/quests.ts): how many are done, and the random one that's on. */
   quest?: { n: number; id?: string; need?: number; reward?: number; base?: number; last?: string };
   /** Lifetime counts by kind (v0.73: the quests count from these): flights, pax, bags, landings, snacks, earned, recycled. */

@@ -41,7 +41,7 @@ import { AT, CLEARINGS, TY, TYCOON_SAVE_V, TY_UNLOCKS, walkable } from './data';
 import { SURFACE, artBaggageCart, artBackdrop, artBug, artDewTank, artFuelFlower, artHangar, artScatter, artGate, artGround, artLawn, artRunway, artSign, artTaxiway, artTerminal, artTower, artWindsock, type ArtLawn, type ArtPiece } from './art';
 import { Plane } from './plane';
 import { Passengers, type Pax, type Stop } from './passengers';
-import { FLEET, bestPlane, openRoutes, routeOf } from './fleet';
+import { FLEET, bestPlane, openRoutes, routeOf, type PlaneType } from './fleet';
 import { STAFF, STAFF_MAX, buyStaff, staffCost, staffFx, type StaffId } from './staff';
 import { UPS, UpMenu, upPrice, type MenuRow, type UpDef } from './upgrades';
 import { Events } from './events';
@@ -75,6 +75,8 @@ interface Gate {
   boardT: number;
   /** 🐝 Swap the plane for the upgraded one the next time it's parked and empty. */
   swap?: boolean;
+  /** 🎲 …and pick a different aircraft when it does (the mixed fleet). */
+  reroll?: boolean;
   open: boolean;
   label: TextSprite;
   /** 🧳 Its BAGS pad: the passengers' seed-bags waiting to be loaded. */
@@ -1064,10 +1066,12 @@ export class Airfield {
           return { id: `fleet.${d.k}`, ic: d.ic, name: `${d.name} (all aircraft)`, desc: d.desc, lv: `Lv ${lv}/${d.max}`, cost: lv >= d.max ? null : upPrice(d, lv) };
         });
         const flying = bestPlane((id) => this.owns(id));
+        const mixed = this.st.mixed !== false;
+        rows.push({ id: 'mixed', ic: '🎲', name: 'Mixed fleet', desc: mixed ? 'Gates take turns with every aircraft you own. Smaller ones carry fewer passengers.' : 'Every gate flies your biggest aircraft (the most income).', lv: mixed ? 'ON' : 'OFF', cost: 0, tap: mixed ? 'Turn OFF' : 'Turn ON' });
         let nextShown = false;
         for (const t of FLEET) {
           const seats = `${t.seats + this.up('fleet.seats')} seats · ×${t.speed} speed`;
-          if (!t.unlock || this.owns(t.unlock)) rows.push({ id: t.kind, ic: t.icon, name: t.name, desc: seats, lv: t === flying ? '✈️ FLYING NOW' : 'Retired', cost: null, done: 'OWNED' });
+          if (!t.unlock || this.owns(t.unlock)) rows.push({ id: t.kind, ic: t.icon, name: t.name, desc: seats, lv: mixed ? '✈️ IN THE MIX' : t === flying ? '✈️ FLYING NOW' : 'Retired', cost: null, done: 'OWNED' });
           else {
             const lock = nextShown ? '🔒 Later' : this.save.level < t.level ? `🔒 Lv ${t.level}` : undefined;
             rows.push({ id: t.kind, ic: t.icon, name: `Unlock ${t.name}`, desc: seats, lv: 'NEW AIRCRAFT', cost: t.cost, lock });
@@ -1077,6 +1081,12 @@ export class Airfield {
         return rows;
       },
       (id) => {
+        if (id === 'mixed') {
+          this.st.mixed = this.st.mixed === false;
+          this.gates.forEach((g) => (g.swap = g.reroll = true)); // (each gate re-picks as its plane comes home)
+          this.sfx.popup();
+          return;
+        }
         const d = UPS.plane.find((x) => `fleet.${x.k}` === id);
         if (d) {
           const lv = this.up(id);
@@ -1151,12 +1161,11 @@ export class Airfield {
   }
   /** Put the building upgrade levels to work (pads, lines, VIPs, the oven, every plane's speed). */
   private applyUps() {
-    const type = bestPlane((id) => this.owns(id));
-    const boost = (this.owns('ty-tower') ? TY.towerBoost * (1 + 0.05 * this.up('tower.boost')) : 1) * type.speed * (1 + 0.06 * this.up('fleet.speed'));
+    const boost = (this.owns('ty-tower') ? TY.towerBoost * (1 + 0.05 * this.up('tower.boost')) : 1) * (1 + 0.06 * this.up('fleet.speed'));
     this.gates.forEach((g, i) => {
       g.fuel.max = TY.fuelMax + 2 * this.up(`gate${i}.fuel`);
       this.pax.gateCap[i] = Math.max(6, g.plane.model.seats.length + 2) + 2 * this.up(`gate${i}.seats`);
-      g.plane.boost = boost;
+      g.plane.boost = boost * this.typeFor(i).speed;
     });
     this.flowers.forEach((f, i) => (f.stack.max = TY.flowerMax + 2 * this.up(`flower${i}.cap`)));
     this.pax.queueMax = TY.queueMax + this.up('terminal.line');
@@ -1200,8 +1209,35 @@ export class Airfield {
 
   /** 🛫 A gate with its plane (`open` = bought). */
   /** A gate's plane: a ladybug (2 seats), or a bee (3) after 🐝 Bee Shuttles. */
+  /** 🎲 MIXED FLEET (v0.74): is it on, and are there at least two aircraft to mix? */
+  private get mixed() {
+    return this.st.mixed !== false && FLEET.filter((f) => !f.unlock || this.owns(f.unlock)).length > 1;
+  }
+  /** The aircraft gate `i` flies: its own pick when the fleet's mixed, else the best one you've unlocked. */
+  private typeFor(i: number): PlaneType {
+    const best = bestPlane((id) => this.owns(id));
+    if (!this.mixed) return best;
+    const t = FLEET.find((f) => f.kind === this.st.types?.[i]);
+    return t && (!t.unlock || this.owns(t.unlock)) ? t : best;
+  }
+  /** Pick gate `i`'s next aircraft: any you've unlocked, but not the one it has, nor one another gate's flying
+   *  (while there are enough to go round): so the apron's always a mix. */
+  private rollType(i: number) {
+    const types = (this.st.types ??= []);
+    if (!this.mixed) return void (types[i] = bestPlane((id) => this.owns(id)).kind);
+    const owned = FLEET.filter((f) => !f.unlock || this.owns(f.unlock));
+    const taken = new Set<string | undefined>();
+    this.gates.forEach((g, k) => {
+      if (k !== i && g.open) taken.add(types[k]);
+    });
+    let pool = owned.filter((f) => f.kind !== types[i] && !taken.has(f.kind));
+    if (!pool.length) pool = owned.filter((f) => f.kind !== types[i]);
+    if (!pool.length) pool = owned;
+    types[i] = pool[Math.floor(Math.random() * pool.length)].kind;
+  }
   private planeModel(i: number) {
-    const t = bestPlane((id) => this.owns(id));
+    if (this.mixed && !this.st.types?.[i]) this.rollType(i); // (its first pick)
+    const t = this.typeFor(i);
     const m = artBug(t.kind, t.length, { seed: 3 + i * 4 });
     m.root.userData.planeType = t.kind;
     // 💺 as many seats as its type has (+ the hangar's Extra Seat levels): extra ones sit between the model's own
@@ -1310,6 +1346,8 @@ export class Airfield {
       plane.inbound = null;
       this.st.landings = (this.st.landings ?? 0) + 1;
       this.count('landings', 1);
+      // 🎲 mixed fleet: a different aircraft takes the next flight (once everyone's off)
+      if (this.mixed) gate.swap = gate.reroll = true;
       if (this.near(plane.pos, 40)) this.hud.floatAt(plane.pos.clone().setY(3), this.camera, '🛬 Landed', '');
     };
     this.gates.push(gate);
@@ -1429,10 +1467,14 @@ export class Airfield {
       if (animate) this.flyers.grow(chef.root);
     } else if (FLEET.some((f) => f.unlock === id)) {
       // ✈️ every gate swaps its plane for the new one (✈️ fleet.ts) as soon as it's parked and empty
-      for (const g of this.gates) g.swap = true;
-      if (this.owns('ty-hangar') && this.hangar) this.fillHangar();
       const t = FLEET.find((f) => f.unlock === id)!;
-      if (animate) this.hud.banner(`${t.icon} ${t.name} unlocked!`, 'Nothing to assign: each gate switches to it as its plane comes home', 4200);
+      // (the next gate home gets the new one; with the fleet mixed, the others keep taking turns)
+      this.gates.forEach((g, k) => {
+        g.swap = true;
+        if (animate && k === 0) (this.st.types ??= [])[k] = t.kind;
+      });
+      if (this.owns('ty-hangar') && this.hangar) this.fillHangar();
+      if (animate) this.hud.banner(`${t.icon} ${t.name} unlocked!`, this.st.mixed !== false ? 'It joins the mix: your gates take turns with every aircraft you own' : 'Nothing to assign: each gate switches to it as its plane comes home', 4200);
     } else if (id === 'ty-route-picnic' || id === 'ty-route-log' || id === 'ty-route-tide' || id === 'ty-route-lizard') {
       if (animate) this.hud.banner('🗺️ New route open!', 'Longer routes pay higher fares: some flights go there now', 3000);
     } else if (id === 'ty-recycler') {
@@ -2041,13 +2083,17 @@ export class Airfield {
       g.swap = false;
       const i = this.gates.indexOf(g);
       const was = plane.model.root.userData.planeType as string | undefined;
+      if (g.reroll) this.rollType(i);
+      const mix = g.reroll;
+      g.reroll = false;
       const old = plane.setModel(this.planeModel(i));
       void old;
       if (g.open) this.flyers.grow(plane.model.root);
       shown(plane.model.root, g.open);
       // (a new type at this gate: say so, once per gate and type)
-      const type = bestPlane((id) => this.owns(id));
-      if (g.open && was && was !== type.kind) this.hud.banner(`${type.icon} Gate ${i + 1} now flies the ${type.name}`, `${plane.model.seats.length} seats`, 2600);
+      const type = this.typeFor(i);
+      this.applyUps(); // (its seats and speed)
+      if (g.open && was && was !== type.kind && !mix) this.hud.banner(`${type.icon} Gate ${i + 1} now flies the ${type.name}`, `${plane.model.seats.length} seats`, 2600);
     }
     const fuelled = this.fuelUnits(g) >= TY.fuelPerFlight;
     const nose = g.door;
