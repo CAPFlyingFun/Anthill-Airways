@@ -46,6 +46,8 @@ export interface QuestInfo {
   step: number;
   total: number;
   progress?: number | null;
+  /** The card's heading instead of "🎯 QUEST 3/11" (the tycoon's 📖 guides and 🎯 quests). */
+  label?: string;
 }
 interface UpHandler {
   model: () => UpPanelModel | null;
@@ -203,7 +205,7 @@ export class Hud {
     }
     this.hintSkip = onSkip ?? null;
     const label = el.querySelector('.q-label');
-    if (label) label.textContent = quest ? `🎯 QUEST ${quest.step + 1}/${quest.total}` : '🎯 QUEST';
+    if (label) label.textContent = quest?.label ?? (quest ? `🎯 QUEST ${quest.step + 1}/${quest.total}` : '🎯 QUEST');
     el.querySelector('.q-text')!.textContent = text;
     const bar = el.querySelector<HTMLElement>('.q-bar i');
     if (bar && quest?.progress != null) bar.style.width = `${Math.round(THREE.MathUtils.clamp(quest.progress, 0, 1) * 100)}%`;
@@ -575,6 +577,8 @@ export class Hud {
   private invOpen = false;
   /** 🦖 The story opens its own backpack panel (🎒 Items | 🔨 Craft) instead of the little list. */
   onBag: (() => void) | null = null;
+  /** 🐜✈️ The tycoon: "where does this go?" for each thing in the list (null = plain slots). */
+  invHelp: ((type: string) => string) | null = null;
   private invTimer = 0;
   private invBound = false;
   private static ICONS: Record<string, string> = { stone: '🪨', branch: '🌿', fiber: '🌱', clothes: '👕', antfarm: '🐜', log: '🪵', berry: '🍓', mast: '📡', radio: '📻', bread: '🥖', parcel: '📦', extinguisher: '🧯', medicine: '💊', medkit: '🩹', luggage: '🧳', meal: '🍔', part: '🔩', fuel: '⛽', crumb: '🍞', snack: '🍪', leaf: '🍃', wrap: '🌯', sugar: '🧊', candy: '🍬', cash: '💵', bag: '🧳', snackbox: '🍱', fruit: '🍈', smoothie: '🥤', meat: '🍖', egg: '🥚', ticket: '🎟️', obsidian: '🪨', gem: '💎', magma: '🔥', crystal: '🔶', laundry: '🧺', towel: '🧻', grocery: '🥬', tray: '🍽️', beans: '🫘', coffee: '☕', shopbag: '🛍️', nectar: '💧', seedbag: '🧳' };
@@ -586,7 +590,8 @@ export class Hud {
       $('bagBtn').addEventListener('click', () => (this.onBag ? this.onBag() : this.showBag(!this.invOpen)));
       $('inv').addEventListener('click', () => this.showBag(false)); // (a tap on the list closes it)
     }
-    const key = [...counts].map(([t, n]) => `${t}${n}`).join() + `|${used}/${max}|` + tools.map((x) => `${x.label}${Math.round(x.wear * 20)}`).join();
+    const help = this.invHelp;
+    const key = [...counts].map(([t, n]) => `${t}${n}${help ? help(t) : ''}`).join() + `|${used}/${max}|` + tools.map((x) => `${x.label}${Math.round(x.wear * 20)}`).join();
     if (key === this.invKey) return; // nothing changed: skip the DOM work
     this.invKey = key;
     const badge = $('bagBadge');
@@ -598,7 +603,7 @@ export class Hud {
       ? `<div class="inv-tools">${tools.map((x) => `<div class="inv-tool">${x.icon}<span>${x.label}</span><i><u style="width:${Math.round(x.wear * 100)}%"></u></i></div>`).join('')}</div>`
       : '';
     $('invSlots').innerHTML = toolRow + (used
-      ? [...counts].map(([t, n]) => `<div class="inv-slot">${Hud.ICONS[t] ?? '❔'}<b>${n}</b></div>`).join('')
+      ? [...counts].map(([t, n]) => (help ? `<div class="inv-row"><span class="inv-slot">${Hud.ICONS[t] ?? '❔'}<b>${n}</b></span><span class="inv-go">➜ ${help(t)}</span></div>` : `<div class="inv-slot">${Hud.ICONS[t] ?? '❔'}<b>${n}</b></div>`)).join('')
       : '<div class="inv-empty">Empty</div>');
     const fill = $('invFill');
     fill.style.width = `${Math.min(100, (used / max) * 100)}%`;
@@ -612,7 +617,7 @@ export class Hud {
     $('inv').classList.toggle('hidden', !open);
     $('bagBtn').classList.toggle('on', open);
     clearTimeout(this.invTimer);
-    if (open) this.invTimer = window.setTimeout(() => this.showBag(false), 5000);
+    if (open) this.invTimer = window.setTimeout(() => this.showBag(false), this.invHelp ? 9000 : 5000);
   }
 
   // ---- Loading screen ------------------------------------------------------

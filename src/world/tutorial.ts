@@ -57,6 +57,10 @@ export interface TutorialScript {
   skippable?: boolean;
   /** Called at the end instead of showing the `finish` card (the story's chapter-end). */
   onFinish?: () => void;
+  /** Called by the Skip button instead of ending with the "How to play is in Settings" banner. */
+  onSkip?: () => void;
+  /** The quest card's number and heading, instead of the step's (the tycoon's 🎯 quests: one endless step). */
+  info?: () => { step: number; total: number; label?: string };
 }
 
 export class Tutorial {
@@ -82,6 +86,11 @@ export class Tutorial {
     this.steps = script.steps(this);
     this.buildArrow();
     this.ring = this.arrow.userData.ring as THREE.Mesh;
+  }
+
+  /** How many steps it has. */
+  get count() {
+    return this.steps.length;
   }
 
   /** True while the tutorial is still running. */
@@ -284,11 +293,12 @@ export class Tutorial {
 
   /** The quest card: this step's text, number and progress (only touched when one changes). */
   private setHint(text: string | null, progress: number | null = null) {
-    const key = text === null ? '' : `${this.save.tutorial}|${text}|${progress === null ? '' : Math.round(progress * 100)}`;
+    const key = text === null ? '' : `${this.script.info?.().step ?? this.save.tutorial}|${text}|${progress === null ? '' : Math.round(progress * 100)}`;
     if (key === this.shown) return;
     this.shown = key;
     const skip = text && this.script.skippable !== false ? () => this.skip() : undefined;
-    this.hud.setHint(text, skip, text ? { step: this.save.tutorial, total: this.steps.length, progress } : undefined);
+    const info = this.script.info?.() ?? { step: this.save.tutorial, total: this.steps.length };
+    this.hud.setHint(text, skip, text ? { ...info, progress } : undefined);
   }
 
   /** The welcome card for a brand-new game. */
@@ -314,6 +324,7 @@ export class Tutorial {
 
   /** Skip the rest (Settings → How to play has it all, and can replay it). */
   skip() {
+    if (this.script.onSkip) return this.script.onSkip();
     this.save.tutorial = TUTORIAL_DONE;
     this.arrow.visible = false;
     this.edge.classList.add('hidden');
@@ -328,6 +339,13 @@ export class Tutorial {
     this.setHint(null);
     if (this.script.onFinish) return this.script.onFinish();
     this.hud.showGuide(this.script.finish.title, this.script.finish.html, [{ label: this.script.finish.button, cls: 'big-btn' }]);
+  }
+
+  /** Take the arrow and the card away for good (a 📖 guide that's over). */
+  dispose() {
+    this.arrow.removeFromParent();
+    this.edge.remove();
+    if (this.shown) this.setHint(null);
   }
 
   /** Settings → 📖 How to play → 🔁 Replay: start over (skipping what's already done). */

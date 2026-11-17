@@ -1139,9 +1139,9 @@ body.in-cut .hotbar, body.in-cut .use-btn { visibility: hidden; }
 .fl-chips::-webkit-scrollbar { display: none; }
 /* ⚠️ the event alert above the chips (v0.72.2) */
 .fl-alert {
-  /* (top left, under the goals bar and beside the minimap: the bottom middle is the ⬆️ upgrade button's) */
-  position: fixed; left: calc(10px + var(--safe-l)); top: calc(104px + var(--safe-t)); pointer-events: auto;
-  max-width: min(330px, calc(100vw - 150px)); padding: 7px 12px; border-radius: 14px; border: 2px solid #8fd3ff;
+  /* (top left, under the goals bar and the quest card: the bottom middle is the ⬆️ upgrade button's) */
+  position: relative; align-self: flex-start; margin-top: 4px; pointer-events: auto;
+  max-width: min(300px, 100%); padding: 7px 12px; border-radius: 14px; border: 2px solid #8fd3ff;
   background: rgba(20, 24, 30, 0.88); color: #fff; font: inherit; font-weight: 800; font-size: 13px; line-height: 1.25; text-align: left;
 }
 .fl-alert.bad { border-color: #ff6b6b; background: rgba(120, 20, 20, 0.92); animation: alertPulse 0.9s ease-in-out infinite; }
@@ -1306,3 +1306,17 @@ body.tycoon .up-btn { bottom: calc(68px + var(--safe-b)); }
 }
 /* the ⬆️ shortcut on the flight card (to the hangar's fleet menu) */
 .fl-up { position: absolute; top: 40px; left: 6px; width: 28px; height: 28px; border-radius: 50%; border: none; padding: 0; background: #16331f; color: #7cfc9b; font-size: 15px; font-weight: 900; box-shadow: 0 0 0 1.5px #2bd4a0; }
+
+/* ============================================================================
+   📖 GUIDES + 🎒 "where does this go?" (v0.73)
+   ============================================================================ */
+.gd-chain { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin: 2px 0 10px; }
+.gd-chain span { padding: 5px 9px; border-radius: 10px; background: rgba(255, 209, 102, 0.22); border: 1.5px solid rgba(180, 130, 30, 0.55); font-weight: 800; font-size: 13px; white-space: nowrap; }
+.gd-chain i { font-style: normal; font-weight: 900; opacity: 0.6; }
+.gd-tip { padding: 7px 10px; border-radius: 10px; background: rgba(92, 207, 90, 0.18); font-size: 13px; }
+.gd-item { padding: 8px 0 4px; border-top: 1px solid rgba(0, 0, 0, 0.12); }
+.gd-item:first-child { border-top: 0; }
+.gd-item > b { display: block; margin-bottom: 5px; font-size: 15px; }
+.inv-row { display: flex; align-items: center; gap: 8px; width: 100%; }
+.inv-row .inv-slot { flex: none; }
+.inv-go { font-size: 12px; font-weight: 700; line-height: 1.2; text-align: left; max-width: 170px; }

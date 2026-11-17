@@ -165,34 +165,37 @@ export function walkable(x: number, z: number) {
   return CLEARINGS.some((c) => Math.hypot(x - c.x, z - c.z) < c.r - 10);
 }
 
-/** The glowing tiles (bought with cash, in this order). */
+/** The glowing tiles (bought with cash, in this order). v0.73: a BUILDING's tile sits at the middle of where it
+ *  will stand (buying it moves you out to its front); the tower's is at its door (the tower's already there, dark),
+ *  and the gift shop's is outside the terminal (a tile under the roof couldn't be seen). No tile stands just north of a
+ *  nectar flower: from the camera, the flower's head covers the ground there. */
 export const TY_UNLOCKS: UnlockDef[] = [
   { id: 'ty-runner', name: 'Fuel Runner Ant', icon: '⛽', cost: 30, pos: [-2, 8], requires: [] },
   { id: 'ty-checkin', name: 'Check-in Ant', icon: '🎫', cost: 70, pos: [-6, 24], requires: ['ty-runner'] },
-  { id: 'ty-bags', name: 'Baggage Ant', icon: '🧳', cost: 60, pos: [8, 4], requires: ['ty-checkin'] },
+  { id: 'ty-bags', name: 'Baggage Ant', icon: '🧳', cost: 60, pos: [0, -5], requires: ['ty-checkin'] },
   { id: 'ty-banker', name: 'Banker Ant', icon: '🏦', cost: 120, pos: [-40, 30], requires: ['ty-checkin'] },
-  { id: 'ty-flower2', name: 'Nectar Flower 2', icon: '🌼', cost: 160, pos: [24, 26], requires: ['ty-runner'] },
-  { id: 'ty-gate2', name: 'Gate 2 + Ladybug', icon: '🐞', cost: 400, pos: [-10, -4], requires: ['ty-banker'], level: 3 },
+  { id: 'ty-flower2', name: 'Nectar Flower 2', icon: '🌼', cost: 160, pos: [32, 12], requires: ['ty-runner'] },
+  { id: 'ty-gate2', name: 'Gate 2 + Ladybug', icon: '🐞', cost: 400, pos: [-10, -16], requires: ['ty-banker'], level: 3 },
   { id: 'ty-runner2', name: 'Fuel Runner 2', icon: '⛽', cost: 280, pos: [20, 34], requires: ['ty-gate2', 'ty-flower2'] },
-  { id: 'ty-gate3', name: 'Gate 3 + Ladybug', icon: '🐞', cost: 800, pos: [14, -4], requires: ['ty-gate2'], level: 5 },
-  { id: 'ty-tower', name: 'Control Tower', icon: '🗼', cost: 900, pos: [54, -10], requires: ['ty-gate2'], level: 5 },
-  { id: 'ty-cafe', name: 'Nectar Café', icon: '🍪', cost: 220, pos: [-52, 26], requires: ['ty-banker'], level: 3 },
+  { id: 'ty-gate3', name: 'Gate 3 + Ladybug', icon: '🐞', cost: 800, pos: [14, -16], requires: ['ty-gate2'], level: 5 },
+  { id: 'ty-tower', name: 'Control Tower', icon: '🗼', cost: 900, pos: [53, -27], requires: ['ty-gate2'], level: 5 },
+  { id: 'ty-cafe', name: 'Nectar Café', icon: '🍪', cost: 220, pos: [-42, 0], requires: ['ty-banker'], level: 3 },
   { id: 'ty-crumbs', name: 'Crumb Runner Ant', icon: '🍪', cost: 200, pos: [-50, 10], requires: ['ty-cafe'] },
   { id: 'ty-chef', name: 'Chef Ant (faster oven)', icon: '🔥', cost: 650, pos: [-30, -2], requires: ['ty-crumbs'], level: 5 },
   // (v0.72: the 🛖 hangar: new aircraft are unlocked, and upgraded, in its menu; the fleet tiles are gone)
-  { id: 'ty-hangar', name: 'Hangar (your fleet)', icon: '🛖', cost: 600, pos: [50, 10], requires: ['ty-gate2'], level: 4 },
-  { id: 'ty-gate4', name: 'Gate 4 + Plane', icon: '✈️', cost: 1800, pos: [38, -4], requires: ['ty-gate3'], level: 7 },
+  { id: 'ty-hangar', name: 'Hangar (your fleet)', icon: '🛖', cost: 600, pos: [66, 6], requires: ['ty-gate2'], level: 4 },
+  { id: 'ty-gate4', name: 'Gate 4 + Plane', icon: '✈️', cost: 1800, pos: [38, -16], requires: ['ty-gate3'], level: 7 },
   { id: 'ty-runner3', name: 'Fuel Runner 3', icon: '⛽', cost: 700, pos: [32, 32], requires: ['ty-gate4'] },
   { id: 'ty-bags2', name: 'Baggage Ant 2', icon: '🧳', cost: 320, pos: [-6, 2], requires: ['ty-gate2', 'ty-bags'] },
   // ---- v0.71: ♻️ the recycler and the 🧹 janitor ----
-  { id: 'ty-recycler', name: 'Recycler (nectar → jet fuel)', icon: '♻️', cost: 500, pos: [14, 31], requires: ['ty-cafe'], level: 4 },
-  { id: 'ty-janitor', name: 'Janitor Ant', icon: '🧹', cost: 350, pos: [14, 24], requires: ['ty-recycler'] },
+  { id: 'ty-recycler', name: 'Recycler (nectar → jet fuel)', icon: '♻️', cost: 500, pos: [6, 28], requires: ['ty-cafe'], level: 4 },
+  { id: 'ty-janitor', name: 'Janitor Ant', icon: '🧹', cost: 350, pos: [12, 36], requires: ['ty-recycler'] },
   // ---- v0.70: 🗺️ routes, ✈️ fleet, 🎁 the gift shop, 👑 the VIP lounge ----
   { id: 'ty-route-picnic', name: 'Route: 🧺 Picnic Table (fare ×1.5)', icon: '🗺️', cost: 450, pos: [-40, 44], requires: ['ty-banker'], level: 4 },
   { id: 'ty-route-log', name: 'Route: 🪵 Fallen Log Town (×2)', icon: '🗺️', cost: 1100, pos: [-32, 50], requires: ['ty-route-picnic'], level: 6 },
   { id: 'ty-route-tide', name: 'Route: 🐚 Tide Pool (×2.6)', icon: '🗺️', cost: 2600, pos: [-24, 54], requires: ['ty-route-log'], level: 9 },
   { id: 'ty-route-lizard', name: 'Route: 🦎 Lizard Rock (×3.3)', icon: '🗺️', cost: 5500, pos: [-16, 58], requires: ['ty-route-tide'], level: 12 },
   { id: 'ty-shop', name: 'Pollen Gift Shop', icon: '🎁', cost: 600, pos: [2, 16], requires: ['ty-cafe'], level: 5 },
-  { id: 'ty-lounge', name: 'VIP Lounge (VIPs pay ×3)', icon: '👑', cost: 1500, pos: [-20, -7], requires: ['ty-gate2'], level: 7 },
-  { id: 'ty-bags3', name: 'Baggage Ant 3', icon: '🧳', cost: 750, pos: [8, -3], requires: ['ty-gate3', 'ty-bags2'] },
+  { id: 'ty-lounge', name: 'VIP Lounge (VIPs pay ×3)', icon: '👑', cost: 1500, pos: [-20, -1], requires: ['ty-gate2'], level: 7 },
+  { id: 'ty-bags3', name: 'Baggage Ant 3', icon: '🧳', cost: 750, pos: [4, -6], requires: ['ty-gate3', 'ty-bags2'] },
 ];

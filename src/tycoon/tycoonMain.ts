@@ -71,6 +71,12 @@ const HOWTO_HTML = `
       (flowers fill twice as fast), or a 🪶 feather to find.</li>
     <li>💵 Walk over the <b>cash pad</b> to collect. Spend it on the <b>glowing tiles</b>: ants who fuel the planes,
       check passengers in and collect the cash for you.</li>
+    <li>🎯 <b>Quests</b> (the card under the airfield's name): there's always one, with a cash reward. The yellow
+      arrow shows where to go. Skip passes one over.</li>
+    <li>📖 When something new opens, a card shows how it works, then the arrow walks you through it once.
+      <b>How things work</b> (below) has them all again.</li>
+    <li>🎒 Tap the <b>backpack</b> to see where each thing you're carrying goes. Small green arrows bob over the pads
+      that take it.</li>
     <li>👁️ The eye button switches to first person: see the airport through your ant's eyes.</li>
   </ul>`;
 
@@ -141,6 +147,7 @@ export async function startTycoon({ app, renderer, save, hud, sfx, input, progre
       if (!at) return;
       field.watch = null;
       field.watchAt = at;
+      field.watchEvent = true;
       hud.banner('🎯 Over here!', 'Walk to come back to your ant', 1800);
     },
   });
@@ -202,6 +209,11 @@ export async function startTycoon({ app, renderer, save, hud, sfx, input, progre
           writeSave(save);
           hud.banner('🎓 Tutorial restarted', 'Follow the yellow arrow 🔽', 4000);
         },
+      },
+      {
+        label: '📖 How things work',
+        cls: 'menu-btn',
+        onClick: () => hud.showGuide('📖 How things work', field.guideList(), [{ label: 'Close', cls: 'big-btn' }]),
       },
       { label: 'Close', cls: 'big-btn' },
     ]);

@@ -106,7 +106,10 @@ export class FlightUi {
     // ⚠️ the alert above the chips (the lizard on the runway…): it stays for as long as the event does
     this.alertEl = el('button', 'fl-alert hidden') as HTMLButtonElement;
     this.alertEl.addEventListener('click', () => hooks.alertTap());
-    parent.insertBefore(this.alertEl, before);
+    // (in the top-left column, under the 🎯 quest card, so the two never overlap)
+    const hint = document.getElementById('hint');
+    if (hint) hint.after(this.alertEl);
+    else parent.insertBefore(this.alertEl, before);
 
     // 🪪 the card
     this.card = el('div', 'fl-card hidden');
