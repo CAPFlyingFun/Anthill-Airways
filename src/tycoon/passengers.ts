@@ -74,17 +74,17 @@ export interface Stop {
   maxWait: number;
 }
 
-/** 🧍 Everyone who flies (the story's cast: actors/cast.ts). The expecting looks come up less often: about 1 in 8. */
-const PEOPLE: { file: HumanKind; weight: number }[] = [
-  ...(['h-jack', 'h-jacklab', 'h-cadet', 'h-director', 'h-enigma', 'h-balance', 'h-azure', 'h-ember', 'h-crew1', 'h-crew2', 'h-crew3', 'h-crew4'] as HumanKind[]).map((file) => ({ file, weight: 1 })),
-  ...(['h-sarah', 'h-sarah2', 'h-grace', 'h-exec', 'h-balance2'] as HumanKind[]).map((file) => ({ file, weight: 0.35 })),
-];
-/** With the builder's women in, the story's models that walk in are these (its women's are theirs now). */
-const MEN = PEOPLE.filter((k) => !['h-enigma', 'h-balance', 'h-azure', 'h-sarah', 'h-sarah2', 'h-grace', 'h-exec', 'h-balance2'].includes(k.file));
+/**
+ * 🧍 The story's models that fly: ITS MEN ONLY (v0.78.1). Every woman is one of the Character Builder's (`woman`),
+ * so none of the story's fixed women is downloaded or walks in: not before the builder's body is in, not after.
+ * LOOKED AT one by one in the game, side by side: h-crew3 and h-crew4 are women (they were still on this list in
+ * v0.78), h-ember and h-cadet are men.
+ */
+const MEN: { file: HumanKind; weight: number }[] = (['h-jack', 'h-jacklab', 'h-cadet', 'h-director', 'h-ember', 'h-crew1', 'h-crew2'] as HumanKind[]).map((file) => ({ file, weight: 1 }));
 /** How many of the builder's women wear the cloth tee (the rest a painted one). GAME TUNING. */
 const CLOTH_SHARE = 0.7;
 /** Every model the tiny people need (downloaded when the switch goes on). */
-export const PEOPLE_FILES = PEOPLE.map((p) => p.file);
+export const PEOPLE_FILES = MEN.map((p) => p.file);
 
 export class Passengers {
   /** Everyone around (any state). */
@@ -160,7 +160,7 @@ export class Passengers {
       const her = this.woman();
       if (her) return her;
     }
-    const ready = (this.crowd ? MEN : PEOPLE).filter((k) => hasModel(k.file));
+    const ready = MEN.filter((k) => hasModel(k.file));
     if (!ready.length) return null;
     let roll = Math.random() * ready.reduce((a, k) => a + k.weight, 0);
     const pick = ready.find((k) => (roll -= k.weight) <= 0) ?? ready[0];
