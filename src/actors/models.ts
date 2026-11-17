@@ -28,6 +28,8 @@ export interface CreatureModel {
   flying: boolean;            // true = wings open and buzzing
   wingOpen: number;           // 0 folded .. 1 spread (eases between)
   biped?: Biped;              // people only: legs with knees, arms with elbows
+  /** Someone else poses this one (the builder's crowd, tycoon/passengers.ts): told how fast it's walking instead. */
+  drive?: (dt: number, speed: number) => void;
   anim?: {                    // models with their own animations (the Dodo)
     mixer: THREE.AnimationMixer;
     walk: THREE.AnimationAction;
@@ -221,6 +223,7 @@ function strideLengths(bodyLengthsPerS: number) {
  * that walks in the worlds). Gate-run riders pass false.
  */
 export function animateCreature(m: CreatureModel, dt: number, speed: number, paced = true) {
+  if (m.drive) return m.drive(dt, speed);
   // LOD: off-screen bugs skip their leg math entirely; far ones update every
   // third frame (with 3x the time step, so they still move at the right pace).
   if (!m.root.visible) return;

@@ -42,7 +42,35 @@ import { faceFieldOn, headPoints } from './vendor/ccbs/sarahlab/faceShapeFields'
 import { MOTION_TARGETS, motionWeights, restingBellySpring, stepBellySpring, stepBreastSpring, walkBounceAccel, walkSwayAccel, type BellySpring } from './vendor/ccbs/bellyMotion';
 
 /** The builder's published models (GitHub Pages: the same origin as this game when it's live). */
-const BUILDER = 'https://capflyingfun.github.io/Custom-Character-Builder-System/models/';
+// (🧪 in development, ?localccbs reads the builder's files from this server's own /_ccbs/ folder: a test machine
+// that can't reach the builder's site)
+const BUILDER = import.meta.env.DEV && new URLSearchParams(location.search).has('localccbs')
+  ? `${import.meta.env.BASE_URL}_ccbs/`
+  : 'https://capflyingfun.github.io/Custom-Character-Builder-System/models/';
+
+/**
+ * 🧍 THE CROWD, IN A GAME (v0.78). The same people as this room's, made and drawn by the same code, but standing in
+ * the game's own scene: the airport's female passengers. Given a host, startDevRoom() builds no page, no camera and no
+ * loop of its own; the game adds people one at a time, says how fast each is walking, and calls step() every frame.
+ */
+export interface CrowdHost { scene: THREE.Scene; camera: THREE.Camera; renderer: THREE.WebGLRenderer }
+export interface CrowdPerson {
+  /** Put this in the scene and move it. She stands 2.8 units tall at scale 1 (HEIGHT), feet at its origin. */
+  root: THREE.Group;
+  /** How fast she is walking right now, in the game's units a second (0: standing). */
+  speed: number;
+  dispose(): void;
+}
+export interface Crowd {
+  /** Her body and hair have loaded: add() gives people from now on. */
+  ready: Promise<boolean>;
+  /** A new woman: her belly's size in %, whether she wears the cloth tee (else a painted one), and a number she is dealt her looks from. */
+  add(opts: { bump: number; cloth: boolean }): CrowdPerson | null;
+  /** One frame: everybody's detail, pose, tee. */
+  step(dt: number): void;
+}
+/** A person is this tall at scale 1. */
+export const CROWD_HEIGHT = 2.8;
 
 interface ModelDef {
   key: string;
@@ -163,6 +191,8 @@ interface Look {
   longSleeves: boolean; // teeLong or teeShort
   /** Her head (v0.57): a hairstyle of the builder's, how long (0 its shortest to 1), its colour ('#rrggbb', or null: her own copper), and her face as FACE_TYPES' weights. */
   head?: { style: string; length: number; colour: string | null; face: Record<string, number> };
+  /** (the crowd in a game) her tee is painted on even where the cloth tee is worn. */
+  paint?: boolean;
 }
 /** The name a face type has among a mesh's shapes. */
 const FACE_SHAPE = (id: string) => `faceType:${id}`;
@@ -552,6 +582,9 @@ interface Person {
   far?: number;
   /** FADE: how much of her is drawn, 1 = all (every one of her materials reads this one value). */
   fade: { value: number };
+  /** (the crowd in a game) how fast the game says she is walking, and where she is in the world. */
+  speedNow?: number;
+  at?: THREE.Vector3;
   /** She is in the scene (someone not drawn is taken out of it, so her 80 bones cost nothing: v0.50). */
   shown: boolean;
   /** Her shadow's material (it thins out with her). */
@@ -579,16 +612,19 @@ interface Person {
   };
 }
 
-export async function startDevRoom() {
+export async function startDevRoom(embed?: CrowdHost): Promise<Crowd | void> {
   // ---- The page: our own canvas and a small panel, over everything else ----
   const host = document.createElement('div');
   host.style.cssText = 'position:fixed;inset:0;z-index:99999;background:#9fd3f5;touch-action:none;font-family:system-ui,sans-serif;';
-  document.body.appendChild(host);
-  const renderer = new THREE.WebGLRenderer({ antialias: true });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // (as the game does)
-  renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-  host.appendChild(renderer.domElement);
+  // (in a game: the page below is made but never shown, and the game's own renderer, scene and camera are used)
+  if (!embed) document.body.appendChild(host);
+  const renderer = embed?.renderer ?? new THREE.WebGLRenderer({ antialias: true });
+  if (!embed) {
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // (as the game does)
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    host.appendChild(renderer.domElement);
+  }
   const panel = document.createElement('div');
   panel.style.cssText =
     'position:absolute;left:calc(8px + env(safe-area-inset-left));right:calc(8px + env(safe-area-inset-right));top:calc(8px + env(safe-area-inset-top));' +
@@ -658,28 +694,28 @@ export async function startDevRoom() {
   panel.appendChild(stat);
 
   // ---- The scene: grass, sky, a sun with shadows (like the backyard) ----
-  const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x9fd3f5);
-  scene.add(new THREE.HemisphereLight(0xffffff, 0x88aa66, 1.15));
+  const scene = embed?.scene ?? new THREE.Scene();
+  if (!embed) scene.background = new THREE.Color(0x9fd3f5);
+  if (!embed) scene.add(new THREE.HemisphereLight(0xffffff, 0x88aa66, 1.15));
   const sun = new THREE.DirectionalLight(0xfff2d6, 2.0);
   sun.position.set(-14, 26, 16);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
   const sc = sun.shadow.camera;
   sc.left = -20; sc.right = 20; sc.top = 20; sc.bottom = -20; sc.near = 1; sc.far = 80;
-  scene.add(sun);
+  if (!embed) scene.add(sun);
   const ground = new THREE.Mesh(new THREE.CircleGeometry(22, 48), new THREE.MeshStandardMaterial({ color: 0x7ec850, roughness: 1 }));
   ground.rotation.x = -Math.PI / 2;
   ground.receiveShadow = true;
-  scene.add(ground);
-  const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 300);
+  if (!embed) scene.add(ground);
+  const camera = (embed?.camera as THREE.PerspectiveCamera | undefined) ?? new THREE.PerspectiveCamera(42, 1, 0.1, 300);
   // Drag: orbit. Pinch / wheel: zoom.
   // (v0.50: the camera starts nearer, 5.4 m from the middle and not 15.6: at the old distance the fade would have
   // had the whole room half gone, and nobody near enough for the 3% and 2% levels)
   const view = { yaw: 0, pitch: 0.62, dist: 9 };
   const pointers = new Map<number, { x: number; y: number }>();
   let pinch = 0;
-  const el = renderer.domElement;
+  const el = embed ? document.createElement('canvas') : renderer.domElement; // (a game's own canvas keeps its own touches)
   el.addEventListener('pointerdown', (e) => { pointers.set(e.pointerId, { x: e.clientX, y: e.clientY }); pinch = 0; });
   const up = (e: PointerEvent) => { pointers.delete(e.pointerId); pinch = 0; };
   el.addEventListener('pointerup', up);
@@ -704,7 +740,11 @@ export async function startDevRoom() {
   const people: Person[] = [];
   // (the defaults are the settings Joshua settled on, 2026-11-14: 40 walking, auto detail, baked, smart, pieces skipped)
   const state = { model: MODELS[0], count: 40, looks: 'random' as 'random' | 'saved' | 'off', seed: 0, shadows: true, detail: 3, shapes: 'baked' as 'live' | 'baked' | 'off', underwear: false, auto: true, fps: true, smart: true, cull: true, fade: true, heads: true, target: 30 as 30 | 45 | 60, cloth: 'off' as 'off' | 'live' | 'freeze' | 'near', perChar: 0, motion: 'walk' as 'walk' | 'idle' | 'off', plain: false, sharp: true, loading: '', error: '', info: null as Loaded | null };
+  // (in a game: nobody until the game adds her; no draw range or fade of this room's (the game's camera is far off:
+  // they would hide everyone); the cloth tee frozen once dressed, as Joshua's settings have it)
+  if (embed) Object.assign(state, { count: 0, fps: false, fade: false, cloth: 'freeze' });
   const resize = () => {
+    if (embed) return;
     renderer.setPixelRatio(state.sharp ? Math.min(window.devicePixelRatio, 2) : 1);
     renderer.setSize(host.clientWidth, host.clientHeight, false);
     el.style.width = '100%';
@@ -1027,7 +1067,7 @@ export async function startDevRoom() {
     // (the cloth tee's wearer has its colour painted on her skin beneath it, so a point of skin showing between the
     // cloth's own points is the tee's colour too)
     // (v0.41: everybody, as a clothing option. The first keeps Sarah's own red; the rest wear it in their own colour)
-    const wearsCloth = def.builder && state.cloth !== 'off';
+    const wearsCloth = def.builder && state.cloth !== 'off' && !tweaked.paint;
     const look = wearsCloth ? { ...tweaked, top: i === 0 ? new THREE.Color(SARAH_TEE.colour).getHex() : tweaked.top, longSleeves: false } : tweaked;
     const tall = 1 + look.heightCm / STANDARD_CM;
     inner.scale.setScalar(src.scale * tall);
@@ -1158,7 +1198,7 @@ export async function startDevRoom() {
       inner.add(copy);
     }
     root.add(inner);
-    scene.add(root);
+    if (!embed) scene.add(root); // (a game puts her where it wants her)
     const ring = Math.floor(i / 6);
     const radius = 4 + ring * 3.2;
     const person: Person = { root, lods, fade: fadeValue, shown: true, depth: fadeDepth, level: TABLE.length - 1, angle: (i % 6) * (Math.PI / 3) + ring * 0.5, radius, speed: ((2.0 - ring * 0.15) / radius) * (ring % 2 ? -1 : 1), phase: r() * 6 };
@@ -1294,6 +1334,25 @@ export async function startDevRoom() {
       if (smart.count < smart.ceil) { smart.count++; smart.doing = 'more'; } else smart.doing = 'at its limit';
     } else smart.doing = 'holding';
   };
+  /** Let go of everything that was one person's own (her materials, baked bodies, skeleton, tee): the model is shared. */
+  const disposePerson = (p: Person) => {
+    p.root.traverse((o) => {
+      const mesh = o as THREE.SkinnedMesh;
+      if (!mesh.isMesh) return;
+      // (only what this person owned: her painted materials and her skeleton; the mesh and textures are shared)
+      for (const m of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) if (m.userData.devRoomOwn) m.dispose();
+      if (mesh.geometry.userData.devRoomOwn) mesh.geometry.dispose();
+      mesh.skeleton?.dispose();
+    });
+    for (const l of p.lods) {
+      for (const geo of l.geos) if (!geo?.userData.devRoomShared) geo?.dispose(); // (her other detail levels; the shared live body isn't hers)
+      for (const set of [l.fine, l.plain]) for (const m of set ? (Array.isArray(set) ? set : [set]) : []) m.dispose();
+    }
+    p.depth?.dispose();
+    p.cloth?.dispose();
+    p.live?.rig.dispose();
+    p.root.removeFromParent();
+  };
   let building = 0;
   let lastSrc: Loaded | null = null;
   let onBuilt = () => {};
@@ -1314,24 +1373,7 @@ export async function startDevRoom() {
       return;
     }
     if (ticket !== building) return;
-    for (const p of people.splice(0)) {
-      p.root.traverse((o) => {
-        const mesh = o as THREE.SkinnedMesh;
-        if (!mesh.isMesh) return;
-        // (only what this person owned: her painted materials and her skeleton; the mesh and textures are shared)
-        for (const m of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) if (m.userData.devRoomOwn) m.dispose();
-        if (mesh.geometry.userData.devRoomOwn) mesh.geometry.dispose();
-        mesh.skeleton?.dispose();
-      });
-      for (const l of p.lods) {
-        for (const geo of l.geos) if (!geo?.userData.devRoomShared) geo?.dispose(); // (her other detail levels; the shared live body isn't hers)
-        for (const set of [l.fine, l.plain]) for (const m of set ? (Array.isArray(set) ? set : [set]) : []) m.dispose();
-      }
-      p.depth?.dispose();
-      p.cloth?.dispose();
-      p.live?.rig.dispose();
-      p.root.removeFromParent();
-    }
+    for (const p of people.splice(0)) disposePerson(p);
     state.loading = 'Preparing…';
     await applyModelSettings(src);
     if (ticket !== building) return;
@@ -1649,7 +1691,7 @@ export async function startDevRoom() {
     targetBtn.classList.toggle('on', state.fps);
   };
   sync();
-  void rebuild();
+  const firstBuild = rebuild();
 
   // ---- The loop: they walk their circles; frames per second, averaged over a second ----
   let last = performance.now();
@@ -1659,20 +1701,25 @@ export async function startDevRoom() {
   let fps = 0;
   let worstShown = 0;
   let t = 0;
-  const tick = (now: number) => {
-    requestAnimationFrame(tick);
-    const ms = Math.max(0, now - last);
+  const camAt = new THREE.Vector3(), scaleAt = new THREE.Vector3();
+  const tick = (now: number, gameDt?: number) => {
+    if (!embed) requestAnimationFrame(tick);
+    const ms = gameDt !== undefined ? gameDt * 1000 : Math.max(0, now - last);
     last = now;
     const frameStart = performance.now();
     const dt = Math.min(0.05, ms / 1000);
     t += dt;
     let simulating = 0;
+    // (in a game she may be anywhere, at any size, even riding a bug: where she is and how big, in the world)
+    if (embed) camera.getWorldPosition(camAt); else camAt.copy(camera.position);
     for (const p of people) {
-      p.dist = Math.hypot(camera.position.x - p.root.position.x, camera.position.y - 1.4, camera.position.z - p.root.position.z);
+      const at = embed ? p.root.getWorldPosition((p.at ??= new THREE.Vector3())) : p.root.position;
+      const unit = embed ? p.root.getWorldScale(scaleAt).x || 1 : 1;
+      p.dist = Math.hypot(camAt.x - at.x, camAt.y - (at.y + 1.4 * unit), camAt.z - at.z) / unit;
       if (p.lods.length && p.root.visible) { // (someone out of view keeps the level she had: no baking for nobody to see)
         // AUTO detail: her level by her distance from the camera (a level is only left once she is 10% past
         // its edge, so someone walking along an edge doesn't flicker between two)
-        const d = Math.hypot(camera.position.x - p.root.position.x, camera.position.y - 1.4, camera.position.z - p.root.position.z); // (to her middle)
+        const d = p.dist; // (to her middle)
         let band = p.band ?? p.level;
         while (band > 0 && d < TABLE[band - 1].within * 0.95) band--;
         while (band < TABLE.length - 1 && d > TABLE[band].within * 1.05) band++;
@@ -1696,22 +1743,24 @@ export async function startDevRoom() {
           }
         }
       }
-      const walking = state.motion !== 'idle';
-      if (walking) p.angle += p.speed * dt;
+      // (her own walking speed along the ground, in this room's units: round her circle, or what the game says)
+      const pace = embed ? (p.speedNow ?? 0) / unit : Math.abs(p.speed) * p.radius;
+      const walking = embed ? pace > 0.05 : state.motion !== 'idle';
+      if (walking && !embed) p.angle += p.speed * dt;
       const x = Math.cos(p.angle) * p.radius;
       const z = Math.sin(p.angle) * p.radius;
       const m = p.live;
       // (someone out of view isn't posed either, unless her tee is being simulated on her: her place on her circle goes on)
       if (m && (p.root.visible || (p.cloth && p.cloth.phase !== 'frozen'))) {
         // The builder's own pose for this frame: standing and breathing, or a step of her walk with its weight
-        if (walking) m.walked += Math.abs(p.speed) * p.radius * dt;
+        if (walking) m.walked += pace * dt;
         const phase = ((m.walked * m.perUnit) / humanStride(m.measure, 'walk', m.carry)) % 1;
         let turns = poseHuman(m.measure, m.rig.bind, { stance: walking ? 'walk' : 'stand', phase, seconds: t + p.phase, lean: 0, carry: m.carry }, m.out);
         if (walking) turns = weighWalk(m.measure, turns, walkWeight(phase, 'walk'), m.out2);
         m.rig.apply(turns);
         // Her belly's and bust's weight: the walk's bounce and sway, felt by their springs (the builder's own rule)
         const stride = humanStride(m.measure, 'walk', m.carry);
-        const strideSeconds = walking ? stride / Math.max(1e-6, Math.abs(p.speed) * p.radius * m.perUnit) : 0;
+        const strideSeconds = walking ? stride / Math.max(1e-6, pace * m.perUnit) : 0;
         const upA = walking ? walkBounceAccel(phase, strideSeconds) : 0;
         const leftA = walking ? walkSwayAccel(phase, strideSeconds) : 0;
         stepBellySpring(m.belly, dt, upA, leftA);
@@ -1719,8 +1768,10 @@ export async function startDevRoom() {
         motionWeights(m.bumpPercent, m.belly, m.breast, m.weights);
         for (const sm of m.soft) for (let k = 0; k < 4; k++) if (sm.at[k] >= 0) sm.influences[sm.at[k]] = m.weights[k];
       }
-      p.root.position.set(x, m ? 0 : Math.abs(Math.sin(t * 5 + p.phase)) * 0.05, z);
-      p.root.rotation.y = -p.angle + (p.speed > 0 ? 0 : Math.PI); // (facing the way she goes)
+      if (!embed) {
+        p.root.position.set(x, m ? 0 : Math.abs(Math.sin(t * 5 + p.phase)) * 0.05, z);
+        p.root.rotation.y = -p.angle + (p.speed > 0 ? 0 : Math.PI); // (facing the way she goes)
+      }
       p.cloth?.update(dt);
       if (p.cloth && p.cloth.phase !== 'frozen') simulating++;
     }
@@ -1746,8 +1797,10 @@ export async function startDevRoom() {
         if (near) { putOn(near, false); near.clothNear = true; }
       }
     }
-    camera.position.set(Math.sin(view.yaw) * Math.cos(view.pitch) * view.dist, Math.sin(view.pitch) * view.dist + 1.2, Math.cos(view.yaw) * Math.cos(view.pitch) * view.dist);
-    camera.lookAt(0, 1.2, 0);
+    if (!embed) {
+      camera.position.set(Math.sin(view.yaw) * Math.cos(view.pitch) * view.dist, Math.sin(view.pitch) * view.dist + 1.2, Math.cos(view.yaw) * Math.cos(view.pitch) * view.dist);
+      camera.lookAt(0, 1.2, 0);
+    }
     // OUT OF VIEW, NOT DRAWN (v0.43; Joshua: "hide completely models that are not in the camera viewing frame... as
     // soon as the camera or person walks into the camera view, it shows"). three.js can't do this for these bodies by
     // itself (a skinned body's own bounds are its rest pose's, so its culling is off): each person is a ball round her
@@ -1775,7 +1828,8 @@ export async function startDevRoom() {
     }
     inView = 0;
     for (const p of people) {
-      let show = !state.cull || frustum.intersectsSphere(cullBall.set(cullAt.set(p.root.position.x, 1.4, p.root.position.z), cullBall.radius));
+      const unit = embed ? p.root.getWorldScale(scaleAt).x || 1 : 1, at = embed && p.at ? p.at : p.root.position;
+      let show = !state.cull || frustum.intersectsSphere(new THREE.Sphere(cullAt.set(at.x, at.y + 1.4 * unit, at.z), cullBall.radius * unit));
       if (show) inView++;
       p.inView = show;
       let f = 1;
@@ -1813,11 +1867,12 @@ export async function startDevRoom() {
     }
     // (someone not drawn is taken out of the scene: 400 people are some 40,000 bones, and three.js works out where
     // every bone in the scene is each frame, drawn or not. That was most of the cost of a big crowd out of view.)
-    for (const p of people) {
+    if (!embed) for (const p of people) {
       const on = p.root.visible;
       if (on !== p.shown) { p.shown = on; if (on) scene.add(p.root); else scene.remove(p.root); }
     }
     for (const p of people) p.cloth?.show(p.root.visible);
+    if (embed) return; // (the game draws its own picture)
     renderer.info.reset();
     renderer.render(scene, camera);
     // (how long this frame's own work took, start to end: unlike the frame rate, the screen's refresh doesn't round it)
@@ -1881,6 +1936,28 @@ export async function startDevRoom() {
     }
   };
   onBuilt = paint;
+  if (embed) {
+    // 🧍 THE CROWD'S HANDLE for the game (see Crowd, at the top)
+    let dealt = 0;
+    return {
+      ready: firstBuild.then(() => !!lastSrc),
+      add: ({ bump, cloth }) => {
+        if (!lastSrc) return null;
+        // (her looks dealt as the room's random ones are, then her belly as the game rolled it)
+        hooks.tweak = (look) => ({ ...look, bump, paint: !cloth });
+        let p: Person;
+        try { p = makePerson(state.model, lastSrc, dealt++); } finally { hooks.tweak = null; }
+        people.push(p);
+        return {
+          root: p.root,
+          get speed() { return p.speedNow ?? 0; },
+          set speed(v: number) { p.speedNow = v; },
+          dispose: () => { const k = people.indexOf(p); if (k >= 0) people.splice(k, 1); disposePerson(p); },
+        };
+      },
+      step: (dt) => tick(performance.now(), dt),
+    };
+  }
   requestAnimationFrame(tick);
   renderer.info.autoReset = false;
 

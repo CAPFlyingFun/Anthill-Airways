@@ -82,6 +82,7 @@ export function seeThroughAll(root: THREE.Object3D, skip: THREE.Object3D[] = [])
     for (const m of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
       if (!m || (m as THREE.ShaderMaterial).isShaderMaterial || (m as THREE.SpriteMaterial).isSpriteMaterial) continue;
       if (own(m, 'customProgramCacheKey') && String(m.customProgramCacheKey()).startsWith('flora-lawn')) continue;
+      if (m.userData.devRoomOwn) continue; // (the builder's people keep their own painted materials)
       patch(m as Mat);
     }
   });

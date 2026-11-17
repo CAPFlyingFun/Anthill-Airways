@@ -49,6 +49,7 @@ import { Events } from './events';
 import { Guides, type GuideDef } from './guides';
 import { Quests } from './quests';
 import { seeThroughAll, setSee } from './seeThrough';
+import type { Crowd } from '../devRoom';
 import { trash } from '../world/trash';
 import { mat, mesh, PAL } from './kit';
 import { distToPath } from './airport/common';
@@ -1331,6 +1332,7 @@ export class Airfield {
       // The travellers have flown off to their destination
       for (const p of gate.riders) {
         p.model.root.removeFromParent();
+        this.pax.gone(p);
         this.paxRemove(p);
       }
       plane.riders.fill(null);
@@ -1894,6 +1896,7 @@ export class Airfield {
     // 🎫 Check-in: you on the CHECK-IN pad, or the Check-in ant (it waits while the BAG DROP is full)
     this.pax.serving = (!!this.checkInAnt || this.deskZone.contains(p)) && !this.bagDrop.full;
     this.pax.update(dt);
+    if (this.crowd && this.crowd !== 'loading') this.crowd.step(dt);
 
     // 💵 Cash pad -> your wallet
     this.every(this.cashPad.zone, dt, this.cashPad.zone.contains(p), 0.035, () => {
@@ -2275,11 +2278,31 @@ export class Airfield {
   peopleReady() {
     return `${PEOPLE_FILES.filter((f) => hasModel(f)).length}/${PEOPLE_FILES.length}`;
   }
+  /** The game's renderer (tycoonMain hands it over: the builder's crowd draws with it) and the crowd itself. */
+  renderer: THREE.WebGLRenderer | null = null;
+  private crowd: Crowd | 'loading' | null = null;
   setPeople(on: boolean, quiet = false) {
     this.st.people = on;
     this.pax.people = on;
-    if (!on) return;
+    if (!on) return void (this.pax.crowd = null);
     if (!quiet) this.hud.banner('🧍 Tiny people are on their way', 'New passengers are miniature people: they join as their models arrive', 4200);
+    // 👩 the Character Builder's women: its body and hair load once (from the builder's own site), then every woman
+    // who walks in is one of them (devRoom.ts's crowd, drawn in this scene)
+    if (!this.crowd && this.renderer) {
+      this.crowd = 'loading';
+      void import('../devRoom')
+        .then((room) => room.startDevRoom({ scene: this.scene, camera: this.camera, renderer: this.renderer! }))
+        .then(async (crowd) => {
+          if (!crowd || !(await crowd.ready)) throw new Error('the builder\'s body did not load');
+          this.crowd = crowd;
+          this.pax.crowd = this.pax.people ? crowd : null;
+          if (!quiet && this.pax.people) this.hud.banner('👩 The builder\'s women are here!', 'Every woman who walks in now has her own hair, face, outfit and belly', 4200);
+        })
+        .catch((e) => {
+          console.warn('No builder crowd', e);
+          this.crowd = null;
+        });
+    } else if (this.crowd && this.crowd !== 'loading') this.pax.crowd = this.crowd;
     // (each one as it arrives: downloaded, then its lighter triangle lists made for when it's far from the camera)
     let told = false;
     // (a person joins the moment her model has downloaded; her lighter far-away versions are made afterwards, one

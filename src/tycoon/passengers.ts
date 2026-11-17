@@ -10,7 +10,8 @@
 // carry bigger travellers.
 // ============================================================================
 import { PEOPLE_LOD, hasModel, setPersonLod, spawnHuman, type HumanKind } from '../actors/creatures';
-import type { CreatureModel } from '../actors/models';
+import { newModel, type CreatureModel } from '../actors/models';
+import { CROWD_HEIGHT, type Crowd, type CrowdPerson } from '../devRoom';
 import { SIZE } from './scale';
 import * as THREE from 'three';
 import { animateCreature, faceToward } from '../actors/models';
@@ -78,6 +79,10 @@ const PEOPLE: { file: HumanKind; weight: number }[] = [
   ...(['h-jack', 'h-jacklab', 'h-cadet', 'h-director', 'h-enigma', 'h-balance', 'h-azure', 'h-ember', 'h-crew1', 'h-crew2', 'h-crew3', 'h-crew4'] as HumanKind[]).map((file) => ({ file, weight: 1 })),
   ...(['h-sarah', 'h-sarah2', 'h-grace', 'h-exec', 'h-balance2'] as HumanKind[]).map((file) => ({ file, weight: 0.35 })),
 ];
+/** With the builder's women in, the story's models that walk in are these (its women's are theirs now). */
+const MEN = PEOPLE.filter((k) => !['h-enigma', 'h-balance', 'h-azure', 'h-sarah', 'h-sarah2', 'h-grace', 'h-exec', 'h-balance2'].includes(k.file));
+/** How many of the builder's women wear the cloth tee (the rest a painted one). GAME TUNING. */
+const CLOTH_SHARE = 0.7;
 /** Every model the tiny people need (downloaded when the switch goes on). */
 export const PEOPLE_FILES = PEOPLE.map((p) => p.file);
 
@@ -115,13 +120,48 @@ export class Passengers {
    * 🧍 TINY PEOPLE (v0.77): travellers are TRADDOMIUM's miniature people (the story's cast, at their true 1:180
    * size) instead of aphids. Whoever's model has arrived is in the mix; until one has, they're aphids.
    */
+  /**
+   * 👩 THE BUILDER'S WOMEN (v0.78): once the Character Builder's body has loaded, every woman who flies is one of
+   * its people (devRoom.ts's crowd: one body cloned, each with her own hair, face, height, outfit and belly), and
+   * the story's models are the men. Until then, the story's cast as before.
+   */
+  crowd: Crowd | null = null;
+  private woman(): (CreatureModel & { seats: THREE.Object3D[] }) | null {
+    // Joshua's belly sizes (2026-11-17): 82% of women 0-35%, 10% 36-50%, 5% 51-80%, 3% 81-140%
+    const r = Math.random(), within = (lo: number, hi: number) => Math.round(lo + Math.random() * (hi - lo));
+    const bump = r < 0.82 ? within(0, 35) : r < 0.92 ? within(36, 50) : r < 0.97 ? within(51, 80) : within(81, 140);
+    // (most wear the builder's cloth tee, simulated onto her and then frozen; the rest a painted one)
+    const her = this.crowd?.add({ bump, cloth: Math.random() < CLOTH_SHARE });
+    if (!her) return null;
+    const m = newModel(SIZE.person, SIZE.person * 0.3);
+    m.root.scale.setScalar(SIZE.person / CROWD_HEIGHT);
+    m.root.add(her.root);
+    m.drive = (_dt, speed) => {
+      her.speed = speed;
+    };
+    m.root.userData.crowd = her;
+    m.root.userData.bump = bump;
+    m.root.userData.sitDrop = SIZE.person * 0.47 * 0.82;
+    return Object.assign(m, { seats: [] as THREE.Object3D[] });
+  }
+  /** A traveller has gone for good: what was hers alone is let go of. */
+  gone(p: Pax) {
+    (p.model.root.userData.crowd as CrowdPerson | undefined)?.dispose();
+  }
+
   people = false;
   /** Where the camera is (the airfield keeps it up to date): people are drawn by their distance from it. */
   eye = new THREE.Vector3();
   private lodT = 0;
   private person(): (CreatureModel & { seats: THREE.Object3D[] }) | null {
-    const ready = PEOPLE.filter((k) => hasModel(k.file));
-    if (!this.people || !ready.length) return null;
+    if (!this.people) return null;
+    // (half are women: the builder's, once its body is in)
+    if (this.crowd && Math.random() < 0.5) {
+      const her = this.woman();
+      if (her) return her;
+    }
+    const ready = (this.crowd ? MEN : PEOPLE).filter((k) => hasModel(k.file));
+    if (!ready.length) return null;
     let roll = Math.random() * ready.reduce((a, k) => a + k.weight, 0);
     const pick = ready.find((k) => (roll -= k.weight) <= 0) ?? ready[0];
     const m = spawnHuman(pick.file, SIZE.person * (0.93 + Math.random() * 0.12));
@@ -160,7 +200,8 @@ export class Passengers {
   /** 👑 Make `p` a VIP: a golden aphid with a crown over its head. */
   private makeVip(p: Pax) {
     p.vip = true;
-    p.model.root.traverse((o) => {
+    // (an aphid turns gold; a person keeps her own clothes and wears the crown)
+    if (!p.model.biped && !p.model.root.userData.crowd) p.model.root.traverse((o) => {
       const m = (o as THREE.Mesh).material as THREE.MeshStandardMaterial | undefined;
       if (m && 'color' in m && (o as THREE.Mesh).isMesh) {
         const gold = m.clone();
@@ -280,6 +321,9 @@ export class Passengers {
       this.lodT = 0.25;
       const metre = SIZE.person / 1.7;
       for (const p of this.all) {
+        // (a woman of the builder's stands still once she's riding: the crowd sees to how she's drawn itself)
+        const her = p.model.root.userData.crowd as CrowdPerson | undefined;
+        if (her && p.state === 'seated') her.speed = 0;
         if (!p.model.biped) continue;
         const d = p.model.root.getWorldPosition(this.tmp).distanceTo(this.eye) / metre;
         setPersonLod(p.model, PEOPLE_LOD.findIndex((lv) => d <= lv.within));
@@ -294,6 +338,7 @@ export class Passengers {
       this.walk(p, dt);
       if (p.state === 'leaving' && p.there && !p.via.length) {
         p.model.root.removeFromParent();
+        this.gone(p);
         this.all.splice(i, 1);
       }
     }

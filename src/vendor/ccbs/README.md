@@ -33,3 +33,13 @@ Not used yet: `faceLook.ts` (eye, brow and lip colours need the builder's face l
 material, which the room's stand-in painted outfit does not carry) and the builder's sixteen painted tops
 (`topCut.ts`, `topDetails.ts`, `paintTemplates.ts`, `fabricMaterial.ts`: not copied; the room still paints its own
 stand-in tee and leggings).
+
+## The crowd in the airport (2026-11-17, compared against builder commit `764f7c7`, v0.9.40)
+
+`src/devRoom.ts` can now run inside a game's own scene (`startDevRoom({ scene, camera, renderer })`: its `Crowd`):
+the airport's female passengers are its people (`src/tycoon/passengers.ts`). Her body and hairstyles still load from
+the builder's own site, so they are always its latest; the hair, hair colour and face files copied here were compared
+with v0.9.40 and are unchanged since `6e0b67b`. Not re-copied: `softBody.ts`, `bodyRegions.ts`, `garmentCloth.ts`
+(small changes in the builder since) and the builder's newer garments (its cloth shirt, tunic and brief, its sixteen
+painted tops and the drawn bottoms): the airport's women wear the one cloth tee the DEV Room has, frozen once dressed,
+or its painted tee, over painted leggings.

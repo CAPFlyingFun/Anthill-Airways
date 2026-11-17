@@ -84,6 +84,9 @@ export async function startTycoon({ app, renderer, save, hud, sfx, input, progre
   // 1) Your colony's ants are the real 3D models (every other creature is built from code)
   await loadModels((d, t) => hud.setLoading(d / t));
   const field = new Airfield(hud, sfx, save, progress);
+  // (the builder's women are drawn with the game's own renderer: now it has one, the tiny people can start)
+  field.renderer = renderer;
+  if (field.people) field.setPeople(true, true);
 
   // 2) The HUD: one world (no switching, route board or shrine yet)
   hud.setNext(null);
