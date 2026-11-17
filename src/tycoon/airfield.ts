@@ -47,6 +47,7 @@ import { UPS, UpMenu, upPrice, type MenuRow, type UpDef } from './upgrades';
 import { Events } from './events';
 import { Guides, type GuideDef } from './guides';
 import { Quests } from './quests';
+import { seeThroughAll, setSee } from './seeThrough';
 import { trash } from '../world/trash';
 import { mat, mesh, PAL } from './kit';
 import { distToPath } from './airport/common';
@@ -309,6 +310,8 @@ export class Airfield {
 
     this.tutorial = new Tutorial(this, hud, save, this.script());
     this.buildGuides();
+    // 👀 nothing tall hides your ant (flowers, leaves, signs, walls: seeThrough.ts)
+    seeThroughAll(this.scene, [this.player.model.root]);
     hud.setCash(save.cash);
     hud.setZone('🛫 Anthill Airfield');
 
@@ -1563,6 +1566,7 @@ export class Airfield {
     delete this.save.paid[id];
     tile.mesh.visible = false;
     this.applyUnlock(id, true);
+    seeThroughAll(this.scene, [this.player.model.root]); // (whatever was just built, too)
     this.freePlayer(id);
     this.guides.offer(id);
     const hired = Airfield.HIRED[id];
@@ -1785,7 +1789,13 @@ export class Airfield {
     if (this.towerAnt) animateCreature(this.towerAnt, dt, 0);
     for (const piece of this.pieces) piece.update?.(dt);
     for (const piece of this.paved) piece.update?.(dt);
-    this.lawn.update(dt, this.camera, this.player.firstPerson ? undefined : (this.watchAt ?? this.focus));
+    if (!this.seeDone) {
+      this.seeDone = true; // (once everything from the save is standing)
+      seeThroughAll(this.scene, [this.player.model.root]);
+    }
+    const see = this.player.firstPerson ? undefined : (this.watchAt ?? this.focus);
+    this.lawn.update(dt, this.camera, see);
+    setSee(this.camera, see);
 
     const iv = CONFIG.player.pickupInterval / prog.workMult;
 
@@ -2225,6 +2235,7 @@ export class Airfield {
   // --------------------------------------------------------------------------
   // 📖 Guides, 🎯 quests and "where does this go?" (v0.73)
   // --------------------------------------------------------------------------
+  private seeDone = false;
   guides!: Guides;
   quests!: Quests;
   /** A drop of jet fuel has reached a FUEL pad (the recycler's guide), and the hangar's menu has been opened. */
