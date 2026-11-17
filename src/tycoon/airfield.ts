@@ -37,7 +37,7 @@ import { TextSprite, TITLE, makePad, titleTag } from '../world/labels';
 import { Bakery, CashPad, OVEN, ResourcePile, TrashBin, UnlockTile, Zone, gridLayout, type Blocker } from '../world/stations';
 import { TUTORIAL_DONE, Tutorial, type TutorialScript } from '../world/tutorial';
 import type { MapRect, MapView } from '../ui/minimap';
-import { AT, CLEARINGS, TY, TYCOON_SAVE_V, TY_UNLOCKS, walkable } from './data';
+import { AT, CLEARINGS, FIELDS, GATES_PER_FIELD, TY, TYCOON_SAVE_V, TY_UNLOCKS, fieldOf, walkable, type FieldDef } from './data';
 import { SURFACE, artBaggageCart, artBackdrop, artBug, artDewTank, artFuelFlower, artHangar, artScatter, artGate, artGround, artLawn, artRunway, artSign, artTaxiway, artTerminal, artTower, artWindsock, type ArtLawn, type ArtPiece } from './art';
 import { Plane } from './plane';
 import { PEOPLE_FILES, Passengers, type Pax, type Stop } from './passengers';
@@ -110,28 +110,32 @@ const HANGAR_SCALE = 1.8;
 interface PathDef {
   pts: THREE.Vector2[];
   hw: number;
-  /** Which gate's spur / link it is (-1: the main taxiway). */
+  /** Which gate's spur / link it is (-1: its field's main taxiway). */
   gate: number;
+  /** 🛫 The field it is on (v0.88). */
+  field: FieldDef;
 }
-/** Every taxiway on the airfield: the main one along the gates, then each gate's spur and runway link. */
+/** Where a field's main taxiway runs: from the runway's west end, along the north of its gates. */
+const taxiWest = (f: FieldDef) => f.runway.x - f.runway.length / 2 + 6;
+const taxiEast = (f: FieldDef) => AT.gates[f.first + GATES_PER_FIELD - 1].x + 8;
+/** Every taxiway: for each field, the main one along its gates, then each gate's spur and runway link. */
 function airfieldPaths(): PathDef[] {
-  const rw = AT.runway;
   const V = (x: number, z: number) => new THREE.Vector2(x, z);
-  const west = rw.x - rw.length / 2 + 6;
-  const east = AT.gates[AT.gates.length - 1].x + 8;
-  return [
-    { pts: [V(west, rw.z), V(west, AT.taxiZ), V(east, AT.taxiZ)], hw: 3.5, gate: -1 },
-    ...AT.gates.flatMap((g, i) => [
-      { pts: [V(g.x, AT.taxiZ), V(g.x, g.z - 6)], hw: 3, gate: i },
-      { pts: [V(linkX(g.x), AT.taxiZ), V(linkX(g.x), rw.z)], hw: 3, gate: i },
-    ]),
-  ];
+  return FIELDS.flatMap((f) => {
+    const rw = f.runway, west = taxiWest(f), east = taxiEast(f);
+    return [
+      { pts: [V(west, rw.z), V(west, f.taxiZ), V(east, f.taxiZ)], hw: 3.5, gate: -1, field: f },
+      ...AT.gates.slice(f.first, f.first + GATES_PER_FIELD).flatMap((g, k) => [
+        { pts: [V(g.x, f.taxiZ), V(g.x, g.z - 6)], hw: 3, gate: f.first + k, field: f },
+        { pts: [V(linkX(g.x), f.taxiZ), V(linkX(g.x), rw.z)], hw: 3, gate: f.first + k, field: f },
+      ]),
+    ];
+  });
 }
 const PATHS = airfieldPaths();
-/** On the runway (or within `pad` of it)? */
-function onRunway(x: number, z: number, pad = 0) {
-  const rw = AT.runway;
-  return Math.abs(x - rw.x) < rw.length / 2 + pad && Math.abs(z - rw.z) < rw.width / 2 + pad;
+/** On a field's runway (or within `pad` of it)? Without a field: on any runway. */
+function onRunway(x: number, z: number, pad = 0, field?: FieldDef) {
+  return (field ? [field] : FIELDS).some((f) => Math.abs(x - f.runway.x) < f.runway.length / 2 + pad && Math.abs(z - f.runway.z) < f.runway.width / 2 + pad);
 }
 /** On one of `paths` (or within `pad` of it)? */
 function onPaths(x: number, z: number, paths: PathDef[], pad = 0) {
@@ -201,7 +205,7 @@ export class Airfield {
   private checkInAnt: CreatureModel | null = null;
   /** 🎧 The Tower ant (clears waiting planes by itself), and who's on the runway right now. */
   private towerAnt: CreatureModel | null = null;
-  private runwayUser: Plane | null = null;
+  private runwayUser: (Plane | null)[] = FIELDS.map(() => null);
   /** 🧳 The BAG DROP outside the terminal's airside doorway. */
   private bagDrop!: Stack;
   private bagDropZone!: Zone;
@@ -239,7 +243,7 @@ export class Airfield {
     this.scene.add(serve);
     this.buildBagDrop();
 
-    AT.flowers.forEach((f, i) => this.buildFlower(f.x, f.z, i === 0 || this.owns('ty-flower2')));
+    AT.flowers.forEach((f, i) => this.buildFlower(f.x, f.z, i === 0 || this.owns(`ty-flower${i + 1}`)));
     AT.gates.forEach((g, i) => this.buildGate(g.x, g.z, i, i === 0 || this.owns(`ty-gate${i + 1}`)));
     this.pax = new Passengers(
       this.scene,
@@ -251,6 +255,8 @@ export class Airfield {
         gateWait: this.gates.map((g) => g.piece.root.localToWorld(g.piece.spots.gate.clone())),
         inbound: [desk.door],
         outbound: [desk.inside, desk.exit],
+        // 🚸 (the north field's gates are over the crossing: out by its south end, back by its north)
+        cross: (g) => (g >= GATES_PER_FIELD ? [new THREE.Vector3(AT.crossing.x, 0, AT.crossing.south), new THREE.Vector3(AT.crossing.x, 0, AT.crossing.north)] : []),
       },
       AT.gates.length,
       this.groundY,
@@ -347,21 +353,29 @@ export class Airfield {
     }
   }
 
+  /** 🛫 Is this field built? (The first always; the north field with Gate 5.) */
+  private fieldOpen(f: FieldDef) {
+    return !f.unlock || this.owns(f.unlock);
+  }
   /** How high the surface is at (x, z): the runway and taxiways are raised a little above the dirt. */
   groundY = (x: number, z: number) => {
     // inside the 🐚 terminal: its floor (a fan 22 from the hinge, ±60°, the hinge 11 behind its centre)
     const lx = x - AT.terminal.x;
     const lz = z - AT.terminal.z + 11;
     if (lz > 0 && Math.hypot(lx, lz) < 21 && Math.abs(Math.atan2(lx, lz)) < Math.PI / 3) return 0.5;
-    const rw = AT.runway;
-    if (Math.abs(x - rw.x) < rw.length / 2 && Math.abs(z - rw.z) < rw.width / 2) return SURFACE.runway;
-    const west = rw.x - rw.length / 2 + 6;
-    const east = AT.gates[AT.gates.length - 1].x + 8;
-    const onTaxi =
-      (Math.abs(z - AT.taxiZ) < 3.5 && x > west - 3.5 && x < east + 3.5) ||
-      (Math.abs(x - west) < 3.5 && z < AT.taxiZ && z > rw.z) ||
-      AT.gates.some((g) => (Math.abs(x - g.x) < 3 && z > AT.taxiZ && z < g.z - 6) || (Math.abs(x - linkX(g.x)) < 3 && z < AT.taxiZ && z > rw.z));
-    return onTaxi ? SURFACE.taxiway : 0;
+    // (🛫 each field that is built: its runway, its main taxiway, its gates' spurs and links)
+    for (const f of FIELDS) {
+      if (!this.fieldOpen(f)) continue;
+      const rw = f.runway;
+      if (Math.abs(x - rw.x) < rw.length / 2 && Math.abs(z - rw.z) < rw.width / 2) return SURFACE.runway;
+      const west = taxiWest(f), east = taxiEast(f);
+      const onTaxi =
+        (Math.abs(z - f.taxiZ) < 3.5 && x > west - 3.5 && x < east + 3.5) ||
+        (Math.abs(x - west) < 3.5 && z < f.taxiZ && z > rw.z) ||
+        AT.gates.slice(f.first, f.first + GATES_PER_FIELD).some((g) => (Math.abs(x - g.x) < 3 && z > f.taxiZ && z < g.z - 6) || (Math.abs(x - linkX(g.x)) < 3 && z < f.taxiZ && z > rw.z));
+      if (onTaxi) return SURFACE.taxiway;
+    }
+    return 0;
   };
 
   // --------------------------------------------------------------------------
@@ -387,8 +401,9 @@ export class Airfield {
     s.add(artBackdrop(480));
     // Pebbles, fallen leaves and twigs lying about the dirt (kept off the runway, paths and stations)
     const busy = (x: number, z: number) =>
-      Math.abs(z - AT.runway.z) < 16 ||
-      Math.abs(z - AT.taxiZ) < 7 ||
+      FIELDS.some((f) => Math.abs(z - f.runway.z) < 16 || Math.abs(z - f.taxiZ) < 7) ||
+      (Math.abs(x - AT.crossing.x) < 10 && z < -10) || // (🚸 nor on the way to the crossing)
+      z < AT.runway.z - 12 || // (🛫 nothing lying about on the north field's apron: planes and travellers use all of it)
       Math.hypot(x - AT.terminal.x, z - AT.terminal.z) < 34 ||
       Math.hypot(x - AT.nest.x, z - AT.nest.z) < 16 ||
       AT.gates.some((g) => Math.abs(x - g.x) < 12 && z > g.z - 30 && z < g.z + 8) ||
@@ -492,7 +507,6 @@ export class Airfield {
    * are open, so they're rebuilt when a gate is bought (buildPaved).
    */
   private buildRunway() {
-    const rw = AT.runway;
     this.buildPaved();
     PATHS.filter((p) => p.gate >= 0).forEach((path) => {
       const others = PATHS.filter((p) => p !== path);
@@ -508,6 +522,7 @@ export class Airfield {
     });
     AT.gates.forEach((g, i) => {
       // 🗼 the HOLD line across the link: two solid + two dashed yellow petal stripes (planes wait behind it)
+      const rw = fieldOf(i).runway;
       const hold = new THREE.Group();
       const yellow = mat(0xffd24a, { rough: 0.6 });
       const z0 = rw.z + rw.width / 2 + 0.2;
@@ -522,6 +537,24 @@ export class Airfield {
       this.scene.add(hold);
       this.gateRoads[i].push(hold);
     });
+    this.buildCrossing();
+  }
+
+  /**
+   * 🚸 The crossing (v0.88): white petal stripes over the first field's taxiway and runway, west of Gate 1's link,
+   * where travellers (and you) walk over to the north field. Shown once the north field is built.
+   */
+  private crossing = new THREE.Group();
+  private buildCrossing() {
+    const c = AT.crossing, white = mat(0xf4f1e6, { rough: 0.7 });
+    for (let z = c.south - 1; z >= c.north + 1; z -= 2.2) {
+      const on = onRunway(c.x, z, 0, FIELDS[0]) ? SURFACE.runway : Math.abs(z - FIELDS[0].taxiZ) < 3.5 ? SURFACE.taxiway : 0;
+      const bar = mesh(new THREE.BoxGeometry(5, 0.05, 1.1), white, false);
+      bar.position.set(c.x, on + 0.04, z);
+      this.crossing.add(bar);
+    }
+    this.scene.add(this.crossing);
+    shown(this.crossing, this.fieldOpen(FIELDS[1]));
   }
 
   /** 🧳 The BAG DROP: a pad just outside the terminal's airside doorway, where checked-in bags pile up. */
@@ -543,27 +576,35 @@ export class Airfield {
   /** Each gate's spur + runway link (hidden until the gate is bought). */
   private gateRoads: THREE.Object3D[][] = [];
 
-  /** The runway + the main taxiway, and which gates' junctions they were built open for. */
-  private paved: ArtPiece[] = [];
-  private pavedFor = '';
-  /** (Re)build the runway and the main taxiway with an opening at each OPEN gate's link and spur. */
+  /** Each field's runway + main taxiway, and which gates' junctions they were built open for. */
+  private paved: ArtPiece[][] = FIELDS.map(() => []);
+  private pavedFor: string[] = FIELDS.map(() => '');
+  /** (Re)build each built field's runway and main taxiway with an opening at each OPEN gate's link and spur. */
   private buildPaved() {
-    const open = AT.gates.map((_, i) => i === 0 || this.owns(`ty-gate${i + 1}`));
-    const key = open.map((o) => (o ? 1 : 0)).join('');
-    if (key === this.pavedFor) return;
-    this.pavedFor = key;
-    for (const p of this.paved) p.root.removeFromParent();
-    const rw = AT.runway;
-    const main = PATHS[0];
-    const joining = PATHS.filter((p) => p.gate >= 0 && open[p.gate]);
-    const runway = artRunway(rw.length, rw.width, (x, z) => onPaths(x + rw.x, z + rw.z, [main, ...joining], 1));
-    runway.root.position.set(rw.x, 0, rw.z);
-    const taxi = artTaxiway(main.pts, main.hw * 2, {
-      keepClear: (x, z) => onRunway(x, z, 1) || onPaths(x, z, joining, 1),
-      noDash: (x, z) => onRunway(x, z, 0.5),
+    FIELDS.forEach((f, k) => {
+      const open = AT.gates.map((_, i) => i === 0 || this.owns(`ty-gate${i + 1}`));
+      const mine = PATHS.filter((p) => p.field === f);
+      // 🚸 (the first field's borders are left open where the crossing goes over them, once there is a north field)
+      const cross = k === 0 && this.fieldOpen(FIELDS[1]);
+      const onCross = (x: number) => cross && Math.abs(x - AT.crossing.x) < 3.4;
+      const key = this.fieldOpen(f) ? mine.filter((p) => p.gate >= 0).map((p) => (open[p.gate] ? 1 : 0)).join('') + (cross ? 'x' : '') : 'none';
+      if (key === this.pavedFor[k]) return;
+      this.pavedFor[k] = key;
+      for (const p of this.paved[k]) p.root.removeFromParent();
+      this.paved[k] = [];
+      if (!this.fieldOpen(f)) return;
+      const rw = f.runway;
+      const main = mine[0];
+      const joining = mine.filter((p) => p.gate >= 0 && open[p.gate]);
+      const runway = artRunway(rw.length, rw.width, (x, z) => onCross(x + rw.x) || onPaths(x + rw.x, z + rw.z, [main, ...joining], 1));
+      runway.root.position.set(rw.x, 0, rw.z);
+      const taxi = artTaxiway(main.pts, main.hw * 2, {
+        keepClear: (x, z) => onCross(x) || onRunway(x, z, 1, f) || onPaths(x, z, joining, 1),
+        noDash: (x, z) => onRunway(x, z, 0.5, f),
+      });
+      this.paved[k] = [runway, taxi];
+      for (const p of this.paved[k]) this.scene.add(p.root);
     });
-    this.paved = [runway, taxi];
-    for (const p of this.paved) this.scene.add(p.root);
   }
 
   /**
@@ -1275,7 +1316,7 @@ export class Airfield {
     const stand = this.worldSpot(piece, 'plane', new THREE.Vector3(x, 0, z - 6));
     const model = this.planeModel(i);
     this.scene.add(model.root);
-    const plane = new Plane(model, stand, linkX(x), this.groundY, i);
+    const plane = new Plane(model, stand, linkX(x), this.groundY, i % GATES_PER_FIELD, fieldOf(i));
     // ⛽ the fuel pad beside the stand
     const fuelAt = stand.clone().add(new THREE.Vector3(6.5, 0, 2));
     const pad = makePad(3, 3, 'FUEL', '#ffb02e');
@@ -1355,7 +1396,7 @@ export class Airfield {
       plane.unseat(this.scene);
       for (const p of gate.riders) {
         p.state = 'leaving';
-        this.pax.leave(p, [...gate.path].reverse());
+        this.pax.leave(p, [...gate.path].reverse(), this.gates.indexOf(gate));
         this.bill(TY.landingFee * (plane.inbound?.fare ?? 1), plane.pos);
       }
       gate.riders = [];
@@ -1390,6 +1431,7 @@ export class Airfield {
     this.place(artBaggageCart(), 64, -14, 0.6);
     this.place(artSign('ANTHILL AIRWAYS'), AT.terminal.x - 30, AT.terminal.z + 24, 0.5);
     this.place(artSign('GATES', 'up'), -64, -14, 0.3);
+    this.place(artSign('NORTH FIELD'), -70, -27, 0.2); // (🚸 by the crossing's south end)
   }
 
   // --------------------------------------------------------------------------
@@ -1401,7 +1443,7 @@ export class Airfield {
 
   private applyUnlock(id: string, animate: boolean) {
     const nest = new THREE.Vector3(AT.nest.x, 0, AT.nest.z + 7);
-    if (id === 'ty-runner' || id === 'ty-runner2' || id === 'ty-runner3') {
+    if (/^ty-runner\d?$/.test(id)) {
       const w = new Worker(this.scene, nest.x, nest.z, () => this.fuelRoute(), { color: 0xffb02e }, 2.1);
       Object.assign(w.model.root.userData, { job: 'fuel', carry0: w.baseCarry });
       titleTag(w.model, '⛽ FUEL RUNNER', TITLE.ant);
@@ -1415,7 +1457,7 @@ export class Airfield {
       this.scene.add(a.root);
       this.checkInAnt = a;
       if (animate) this.flyers.grow(a.root);
-    } else if (id === 'ty-bags' || id === 'ty-bags2' || id === 'ty-bags3') {
+    } else if (/^ty-bags\d?$/.test(id)) {
       // 🧳 carries seed-bags from the BAG DROP to the gate that needs them most
       const w = new Worker(this.scene, nest.x, nest.z, () => this.bagRoute(), { color: 0x5fb4ff }, 2.1);
       w.baseCarry = w.stack.max = TY.bagCarry;
@@ -1443,15 +1485,18 @@ export class Airfield {
       titleTag(b.model, '🏦 BANKER', TITLE.ant);
       this.bankers.push(b);
       if (animate) this.flyers.grow(b.model.root);
-    } else if (id === 'ty-flower2') {
-      const f = this.flowers[1];
+    } else if (id === 'ty-flower2' || id === 'ty-flower3') {
+      const f = this.flowers[Number(id.slice(-1)) - 1];
       if (!f.piece.root.visible) this.blockers.push(...(f.piece.root.userData.walls as Blocker[]));
       shown(f.piece.root, true);
       shown((f.piece.root.userData.label as TextSprite).sprite, true);
       if (animate) this.flyers.grow(f.piece.root);
-    } else if (id === 'ty-gate2' || id === 'ty-gate3' || id === 'ty-gate4') {
+    } else if (/^ty-gate\d$/.test(id)) {
       const n = Number(id.slice(-1)) - 1;
       const g = this.gates[n];
+      // 🛫 (Gate 5 builds the north field: its runway and taxiway are laid, and the crossing to it is painted)
+      shown(this.crossing, this.fieldOpen(FIELDS[1]));
+      if (animate && id === 'ty-gate5') this.hud.banner('🛫 The NORTH FIELD is open!', 'A second runway and Gate 5: walk over the 🚸 crossing, west of Gate 1', 4200);
       this.buildPaved(); // (open the runway's and the taxiway's borders where this gate's paths join them)
       g.open = true;
       for (const o of [g.piece.root, g.plane.model.root, g.piece.root.userData.pad as THREE.Object3D, g.label.sprite, ...(g.piece.root.userData.link as THREE.Object3D[]), ...(g.piece.root.userData.bags as THREE.Object3D[])]) shown(o, true);
@@ -1544,9 +1589,13 @@ export class Airfield {
   /** ⛽ The fullest open flower -> the open gate with the least fuel. */
   private fuelRoute() {
     const flowers = this.flowers.filter((f) => f.piece.root.visible);
-    const f = flowers.reduce((a, b) => (b.stack.count > a.stack.count ? b : a), flowers[0]);
     const gates = this.gates.filter((g) => g.open);
     const g = gates.reduce((a, b) => (this.fuelUnits(b) < this.fuelUnits(a) ? b : a), gates[0]);
+    // (v0.88: the nearest flower to that gate that has a flight's worth of nectar: the fullest, if none has.
+    // With one field the fullest was always near enough; the north field's flower is a long walk from Gate 1)
+    const far = (f: (typeof flowers)[number]) => Math.hypot(f.zone.x - g.fuelZone.x, f.zone.z - g.fuelZone.z);
+    const ready = flowers.filter((x) => x.stack.count >= TY.fuelPerFlight);
+    const f = ready.length ? ready.reduce((a, b) => (far(b) < far(a) ? b : a)) : flowers.reduce((a, b) => (b.stack.count > a.stack.count ? b : a), flowers[0]);
     // (♻️ jet fuel waiting at the recycler goes first)
     const r = this.recycler;
     if (r.open && r.output.count > 0) return { src: r.output, srcZone: r.outZone, dst: g.fuel, dstZone: g.fuelZone };
@@ -1567,6 +1616,11 @@ export class Airfield {
     'ty-banker': ['🏦 Banker hired!', 'He carries the cash from the pad to your wallet: income while you work'],
     'ty-runner2': ['⛽ Fuel Runner 2 hired!', 'Flower → the gate with the least fuel, by himself'],
     'ty-runner3': ['⛽ Fuel Runner 3 hired!', 'Flower → the gate with the least fuel, by himself'],
+    'ty-runner4': ['⛽ Fuel Runner 4 hired!', 'The nearest flower with nectar → the gate with the least fuel'],
+    'ty-runner5': ['⛽ Fuel Runner 5 hired!', 'The nearest flower with nectar → the gate with the least fuel'],
+    'ty-bags4': ['🧳 Baggage Ant 4 hired!', 'BAG DROP → the gate that needs bags most'],
+    'ty-bags5': ['🧳 Baggage Ant 5 hired!', 'BAG DROP → the gate that needs bags most'],
+    'ty-flower3': ['🌼 Nectar Flower 3 is growing!', 'Nectar for the north field, right beside its gates'],
     'ty-bags2': ['🧳 Baggage Ant 2 hired!', 'BAG DROP → the gate that needs bags most'],
     'ty-bags3': ['🧳 Baggage Ant 3 hired!', 'BAG DROP → the gate that needs bags most'],
     'ty-crumbs': ['🍪 Crumb Runner hired!', 'Picnic crumbs → the kitchen\'s IN pad: the café runs by itself now'],
@@ -1873,7 +1927,7 @@ export class Airfield {
     if (this.checkInAnt) animateCreature(this.checkInAnt, dt, 0);
     if (this.towerAnt) animateCreature(this.towerAnt, dt, 0);
     for (const piece of this.pieces) piece.update?.(dt);
-    for (const piece of this.paved) piece.update?.(dt);
+    for (const piece of this.paved.flat()) piece.update?.(dt);
     if (!this.seeDone) {
       this.seeDone = true; // (once everything from the save is standing)
       seeThroughAll(this.scene, [this.player.model.root]);
@@ -2122,20 +2176,23 @@ export class Airfield {
    */
   private updateRunway() {
     const open = this.gates.filter((g) => g.open);
-    if (this.runwayUser && !this.runwayUser.onRunway) this.runwayUser = null;
     for (const g of open) {
       const p = g.plane;
       if (p.waiting && !p.cleared && p.waitT >= TY.towerDelay) p.clear();
     }
-    if (this.runwayUser || this.events.runwayBlocked) return; // (🦎 nobody uses the runway while the lizard's on it)
-    const next = open
-      .map((g) => g.plane)
-      .filter((p) => p.waiting && p.cleared)
-      .sort((a, b) => (a.state === 'holding' ? 0 : 1) - (b.state === 'holding' ? 0 : 1) || a.clearedAt - b.clearedAt)[0];
-    if (next) {
-      next.grant();
-      this.runwayUser = next;
-    }
+    // 🛫 (v0.88: each field's runway is handed out by itself: the north field never waits for the first)
+    FIELDS.forEach((f, k) => {
+      if (this.runwayUser[k] && !this.runwayUser[k]!.onRunway) this.runwayUser[k] = null;
+      if (this.runwayUser[k] || (k === 0 && this.events.runwayBlocked)) return; // (🦎 nobody uses the first runway while the lizard's on it)
+      const next = open
+        .map((g) => g.plane)
+        .filter((p) => p.field === f && p.waiting && p.cleared)
+        .sort((a, b) => (a.state === 'holding' ? 0 : 1) - (b.state === 'holding' ? 0 : 1) || a.clearedAt - b.clearedAt)[0];
+      if (next) {
+        next.grant();
+        this.runwayUser[k] = next;
+      }
+    });
   }
 
   // --------------------------------------------------------------------------
@@ -2286,7 +2343,6 @@ export class Airfield {
   // 🗺️ The minimap
   // --------------------------------------------------------------------------
   mapView(): MapView {
-    const rw = AT.runway;
     const markers = [
       { x: AT.terminal.x, z: AT.terminal.z, icon: '🐚', label: 'Terminal' },
       { x: AT.nest.x, z: AT.nest.z, icon: '🐜', label: 'Colony' },
@@ -2310,7 +2366,7 @@ export class Airfield {
     return {
       areas: [
         ...CLEARINGS.map((c) => ({ rect: { minX: c.x - c.r * 0.8, maxX: c.x + c.r * 0.8, minZ: c.z - c.r * 0.8, maxZ: c.z + c.r * 0.8 }, fill: '#c9a46c' })),
-        { rect: { minX: rw.x - rw.length / 2, maxX: rw.x + rw.length / 2, minZ: rw.z - rw.width / 2, maxZ: rw.z + rw.width / 2 }, fill: '#8a7558', label: 'RUNWAY' },
+        ...FIELDS.filter((f) => this.fieldOpen(f)).map(({ runway: rw }, k) => ({ rect: { minX: rw.x - rw.length / 2, maxX: rw.x + rw.length / 2, minZ: rw.z - rw.width / 2, maxZ: rw.z + rw.width / 2 }, fill: '#8a7558', label: k ? 'RUNWAY 2' : 'RUNWAY' })),
       ],
       trees: [],
       fences: [],
@@ -2528,9 +2584,8 @@ export class Airfield {
   /** What each building covers (its tile sits at its centre): buying it moves you out to its front. */
   private static FOOT: Record<string, { x: number; z: number; r: number; dx?: number; dz?: number }> = {
     'ty-flower2': { ...AT.flowers[1], r: 4.5 },
-    'ty-gate2': { ...AT.gates[1], r: 9 },
-    'ty-gate3': { ...AT.gates[2], r: 9 },
-    'ty-gate4': { ...AT.gates[3], r: 9 },
+    'ty-flower3': { ...AT.flowers[2], r: 4.5 },
+    ...Object.fromEntries(AT.gates.slice(1).map((g, i) => [`ty-gate${i + 2}`, { ...g, r: 9 }])),
     'ty-cafe': { ...AT.oven, r: 5 },
     'ty-recycler': { ...AT.recycler, r: 5.5 },
     'ty-hangar': { ...AT.hangar, r: 16, dx: -1, dz: 0.45 },

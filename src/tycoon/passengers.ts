@@ -44,6 +44,8 @@ export class Pax {
   route: THREE.Vector3[] | null = null;
   routeTo = new THREE.Vector3();
   routeOn = -1;
+  /** Climbing down off a plane: how many of its waypoints are the gate's bridge and ramp (the rest are on the ground). */
+  offBridge = 0;
   constructor(public model: ArtBug) {}
   get pos() {
     return this.model.root.position;
@@ -63,6 +65,8 @@ export interface FlowSpots {
    *  (through the terminal's airside doorway), so nobody walks through a wall. */
   inbound: THREE.Vector3[];
   outbound: THREE.Vector3[];
+  /** 🚸 More waypoints on the way out to gate `g` (v0.88: the crossing to the north field), walked back the other way by arrivals. */
+  cross?: (g: number) => THREE.Vector3[];
 }
 
 /**
@@ -234,10 +238,11 @@ export class Passengers {
   }
 
   /** Climbed down off a plane: walk away into the lawn. */
-  leave(p: Pax, path: THREE.Vector3[] = []) {
+  leave(p: Pax, path: THREE.Vector3[] = [], gate = -1) {
     p.state = 'leaving';
-    // (off the plane along the bridge and down its ramp, then out)
-    p.via = [...path.map((v) => v.clone()), this.spots.exit.clone()];
+    // (off the plane along the bridge and down its ramp, back over the crossing from a north gate, then out)
+    p.via = [...path.map((v) => v.clone()), ...this.wayOut(gate).reverse(), this.spots.exit.clone()];
+    p.offBridge = path.length;
     p.target.copy(p.via[0]);
     p.there = false;
   }
@@ -255,6 +260,11 @@ export class Passengers {
       p.there = false;
     }
     return called;
+  }
+
+  /** 🚸 The crossing's waypoints on the way out to gate `g` (none for the first field's gates). */
+  private wayOut(g: number) {
+    return g >= 0 ? (this.spots.cross?.(g) ?? []).map((v) => v.clone()) : [];
   }
 
   /** The line spot `i` places back from the desk. */
@@ -299,7 +309,7 @@ export class Passengers {
         // its stops first (the café, the shop, the lounge for a VIP), then out through the airside doorway
         front.stops = this.stops.filter((s) => s.who(front));
         front.stopT = 0;
-        front.via = front.stops.length ? [] : this.spots.outbound.map((v) => v.clone());
+        front.via = front.stops.length ? [] : [...this.spots.outbound.map((v) => v.clone()), ...this.wayOut(gate)];
         this.atGate[gate].push(front);
         this.onCheckIn(front);
       }
@@ -322,7 +332,7 @@ export class Passengers {
             p.stops.shift();
             p.stopT = 0;
             p.there = false;
-            if (!p.stops.length) p.via = this.spots.outbound.map((v) => v.clone());
+            if (!p.stops.length) p.via = [...this.spots.outbound.map((v) => v.clone()), ...this.wayOut(g)];
           }
         }
         return;
@@ -368,6 +378,7 @@ export class Passengers {
     if (!p.via.length) return false;
     if (p.there && p.target.distanceTo(p.via[0]) < 0.01) {
       p.via.shift();
+      if (p.offBridge > 0) p.offBridge--;
       p.there = false;
       if (!p.via.length) return false;
     }
@@ -400,7 +411,7 @@ export class Passengers {
     }
     p.there = false;
     // 🧭 on the ground it follows a path; on a gate's bridge and ramp (boarding, climbing down) its waypoints are the way
-    const onGround = p.state !== 'boarding' && !(p.state === 'leaving' && p.via.length > 1);
+    const onGround = p.state !== 'boarding' && !(p.state === 'leaving' && p.offBridge > 0);
     if (this.nav && onGround) {
       if (!p.route || p.routeOn !== this.nav.version || p.routeTo.distanceToSquared(p.target) > 0.04) {
         p.route = this.nav.path(p.pos, p.target);

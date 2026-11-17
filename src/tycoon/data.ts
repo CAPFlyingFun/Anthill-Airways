@@ -107,11 +107,20 @@ export const AT = {
     { x: -10, z: -16 },
     { x: 14, z: -16 },
     { x: 38, z: -16 },
+    // (v0.88 🛫 THE NORTH FIELD: Gates 5 to 8, the same row again on the far side of the runway, with a runway of their own)
+    { x: -34, z: -100 },
+    { x: -10, z: -100 },
+    { x: 14, z: -100 },
+    { x: 38, z: -100 },
   ],
   flowers: [
     { x: 12, z: 16 },
     { x: 32, z: 12 },
+    // (v0.88: the north field's own nectar flower, east of Gate 8)
+    { x: 64, z: -94 },
   ],
+  /** 🚸 The crossing over the runway and its taxiway (v0.88): where travellers and ants walk to the north field. */
+  crossing: { x: -62, south: -29, north: -73 },
   /** 🍪 The café's kitchen (an oven outside the terminal's west wall) and its crumb pile (picnic crumbs). */
   oven: { x: -42, z: 0 },
   crumbs: { x: -60, z: 14 },
@@ -150,6 +159,33 @@ export const AT = {
   lawnExit: { x: -84, z: 18 },
 } as const;
 
+/**
+ * v0.88 🛫 THE FIELDS. Joshua, maxed out: "we should add more to the game"; of the bigger airport, "Yes! Keep going".
+ * The airport is two fields now: the first, as it always was (Gates 1 to 4 and their runway), and the NORTH FIELD
+ * beyond it: Gates 5 to 8 in the same row again, 84 units further north, with their own taxiway, their own runway
+ * and their own holding pattern. Each runway takes one bug at a time, so the north field's planes never wait for
+ * the first field's. A plane, a taxiway and a HOLD line belong to their gate's field (`fieldOf`).
+ */
+export interface FieldDef {
+  runway: { x: number; z: number; length: number; width: number };
+  taxiZ: number;
+  hold: { x: number; z: number };
+  /** Its first gate's number (from 0), and the tile that builds it (null: there from the start). */
+  first: number;
+  unlock: string | null;
+}
+export const GATES_PER_FIELD = 4;
+export const NORTH_BY = -84;
+export const FIELDS: FieldDef[] = [
+  { runway: AT.runway, taxiZ: AT.taxiZ, hold: AT.hold, first: 0, unlock: null },
+  {
+    runway: { ...AT.runway, z: AT.runway.z + NORTH_BY }, taxiZ: AT.taxiZ + NORTH_BY, hold: { x: AT.hold.x, z: AT.hold.z + NORTH_BY },
+    first: GATES_PER_FIELD, unlock: 'ty-gate5',
+  },
+];
+/** The field gate `i` (from 0) belongs to. */
+export const fieldOf = (gate: number) => FIELDS[Math.min(FIELDS.length - 1, Math.floor(gate / GATES_PER_FIELD))];
+
 /** The bare-dirt clearings in the lawn (circles): the airfield, the camera side, and the runway strip. */
 export const CLEARINGS = [
   { x: 0, z: 0, r: 74 },
@@ -158,6 +194,9 @@ export const CLEARINGS = [
   // (v0.72.1: the 🛖 hangar's ground, so the grass doesn't lean in over its back wall)
   { x: 70, z: 6, r: 25 },
   ...[-100, -55, -10, 35, 80, 115].map((x) => ({ x, z: -58, r: 34 })),
+  // (v0.88: the north field: its gates' apron, and its runway's strip)
+  ...[-64, -22, 20, 62].map((x) => ({ x, z: -102, r: 38 })),
+  ...[-100, -55, -10, 35, 80, 115].map((x) => ({ x, z: AT.runway.z + NORTH_BY, r: 34 })),
 ];
 
 /** Where you can walk: inside the clearings, a little in from their edges. */
@@ -198,4 +237,14 @@ export const TY_UNLOCKS: UnlockDef[] = [
   { id: 'ty-shop', name: 'Pollen Gift Shop', icon: '🎁', cost: 600, pos: [2, 16], requires: ['ty-cafe'], level: 5 },
   { id: 'ty-lounge', name: 'VIP Lounge (VIPs pay ×3)', icon: '👑', cost: 1500, pos: [-20, -1], requires: ['ty-gate2'], level: 7 },
   { id: 'ty-bags3', name: 'Baggage Ant 3', icon: '🧳', cost: 750, pos: [4, -6], requires: ['ty-gate3', 'ty-bags2'] },
+  // ---- v0.88: 🛫 the north field: a second runway and Gates 5 to 8, and help to keep them running ----
+  { id: 'ty-gate5', name: 'North Field: Runway 2 + Gate 5', icon: '🛫', cost: 60000, pos: [-34, -100], requires: ['ty-gate4'], level: 16 },
+  { id: 'ty-gate6', name: 'Gate 6 + Plane', icon: '✈️', cost: 45000, pos: [-10, -100], requires: ['ty-gate5'], level: 18 },
+  { id: 'ty-gate7', name: 'Gate 7 + Plane', icon: '✈️', cost: 65000, pos: [14, -100], requires: ['ty-gate6'], level: 20 },
+  { id: 'ty-gate8', name: 'Gate 8 + Plane', icon: '✈️', cost: 90000, pos: [38, -100], requires: ['ty-gate7'], level: 22 },
+  { id: 'ty-flower3', name: 'Nectar Flower 3 (north field)', icon: '🌼', cost: 15000, pos: [64, -94], requires: ['ty-gate5'] },
+  { id: 'ty-runner4', name: 'Fuel Runner 4', icon: '⛽', cost: 12000, pos: [54, -84], requires: ['ty-flower3'] },
+  { id: 'ty-bags4', name: 'Baggage Ant 4', icon: '🧳', cost: 12000, pos: [-52, -84], requires: ['ty-gate5'] },
+  { id: 'ty-runner5', name: 'Fuel Runner 5', icon: '⛽', cost: 20000, pos: [48, -78], requires: ['ty-runner4', 'ty-gate7'] },
+  { id: 'ty-bags5', name: 'Baggage Ant 5', icon: '🧳', cost: 20000, pos: [-44, -78], requires: ['ty-bags4', 'ty-gate7'] },
 ];

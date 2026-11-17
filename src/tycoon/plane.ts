@@ -23,7 +23,7 @@
 import * as THREE from 'three';
 import { animateCreature, faceToward } from '../actors/models';
 import type { ArtBug } from './art';
-import { AT, TY } from './data';
+import { FIELDS, TY, type FieldDef } from './data';
 
 export type PlaneState = 'parked' | 'taxiOut' | 'hold' | 'lineUp' | 'takeoff' | 'route' | 'holding' | 'landing' | 'taxiIn';
 
@@ -81,10 +81,14 @@ export class Plane {
    * landing: short trips, so planes turn around fast). `ground(x, z)` = how high the surface is there.
    * `slot` = its gate's number from 0 (keeps planes apart in the holding pattern).
    */
-  constructor(public model: ArtBug, park: THREE.Vector3, private link: number, private ground: (x: number, z: number) => number = () => 0, private slot = 0) {
+  constructor(
+    public model: ArtBug, park: THREE.Vector3, private link: number, private ground: (x: number, z: number) => number = () => 0, private slot = 0,
+    /** 🛫 Its field (v0.88): the runway it uses, the taxiway it walks, where it circles. */
+    readonly field: FieldDef = FIELDS[0],
+  ) {
     this.home = park.clone();
     this.riders = model.seats.map(() => null);
-    const rw = AT.runway;
+    const rw = field.runway;
     this.rwStart = rw.x - rw.length / 2 + 14;
     this.rwEnd = rw.x + rw.length / 2 - 14;
     this.park();
@@ -188,8 +192,8 @@ export class Plane {
   depart() {
     if (this.state !== 'parked') return;
     const h = this.home;
-    const tz = AT.taxiZ;
-    this.path = [v3(h.x, 0, tz), v3(this.link, 0, tz), v3(this.link, 0, Plane.holdZ)];
+    const tz = this.field.taxiZ;
+    this.path = [v3(h.x, 0, tz), v3(this.link, 0, tz), v3(this.link, 0, this.holdZ)];
     this.state = 'taxiOut';
     this.waitT = 0;
   }
@@ -205,7 +209,7 @@ export class Plane {
   /** The runway is ours (the airfield's Runway gives it to one cleared plane at a time). */
   grant() {
     this.cleared = false;
-    const rz = AT.runway.z;
+    const rz = this.field.runway.z;
     if (this.state === 'hold') {
       this.state = 'lineUp';
       this.path = [v3(this.link, 0, rz), v3(this.link + 2, 0, rz)];
@@ -244,9 +248,9 @@ export class Plane {
             this.state = 'takeoff';
             this.speed = 2;
             this.path = [
-              v3(this.link + 44, this.ground(this.link + 44, AT.runway.z), AT.runway.z),
-              v3(this.rwEnd + 40, TY.cruiseAlt * 0.6, AT.runway.z - 10),
-              v3(this.rwEnd + 140, TY.cruiseAlt, AT.runway.z - 120),
+              v3(this.link + 44, this.ground(this.link + 44, this.field.runway.z), this.field.runway.z),
+              v3(this.rwEnd + 40, TY.cruiseAlt * 0.6, this.field.runway.z - 10),
+              v3(this.rwEnd + 140, TY.cruiseAlt, this.field.runway.z - 120),
             ];
           } else {
             this.park();
@@ -287,7 +291,7 @@ export class Plane {
           this.setInSight(true);
           m.flying = true;
           m.bob.rotation.x = 0;
-          const c = AT.hold;
+          const c = this.field.hold;
           this.pos.set(c.x - 44, TY.cruiseAlt + 4, c.z + 6); // (in over the grass tops, down into the clearing)
           this.holdA = Math.PI * 0.75 + this.slot * (Math.PI / 2);
           this.path = [this.holdPoint(this.holdA, new THREE.Vector3())];
@@ -323,7 +327,7 @@ export class Plane {
         animateCreature(m, dt, down ? this.speed * 0.5 : 0);
         if (done) {
           const h = this.home;
-          this.path = [v3(this.exitX(), 0, AT.taxiZ), v3(h.x, 0, AT.taxiZ), v3(h.x, 0, h.z - 6), h.clone()];
+          this.path = [v3(this.exitX(), 0, this.field.taxiZ), v3(h.x, 0, this.field.taxiZ), v3(h.x, 0, h.z - 6), h.clone()];
           this.state = 'taxiIn';
         }
         return;
@@ -334,13 +338,13 @@ export class Plane {
 
   /** A point on this plane's holding circle (its own height, so two planes never share a spot). */
   private holdPoint(a: number, out: THREE.Vector3) {
-    const c = AT.hold;
+    const c = this.field.hold;
     return out.set(c.x + Math.cos(a) * TY.holdRadius, TY.holdAlt + this.slot * 3, c.z + Math.sin(a) * TY.holdRadius);
   }
 
   /** Where it waits for take-off clearance: behind the HOLD line on its link, just short of the runway. */
-  static get holdZ() {
-    return AT.runway.z + AT.runway.width / 2 + 5;
+  get holdZ() {
+    return this.field.runway.z + this.field.runway.width / 2 + 5;
   }
 
   // --------------------------------------------------------------------------
@@ -357,7 +361,7 @@ export class Plane {
     return d;
   }
   private get taxiInSecs() {
-    return (Math.abs(this.exitX() - this.home.x) + Math.abs(AT.runway.z - AT.taxiZ) + Math.abs(AT.taxiZ - this.home.z)) / (TY.taxiSpeed * this.boost);
+    return (Math.abs(this.exitX() - this.home.x) + Math.abs(this.field.runway.z - this.field.taxiZ) + Math.abs(this.field.taxiZ - this.home.z)) / (TY.taxiSpeed * this.boost);
   }
   /** Coming back from the route to touchdown, if it's cleared straight away (the fly-in and the final approach). */
   private get approachSecs() {
@@ -365,7 +369,7 @@ export class Plane {
   }
   /** Seconds until it leaves the ground (null: not heading out, or waiting for clearance). */
   etaTakeoff(): number | null {
-    const lineUp = (Math.abs(Plane.holdZ - AT.runway.z) + 2) / (TY.taxiSpeed * this.boost);
+    const lineUp = (Math.abs(this.holdZ - this.field.runway.z) + 2) / (TY.taxiSpeed * this.boost);
     if (this.state === 'taxiOut') return this.left() / (TY.taxiSpeed * this.boost) + lineUp + 3;
     if (this.state === 'lineUp') return this.left() / (TY.taxiSpeed * this.boost) + 3;
     if (this.state === 'takeoff') return this.wasUp ? 0 : Math.max(0, (this.link + 30 - this.pos.x) / Math.max(this.speed, 8));

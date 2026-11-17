@@ -54,6 +54,8 @@ const HOWTO_HTML = `
       before landing. The arriving passengers pay a landing fee.</li>
     <li>✈️ Tap a chip at the bottom (or a plane) for its <b>flight card</b>: passengers, bags, nectar and what it's
       doing. 🎯 on the card points the camera at it until you walk. 📋 is the whole flight board.</li>
+    <li>🛫 <b>The north field</b> (the Runway 2 + Gate 5 tile, beyond the runway): four more gates with a runway of
+      their own. Walk over the 🚸 crossing west of Gate 1. Its planes never wait for the first runway.</li>
     <li>🗺️ <b>Destinations:</b> the 🗺️ button (top right) is a map of the garden. Open far-away places for cash:
       they pay a higher fare. 📣 Advertise a place to raise its fare, or switch its flights off and on.</li>
     <li>📅 <b>Daily goals</b> (the bar under the airfield's name): finish each day's goals quickly for ⭐⭐⭐
