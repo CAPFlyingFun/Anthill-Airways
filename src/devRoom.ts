@@ -56,14 +56,14 @@ const BUILDER = import.meta.env.DEV && new URLSearchParams(location.search).has(
  */
 export interface CrowdHost {
   scene: THREE.Scene; camera: THREE.Camera; renderer: THREE.WebGLRenderer;
-  /** Which step of CROWD_DETAILS everyone is drawn at now (0: 100%). */
-  level?: () => number;
 }
 export interface CrowdPerson {
   /** Put this in the scene and move it. She stands 2.8 units tall at scale 1 (HEIGHT), feet at its origin. */
   root: THREE.Group;
   /** How fast she is walking right now, in the game's units a second (0: standing). */
   speed: number;
+  /** The step of the detail ladder she is drawn at (tycoon/autoDetail.ts CROWD_DETAILS: 0 is 100%). */
+  level: number;
   dispose(): void;
 }
 export interface Crowd {
@@ -158,10 +158,9 @@ function fadedMaterial(base: THREE.Material, fade: { value: number }) {
  */
 const AUTO_LIVE: { within: number; detail: number; live?: boolean }[] = AUTO_LITE.map((a) => ({ ...a, live: true }));
 /**
- * IN A GAME (v0.80): the ladder Joshua set, from 100% to 1%. The game says which step everyone is on (the airport:
- * by how many people are in view, tycoon/autoDetail.ts); her distance plays no part. The heavy steps are her own
- * baked body (a live 30% body's shapes would be some 50 MB on the graphics chip, a full one's 160); 5% and lighter
- * are the shared live ones, as in AUTO LIVE.
+ * IN A GAME: the ladder Joshua set (tycoon/autoDetail.ts CROWD_DETAILS, 30% down to 1% since v0.81). The game says
+ * which step each person is on. The heavy steps are her own baked body (a live 30% body's shapes would be some
+ * 50 MB on the graphics chip); 5% and lighter are the shared live ones, as in AUTO LIVE.
  */
 const CROWD_TABLE: { within: number; detail: number; live?: boolean }[] = CROWD_DETAILS.map((detail) => ({ within: Infinity, detail, live: detail <= 5 }));
 /** The table in use: AUTO, AUTO_LITE or AUTO_LIVE (their buttons), or CROWD_TABLE in a game. */
@@ -596,6 +595,8 @@ interface Person {
   fade: { value: number };
   /** (the crowd in a game) how fast the game says she is walking, and where she is in the world. */
   speedNow?: number;
+  /** In a game: the step of CROWD_DETAILS the game wants her drawn at (0: 100%). */
+  stepNow?: number;
   at?: THREE.Vector3;
   /** She is in the scene (someone not drawn is taken out of it, so her 80 bones cost nothing: v0.50). */
   shown: boolean;
@@ -1738,8 +1739,9 @@ export async function startDevRoom(embed?: CrowdHost): Promise<Crowd | void> {
         while (band < TABLE.length - 1 && d > TABLE[band].within * 1.05) band++;
         p.band = band;
         let level = band;
-        if (embed?.level) {
-          level = THREE.MathUtils.clamp(Math.round(embed.level()), 0, TABLE.length - 1);
+        if (embed) {
+          // (the game says which step each person is on: the airport, by how near she is to the player's ant)
+          level = THREE.MathUtils.clamp(Math.round(p.stepNow ?? TABLE.length - 1), 0, TABLE.length - 1);
           // (a heavy level is her own body, baked when she needs it: one of those a frame, so a step for
           // everyone at once is spread over a few frames and not one long one)
           if (level !== p.level && p.lods.some((l) => !l.geos[level] && !TABLE[level].live)) { if (bakedNow) level = p.level; else bakedNow = true; }
@@ -1974,6 +1976,8 @@ export async function startDevRoom(embed?: CrowdHost): Promise<Crowd | void> {
           root: p.root,
           get speed() { return p.speedNow ?? 0; },
           set speed(v: number) { p.speedNow = v; },
+          get level() { return p.stepNow ?? TABLE.length - 1; },
+          set level(v: number) { p.stepNow = v; },
           dispose: () => { const k = people.indexOf(p); if (k >= 0) people.splice(k, 1); disposePerson(p); },
         };
       },

@@ -1,12 +1,13 @@
 // ============================================================================
 // 🎚️ AUTOMATIC DETAIL for the tiny people
 //
-// v0.80, Joshua's table to test: everyone's detail by HOW MANY PEOPLE ARE IN VIEW.
-//   1-2: 100% · 3-4: 90% · 5-6: 80% · 7-8: 70% · 9-10: 60% · 11-12: 50% · 13-14: 40% · 15-16: 30% ·
-//   17-18: 20% · 19-20: 10% · 21-22: 5% · 23-24: 2% · 25 and more: 1%
-// Every two people more is one step down the ladder (devRoom.ts CROWD_DETAILS); her distance plays no part.
-// A count has to hold for a moment before the step changes: someone walking along the screen's edge would
-// otherwise have everyone's body made again and again.
+// Joshua's numbers (v0.81, after 100% down to 1% by the count alone was "Too much, lol"), a HYBRID of his two tables.
+// Each person in view is drawn at the LOWER of:
+//   - BY HOW MANY ARE IN VIEW ("1 person = 30% · 5 people = 15% · 10 people = 5% · 11+ people = 1%"):
+//       1-4: 30% · 5-7: 15% · 8-9: 10% (between his 5 and 10) · 10: 5% · 11 and more: 1%
+//   - BY HOW FAR SHE IS FROM THE PLAYER'S ANT, in her own metres ("1-2m: 30% · 3-4m: 15% · 5-6m: 10% · 7-8m: 5% · +9m: 1%")
+// So someone beside the ant is the sharpest the count allows, people far from it are light whatever the count,
+// and a full terminal is light everywhere. Men and women alike. (Airfield.rankPeople gives each her step.)
 //
 // THE GUARD (v0.79's, kept as a safety net; Joshua: "if it starts falling, will lower it if needed down to 1%"):
 // if the frame rate falls under four fifths of the best this device has shown, everyone goes a step lower than
@@ -15,12 +16,14 @@
 // Power Mode draws 30 a second at most. Settings says when the guard is in ("2 lower for fps").
 // ============================================================================
 /** The ladder: the detail (%) of each step. Joshua's, 2026-11-17. */
-export const CROWD_DETAILS = [100, 90, 80, 70, 60, 50, 40, 30, 20, 10, 5, 2, 1];
+export const CROWD_DETAILS = [30, 15, 10, 5, 1];
 
 /** GAME TUNING (the ladder itself is Joshua's). */
 export const AUTO_DETAIL = {
-  /** People in view for each step of the ladder. */
-  perStep: 2,
+  /** BY COUNT: the most people in view for each step of the ladder (past the last: the lightest). */
+  count: [4, 7, 9, 10],
+  /** BY DISTANCE: the furthest from the player's ant, in a person's own metres, for each step. */
+  metres: [2.5, 4.5, 6.5, 8.5],
   /** A new count holds this long (s) before the step follows it. */
   hold: 0.8,
   /** A reading is this long (s); under `low` of the best frame rate seen the guard steps down, over `high` it may step back. */
@@ -31,9 +34,14 @@ export const AUTO_DETAIL = {
   upAfter: 4.5, undo: 8, retry: 40,
 };
 
-/** The step of the ladder for that many people in view. */
+/** The step of the ladder for that many people in view, and for someone that many metres from the ant. */
 export function stepFor(inView: number) {
-  return Math.min(CROWD_DETAILS.length - 1, Math.max(0, Math.ceil(inView / AUTO_DETAIL.perStep) - 1));
+  const k = AUTO_DETAIL.count.findIndex((most) => inView <= most);
+  return k < 0 ? CROWD_DETAILS.length - 1 : k;
+}
+export function stepAt(metres: number) {
+  const k = AUTO_DETAIL.metres.findIndex((most) => metres <= most);
+  return k < 0 ? CROWD_DETAILS.length - 1 : k;
 }
 
 export class AutoDetail {

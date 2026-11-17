@@ -87,8 +87,6 @@ const CLOTH_SHARE = 0.7;
 export const PEOPLE_FILES = MEN.map((p) => p.file);
 
 export class Passengers {
-  /** 🎚️ The detail (%) everyone is drawn at now (the airfield's AutoDetail). */
-  detail = 100;
   /** Everyone around (any state). */
   all: Pax[] = [];
   /** The check-in line, front first. */
@@ -328,11 +326,12 @@ export class Passengers {
         if (her && p.state === 'seated') her.speed = 0;
         if (!p.model.biped) continue;
         const d = p.model.root.getWorldPosition(this.tmp).distanceTo(this.eye) / metre;
-        // (v0.80: by how many people are in view, not by her distance: autoDetail.ts. The story's men have four
-        // triangle lists, 100, 30, 15 and 8%: each is drawn with the one nearest the detail asked for)
+        // (v0.81: by how near she is to the player's ant among the people in view: the airfield's rankPeople
+        // says her detail. The story's men have four triangle lists, 100, 30, 15 and 8%: the nearest to it)
         void d;
+        const want = (p.model.root.userData.detailPct as number | undefined) ?? 8;
         let nearest = 0;
-        PEOPLE_LOD.forEach((lv, k) => { if (Math.abs(lv.detail - this.detail) < Math.abs(PEOPLE_LOD[nearest].detail - this.detail)) nearest = k; });
+        PEOPLE_LOD.forEach((lv, k) => { if (Math.abs(lv.detail - want) < Math.abs(PEOPLE_LOD[nearest].detail - want)) nearest = k; });
         setPersonLod(p.model, nearest);
       }
     }
