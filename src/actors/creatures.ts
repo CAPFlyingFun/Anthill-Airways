@@ -530,6 +530,29 @@ function findHumanLimbs(model: CreatureModel) {
   }
   model.root.updateMatrixWorld(true); // so elbows etc. see the lowered arms
 
+  // 1b) LEGS UNDER THE HIPS (v0.85; Joshua, of Jack walking: "need to either rotate the hips inward to look normal
+  //     or remove from the list… looks weird walking wide legged"). Some rigs rest in an A-stance, feet well out
+  //     to the sides, and a walk swung from there is a straddle. Each leg that rests more than LEG_SPLAY_MOST out
+  //     (or in) from straight down is turned at the hip, about the body's forward axis, to LEG_SPLAY outward; the
+  //     ankle is turned back by as much, so the sole stays flat on the ground.
+  for (const l of legs) {
+    const { out } = chainFrom(l.bone);
+    l.bone.getWorldPosition(root);
+    out[out.length - 1].getWorldPosition(tip);
+    const rests = Math.atan2(tip.x - root.x, root.y - tip.y);
+    if (Math.abs(rests - l.side * LEG_SPLAY) <= LEG_SPLAY_MOST) continue;
+    const by = l.side * LEG_SPLAY - rests;
+    l.bone.getWorldQuaternion(wq);
+    l.bone.quaternion.multiply(lower.setFromAxisAngle(fwd.clone().applyQuaternion(wq.invert()).normalize(), by));
+    model.root.updateMatrixWorld(true);
+    const ankle = out[2];
+    if (ankle) {
+      ankle.getWorldQuaternion(wq);
+      ankle.quaternion.multiply(lower.setFromAxisAngle(fwd.clone().applyQuaternion(wq.invert()).normalize(), -by));
+    }
+  }
+  model.root.updateMatrixWorld(true);
+
   // 2) Every joint swings around the body's side-to-side axis (world X),
   //    expressed in that bone's own space.
   const side = new THREE.Vector3(1, 0, 0);
@@ -556,6 +579,9 @@ function findHumanLimbs(model: CreatureModel) {
   // planted foot moves back exactly as fast as the body moves forward.
   model.stride = (4 * model.biped.step) / model.length;
 }
+
+/** A leg's rest slope out from straight down (radians, about 1.5°), and how far from that a rig's own may be before it is turned. GAME TUNING. */
+const LEG_SPLAY = 0.025, LEG_SPLAY_MOST = 0.035;
 
 /** How far below horizontal the arms hang (radians, ~80°). */
 const ARM_DOWN = 1.4;
