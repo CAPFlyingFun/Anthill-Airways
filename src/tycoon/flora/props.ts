@@ -726,7 +726,10 @@ export function scatter(
   seed = 1,
   /** Spots that are chosen as ever but not drawn (v0.90): something has since been built there. Leaving them in the
    *  count keeps every other piece exactly where, and as big as, it was. */
-  hide?: (x: number, z: number) => boolean
+  hide?: (x: number, z: number) => boolean,
+  /** Told of each piece drawn (v0.92.1): where it is, its scale and which way it's turned, so the caller can make
+   *  the big ones solid. (Only reads what's already been dealt: the deal itself is unchanged.) */
+  onPiece?: (x: number, z: number, s: [number, number, number], yaw: number) => void
 ): void {
   const R = rng(seed * 6007 + what.length);
   const spots: { x: number; z: number }[] = [];
@@ -753,7 +756,9 @@ export function scatter(
         const tm = p.tiltMax ?? 0;
         e.set((R.next() - 0.5) * tm, R.next() * TAU, (R.next() - 0.5) * tm);
         q.setFromEuler(e);
-        m4.compose(pv.set(spots[si].x, p.y ?? 0, spots[si].z), q, hide?.(spots[si].x, spots[si].z) ? sv.set(1e-6, 1e-6, 1e-6) : sv.set(...p.s));
+        const hidden = hide?.(spots[si].x, spots[si].z);
+        m4.compose(pv.set(spots[si].x, p.y ?? 0, spots[si].z), q, hidden ? sv.set(1e-6, 1e-6, 1e-6) : sv.set(...p.s));
+        if (!hidden) onPiece?.(spots[si].x, spots[si].z, p.s, e.y);
         im.setMatrixAt(n, m4);
       });
       im.castShadow = true;

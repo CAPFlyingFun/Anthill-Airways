@@ -457,10 +457,19 @@ export class Airfield {
       newerTiles.some((u) => Math.hypot(x - u.pos[0], z - u.pos[1]) < 8);
     const area = { x: 0, z: 0, w: 240, d: 190 };
     // (and off every taxiway: no stones lying out on a path; a fallen leaf is big, so it stays well clear)
-    artScatter(s, 'pebbles', area, 46, (x, z) => busy(x, z) || onPaths(x, z, firstPaths, 3), 3, built);
+    // 🪨 (v0.92.1) a stone taller than a knee, and every twig, is solid: you and the travellers go round it, not
+    // through it. (A fallen leaf lies flat: it's walked over.)
+    const pebble = (x: number, z: number, sc: [number, number, number]) => {
+      if (sc[1] < SOLID_PEBBLE) return;
+      const r = Math.max(sc[0], sc[2]) * 0.42;
+      this.blockers.push({ minX: x - r, maxX: x + r, minZ: z - r, maxZ: z + r });
+    };
+    artScatter(s, 'pebbles', area, 46, (x, z) => busy(x, z) || onPaths(x, z, firstPaths, 3), 3, built, pebble);
     artScatter(s, 'leaves', area, 30, (x, z) => busy(x, z) || onPaths(x, z, firstPaths, 10) || onRunway(x, z, 10, first), 4, built);
     // (twigs are long: only out by the edge, where they can't lie across a tile or a path)
-    artScatter(s, 'twigs', area, 8, (x, z) => busy(x, z) || Math.hypot(x, z - 10) < 70, 5, built);
+    const twig = (x: number, z: number, sc: [number, number, number], yaw: number) =>
+      this.blockers.push(...along(x, z, yaw, sc[0], sc[0] * 0.05 + 0.2));
+    artScatter(s, 'twigs', area, 8, (x, z) => busy(x, z) || Math.hypot(x, z - 10) < 70, 5, built, twig);
   }
 
   /** 🐜 The colony's nest: a mound of dug-out soil with the entrance on top. */
@@ -702,6 +711,8 @@ export class Airfield {
     crust.add(bread, top);
     crust.rotation.y = 0.4;
     this.scene.add(crust);
+    // (🍞 v0.92.1: and it's solid: a row of boxes along it, so nobody walks through the bread)
+    this.blockers.push(...along(crust.position.x, crust.position.z, crust.rotation.y, 17, 3.7));
     const crumbSign = new TextSprite(1.0, '#ffd166');
     crumbSign.setText('🧺 PICNIC CRUMBS');
     crumbSign.sprite.position.set(AT.crumbs.x, 8, AT.crumbs.z - 4);
@@ -1586,6 +1597,8 @@ export class Airfield {
     this.hangar.root.userData.sign = sign.sprite;
     this.place(artDewTank(), 70, -18, -0.4);
     this.place(artBaggageCart(), 64, -14, 0.6);
+    // (🛢️🧳 v0.92.1: those two had no footprint: solid now)
+    this.blockers.push(...propWalls(this.pieces[this.pieces.length - 2].root), ...propWalls(this.pieces[this.pieces.length - 1].root));
     this.place(artSign('ANTHILL AIRWAYS'), AT.terminal.x - 30, AT.terminal.z + 24, 0.5);
     this.place(artSign('GATES', 'up'), -64, -14, 0.3);
     this.place(artSign('NORTH FIELD'), -70, -27, 0.2); // (🚸 by the crossing's south end)
@@ -3064,4 +3077,44 @@ export class Airfield {
 export function clockText(secs: number | null) {
   const s = Math.max(0, Math.ceil(secs ?? 0));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
+// ----------------------------------------------------------------------------
+// 🧱 Footprints for things lying about (v0.92.1)
+// ----------------------------------------------------------------------------
+/** How tall a stone has to be (in units: a traveller is 4.72) before it's walked round, not over. */
+const SOLID_PEBBLE = 1.6;
+
+/** A long thing of `length`, `r` either side of its middle line, turned `yaw` about y (its length along its own x),
+ *  as a row of square boxes (the walls are boxes square to the world, so a slanted thing is a row of them). */
+function along(x: number, z: number, yaw: number, length: number, r: number): Blocker[] {
+  const dx = Math.cos(yaw), dz = -Math.sin(yaw);
+  const n = Math.max(1, Math.ceil(length / (r * 1.4)));
+  const out: Blocker[] = [];
+  for (let i = 0; i < n; i++) {
+    const t = ((i + 0.5) / n - 0.5) * (length - r * 0.6);
+    const cx = x + dx * t, cz = z + dz * t;
+    out.push({ minX: cx - r, maxX: cx + r, minZ: cz - r, maxZ: cz + r });
+  }
+  return out;
+}
+
+/** A prop's footprint: its bounding box on the ground, a little in from its edges. */
+function propWalls(root: THREE.Object3D): Blocker[] {
+  root.updateMatrixWorld(true);
+  const b = new THREE.Box3().setFromObject(root);
+  if (b.isEmpty()) return [];
+  const w = b.max.x - b.min.x, d = b.max.z - b.min.z;
+  // (a long thing turned on the slant: a row along its long side; else one box)
+  if (Math.max(w, d) > Math.min(w, d) * 1.6) {
+    const yaw = root.rotation.y;
+    const box = new THREE.Box3().setFromObject(root.clone().rotateY(-yaw));
+    const len = Math.max(box.max.x - box.min.x, box.max.z - box.min.z);
+    const r = Math.min(box.max.x - box.min.x, box.max.z - box.min.z) * 0.45;
+    const long = box.max.x - box.min.x >= box.max.z - box.min.z ? yaw : yaw + Math.PI / 2;
+    return along((b.min.x + b.max.x) / 2, (b.min.z + b.max.z) / 2, long, len * 0.92, r);
+  }
+  const k = 0.42;
+  const cx = (b.min.x + b.max.x) / 2, cz = (b.min.z + b.max.z) / 2;
+  return [{ minX: cx - w * k, maxX: cx + w * k, minZ: cz - d * k, maxZ: cz + d * k }];
 }

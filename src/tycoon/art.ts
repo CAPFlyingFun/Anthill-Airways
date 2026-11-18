@@ -56,8 +56,8 @@ export function artBackdrop(radius: number): THREE.Object3D {
 }
 
 /** 🪨🍂 Pebbles, fallen leaves, twigs and clover scattered over an area (x/z = its centre). */
-export function artScatter(root: THREE.Object3D, what: 'pebbles' | 'leaves' | 'twigs' | 'clover' | 'mushrooms', area: { x: number; z: number; w: number; d: number }, count: number, avoid: (x: number, z: number) => boolean, seed: number, hide?: (x: number, z: number) => boolean) {
-  scatter(root, what, area, count, avoid, seed, hide);
+export function artScatter(root: THREE.Object3D, what: 'pebbles' | 'leaves' | 'twigs' | 'clover' | 'mushrooms', area: { x: number; z: number; w: number; d: number }, count: number, avoid: (x: number, z: number) => boolean, seed: number, hide?: (x: number, z: number) => boolean, onPiece?: (x: number, z: number, s: [number, number, number], yaw: number) => void) {
+  scatter(root, what, area, count, avoid, seed, hide, onPiece);
 }
 
 function piece(): ArtPiece {
