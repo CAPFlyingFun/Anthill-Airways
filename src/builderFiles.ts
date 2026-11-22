@@ -47,7 +47,7 @@ export async function offlineState(): Promise<OfflineState> {
       const hit = await cache.match(url);
       if (!hit) continue;
       saved++;
-      bytes += Number(hit.headers.get('content-length')) || (await hit.clone().blob()).size;
+      bytes += Number(hit.headers.get('content-length')) || 0; // (never read a file's bytes here: 37 MB)
     }
     return { saved, total: files.length, mb: bytes / 1e6 };
   } catch {
@@ -56,30 +56,25 @@ export async function offlineState(): Promise<OfflineState> {
 }
 
 /**
- * Fetch every file afresh and keep it (what was kept before is replaced only once its new copy is in). `progress` is
- * told the megabytes so far and the total as it is known.
+ * Fetch every file afresh and keep it. Each file goes STRAIGHT from the network into the phone's storage, a file at a
+ * time: nothing of it is held in the game's own memory (v0.93.3: the first version gathered each file's bytes itself
+ * before keeping them, up to about 37 MB at once beside the game -- and the game froze on Joshua's phone as it neared
+ * the end). `progress` is told the files done and the megabytes so far.
  */
-export async function saveForOffline(progress: (doneMb: number, totalMb: number, file: number, files: number) => void) {
+export async function saveForOffline(progress: (doneMb: number, file: number, files: number) => void) {
   if (!('caches' in window)) throw new Error('this browser keeps no files');
   const cache = await caches.open(CACHE);
   const files = builderFiles();
-  let done = 0, total = 0;
+  let done = 0;
   for (const [i, url] of files.entries()) {
+    progress(done / 1e6, i + 1, files.length);
     const res = await fetch(url, { cache: 'reload' });
-    if (!res.ok || !res.body) throw new Error(`${res.status} for ${url.split('/').pop()}`);
-    const size = Number(res.headers.get('content-length')) || 0;
-    total += size;
-    const reader = res.body.getReader();
-    const parts: Uint8Array[] = [];
-    for (;;) {
-      const { done: end, value } = await reader.read();
-      if (end) break;
-      parts.push(value);
-      done += value.byteLength;
-      progress(done / 1e6, Math.max(total, done) / 1e6, i + 1, files.length);
-    }
-    const blob = new Blob(parts as BlobPart[], { type: res.headers.get('content-type') ?? 'application/octet-stream' });
-    await cache.put(url, new Response(blob, { headers: { 'content-type': blob.type, 'content-length': String(blob.size) } }));
+    if (!res.ok) throw new Error(`${res.status} for ${url.split('/').pop()}`);
+    done += Number(res.headers.get('content-length')) || 0;
+    await cache.put(url, res);
+    // (a breath between files, so the game keeps drawing)
+    await new Promise((r) => setTimeout(r, 50));
   }
+  progress(done / 1e6, files.length, files.length);
   return done / 1e6;
 }

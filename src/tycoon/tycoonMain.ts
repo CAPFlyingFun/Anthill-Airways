@@ -259,8 +259,8 @@ export async function startTycoon({ app, renderer, save, hud, sfx, input, progre
     saving = true;
     offlineBtn.disabled = true;
     try {
-      const mb = await saveForOffline((done, total, file, files) => {
-        offlineBtn.textContent = `📥 Downloading people… ${done.toFixed(1)} MB · file ${file} of ${files}${total > done ? ` (${total.toFixed(0)} MB)` : ''}`;
+      const mb = await saveForOffline((done, file, files) => {
+        offlineBtn.textContent = `📥 Downloading people… file ${file} of ${files} (${done.toFixed(0)} MB so far)`;
       });
       hud.banner('✅ People saved', `${mb.toFixed(0)} MB kept on this phone: they load without the internet now`, 3600);
     } catch (e) {

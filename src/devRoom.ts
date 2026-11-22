@@ -637,6 +637,41 @@ function randomManLook(i: number, seed: number): Look {
 }
 
 /**
+ * 🖼️ EVERY PICTURE THE CROWD WEARS AT 512 x 512 (v0.93.3; Joshua: "lower to 512x512 to run smoother"). The builder's
+ * skin and hair pictures are 2048 square: 16 MB each in the graphics memory (21 with its smaller copies), and a body
+ * wears three. Seen from the game's camera a person is a few hundred pixels tall, so each picture is drawn into a
+ * 512 canvas as the file is read and the big one let go: a sixteenth of the memory.
+ */
+const PICTURE_MOST = 512;
+function shrinkPictures(root: THREE.Object3D) {
+  const done = new Set<THREE.Texture>();
+  root.traverse((o) => {
+    const mesh = o as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    for (const m of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
+      for (const v of Object.values(m as unknown as Record<string, unknown>)) {
+        const t = v as THREE.Texture;
+        if (!t?.isTexture || done.has(t)) continue;
+        done.add(t);
+        const img = t.image as { width?: number; height?: number; close?: () => void } | undefined;
+        if (!img?.width || !img.height || Math.max(img.width, img.height) <= PICTURE_MOST) continue;
+        const k = PICTURE_MOST / Math.max(img.width, img.height);
+        const c = document.createElement('canvas');
+        c.width = Math.max(1, Math.round(img.width * k));
+        c.height = Math.max(1, Math.round(img.height * k));
+        const g = c.getContext('2d');
+        if (!g) continue;
+        g.imageSmoothingQuality = 'high';
+        g.drawImage(img as CanvasImageSource, 0, 0, c.width, c.height);
+        img.close?.(); // (an ImageBitmap's memory, let go at once)
+        t.image = c;
+        t.needsUpdate = true;
+      }
+    }
+  });
+}
+
+/**
  * EACH OF A POINT'S VALUES IN AN ARRAY OF ITS OWN (v0.93). His file keeps a point's place, facing, picture spot, bones
  * and weights packed together, 52 bytes a point; hers is stored a value to an array. The room reads `attribute.array`
  * by `point * itemSize` when it bakes a person's lighter body, which on his packed data read other values: his body
@@ -651,7 +686,10 @@ function deinterleave(root: THREE.Object3D) {
       const ia = a as THREE.InterleavedBufferAttribute;
       const Arr = ia.data.array.constructor as new (n: number) => THREE.TypedArray;
       const out = new Arr(ia.count * ia.itemSize);
-      for (let i = 0; i < ia.count; i++) for (let c = 0; c < ia.itemSize; c++) out[i * ia.itemSize + c] = ia.getComponent(i, c);
+      // (the stored numbers themselves, as they are: getComponent would hand back a normalized one -- her file's
+      // packed whole numbers -- as a fraction, which a whole-number array then rounds to nothing)
+      const src = ia.data.array, stride = ia.data.stride, off = ia.offset;
+      for (let i = 0; i < ia.count; i++) for (let c = 0; c < ia.itemSize; c++) out[i * ia.itemSize + c] = src[i * stride + off + c];
       return new THREE.BufferAttribute(out, ia.itemSize, ia.normalized);
     };
     for (const name of Object.keys(g.attributes)) g.setAttribute(name, fix(g.attributes[name]) as THREE.BufferAttribute);
@@ -953,6 +991,7 @@ export async function startDevRoom(embed?: CrowdHost): Promise<Crowd | void> {
           bytes += buf.byteLength;
           const gltf = await loader.parseAsync(buf, '');
           deinterleave(gltf.scene);
+          shrinkPictures(gltf.scene);
           parts.push(gltf.scene);
         }
         // HER HAIR (v0.57): the builder's hairstyles, each one's LIGHT file (about 5k triangles, a fifth of the full
@@ -966,6 +1005,7 @@ export async function startDevRoom(embed?: CrowdHost): Promise<Crowd | void> {
             bytes += buf.byteLength;
             const scene = (await loader.parseAsync(buf, '')).scene;
             deinterleave(scene);
+            shrinkPictures(scene);
             return scene;
           };
           const styles = def.male ? MEN_HAIR : HAIR_STYLES;
@@ -2172,6 +2212,9 @@ export async function startDevRoom(embed?: CrowdHost): Promise<Crowd | void> {
     let maleSrc: Loaded | null = null;
     void firstBuild.then(async () => {
       try {
+        // (v0.93.3: not straight after hers. From the phone's storage both bodies were read and made ready back to
+        // back, as the first women walked in: give her people 8 s on screen first)
+        await new Promise((r) => setTimeout(r, 8000));
         const src = await load(MALE_MODEL);
         await applyModelSettings(src);
         maleSrc = src;
