@@ -9,7 +9,7 @@
 // They're small aphids for now (a giant aphid is ~4–5 mm: they fit two to a ladybug). Bigger planes later will
 // carry bigger travellers.
 // ============================================================================
-import { PEOPLE_LOD, hasModel, setPersonLod, spawnHuman, type HumanKind } from '../actors/creatures';
+import { PEOPLE_LOD, setPersonLod } from '../actors/creatures';
 import { newModel, type CreatureModel } from '../actors/models';
 import { CROWD_HEIGHT, type Crowd, type CrowdPerson } from '../devRoom';
 import { SIZE } from './scale';
@@ -84,19 +84,14 @@ export interface Stop {
 }
 
 /**
- * 🧍 The story's models that fly: ITS MEN ONLY (v0.78.1). Every woman is one of the Character Builder's (`woman`),
- * so none of the story's fixed women is downloaded or walks in: not before the builder's body is in, not after.
- * LOOKED AT one by one in the game, side by side: h-crew3 and h-crew4 are women (they were still on this list in
- * v0.78), h-ember and h-cadet are men.
+ * 🧍 THE TRAVELLERS ARE ALL THE CHARACTER BUILDER'S (v0.93.1; Joshua: "replace all the other male models, so it's
+ * only the models from CCBS"). The story's men (h-jack, h-cadet... v0.78.1 to v0.93) are no longer downloaded.
  */
-const MEN: { file: HumanKind; weight: number }[] = (['h-jack', 'h-jacklab', 'h-cadet', 'h-director', 'h-ember', 'h-crew1', 'h-crew2'] as HumanKind[]).map((file) => ({ file, weight: 1 }));
 /** 🧍 How near two travellers come before the walking one is eased aside (world units; a person is about 1.3 across the shoulders). GAME TUNING. */
 const PERSONAL = 1.25;
 /** How many of the builder's women wear the cloth tee (the rest a painted one). 0 since v0.82: the DEV Room's own
  * settings, "Cloth tee: off" (Joshua: "Match the settings exactly"); it was 0.7. */
 const CLOTH_SHARE = 0;
-/** Every model the tiny people need (downloaded when the switch goes on). */
-export const PEOPLE_FILES = MEN.map((p) => p.file);
 
 export class Passengers {
   /** Everyone around (any state). */
@@ -182,26 +177,13 @@ export class Passengers {
   private lodT = 0;
   private person(): (CreatureModel & { seats: THREE.Object3D[] }) | null {
     if (!this.people) return null;
-    // (half are women: the builder's, once its body is in)
-    const woman = Math.random() < 0.5;
-    if (this.crowd && woman) {
-      const her = this.woman();
-      if (her) return her;
-    }
-    // 👨 (v0.93) the men: the builder's too, once his body is in (the story's men stand in until then)
-    if (this.crowd?.men && !woman) {
+    // (half are men, half women: all of them the Character Builder's. v0.93.1, Joshua: "only the models from CCBS".
+    // Until his body is in, a man's turn is a woman's; until hers is, travellers are aphids.)
+    if (this.crowd?.men && Math.random() < 0.5) {
       const him = this.man();
       if (him) return him;
     }
-    const ready = MEN.filter((k) => hasModel(k.file));
-    if (!ready.length) return null;
-    let roll = Math.random() * ready.reduce((a, k) => a + k.weight, 0);
-    const pick = ready.find((k) => (roll -= k.weight) <= 0) ?? ready[0];
-    const m = spawnHuman(pick.file, SIZE.person * (0.93 + Math.random() * 0.12));
-    if (!m) return null;
-    setPersonLod(m, PEOPLE_LOD.length - 1); // (the lightest until the next look at how far away she is)
-    m.root.userData.sitDrop = (m.biped?.legLen ?? m.height * 0.47) * 0.82; // (astride the bug: see Plane.seat)
-    return Object.assign(m, { seats: [] as THREE.Object3D[] });
+    return this.crowd ? this.woman() : null;
   }
 
   /** The next traveller walks in now (the tiny people have just arrived: something to see straight away). */

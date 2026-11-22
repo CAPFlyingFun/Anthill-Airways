@@ -40,9 +40,8 @@ import type { MapRect, MapView } from '../ui/minimap';
 import { AT, CLEARINGS, CLEARINGS_FIRST, FIELDS, GATES_PER_FIELD, TY, TYCOON_SAVE_V, TY_UNLOCKS, fieldOf, walkable, type FieldDef } from './data';
 import { SURFACE, artBaggageCart, artBackdrop, artBug, artDewTank, artFuelFlower, artHangar, artScatter, artGate, artGround, artLawn, artRunway, artSign, artTaxiway, artTerminal, artTower, artWindsock, type ArtLawn, type ArtPiece } from './art';
 import { Plane } from './plane';
-import { PEOPLE_FILES, Passengers, type Pax, type Stop } from './passengers';
+import { Passengers, type Pax, type Stop } from './passengers';
 import { Nav } from './nav';
-import { hasModel, loadPeople, lodPeople } from '../actors/creatures';
 import { FLEET, ROUTES, ROUTE_LV_MAX, bestPlane, routeFare, routeLvCost, routeOf, type PlaneType, type RouteDef } from './fleet';
 import { RouteMap, type RoutePin } from './routeMap';
 import { STAFF, STAFF_MAX, buyStaff, staffCost, staffFx, type StaffId } from './staff';
@@ -2698,7 +2697,9 @@ export class Airfield {
   }
   /** "12/17": how many of the people's models are ready. */
   peopleReady() {
-    return `${PEOPLE_FILES.filter((f) => hasModel(f)).length}/${PEOPLE_FILES.length}`;
+    // (the builder's two bodies: hers, then his)
+    const c = this.crowd && this.crowd !== 'loading' ? this.crowd : null;
+    return `${(c ? 1 : 0) + (c?.men ? 1 : 0)}/2`;
   }
   /** What Settings says of the builder's women: the DEV Room's own readout (how many drawn, smart FPS, the frame rate). */
   detailText() {
@@ -2722,29 +2723,16 @@ export class Airfield {
           if (!crowd || !(await crowd.ready)) throw new Error('the builder\'s body did not load');
           this.crowd = crowd;
           this.pax.crowd = this.pax.people ? crowd : null;
-          if (!quiet && this.pax.people) this.hud.banner('👩 The builder\'s women are here!', 'Every woman who walks in now has her own hair, face, outfit and belly', 4200);
+          if (this.pax.people) this.pax.hurry();
+          if (!quiet && this.pax.people) this.hud.banner('🧍 The tiny people are here!', 'Every traveller has their own hair, face, height and outfit: the men join once theirs is in', 4200);
         })
         .catch((e) => {
           console.warn('No builder crowd', e);
           this.crowd = null;
         });
     } else if (this.crowd && this.crowd !== 'loading') this.pax.crowd = this.crowd;
-    // (each one as it arrives: downloaded, then its lighter triangle lists made for when it's far from the camera)
-    let told = false;
-    // (a person joins the moment her model has downloaded; her lighter far-away versions are made afterwards, one
-    // model at a time, so the game never waits on them)
-    let chain = Promise.resolve();
-    for (const f of PEOPLE_FILES) {
-      void loadPeople([f])
-        .then(() => {
-          chain = chain.then(() => lodPeople([f]));
-          // (the first one's here: say so, and send one walking in straight away so there's something to see)
-          if (told || !this.pax.people || !hasModel(f)) return;
-          told = true;
-          this.pax.hurry();
-          if (!quiet) this.hud.banner('🧍 The first tiny people are here!', "Watch the lawn's edge: the rest of the cast joins as it downloads", 4200);
-        });
-    }
+    // (v0.93.1, Joshua: "replace all the other male models, so it's only the models from CCBS": the story's men are
+    // no longer downloaded. Everyone who walks in is the builder's: hers first, his once his body is in.)
   }
 
   /** 👀 Point the camera at a spot until you walk (a guide's "Show me"). */
