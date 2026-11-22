@@ -598,10 +598,13 @@ function randomHead(r: () => number): NonNullable<Look['head']> {
   return { style: pick(HAIR_STYLES).id, length: Math.round(r() * 100) / 100, colour: colour.colour, face };
 }
 
+/** 👨 The men's hairstyles in the crowd (v0.93.1): his short cuts only, no man bun and none of her long styles (only
+ *  these are downloaded). */
+const MEN_HAIR = MALE_HAIR_STYLES.filter((s) => ['crew', 'buzz', 'side-part', 'slicked-back', 'curly-top'].includes(s.id));
+
 /**
  * 👨 A RANDOM MAN (v0.93): a tee in any colour over shorts or trousers (half of them dark neutrals), long sleeves now
- * and then, 170 to 188 cm tall, any of his twelve hairstyles (his six cuts most of the time), a natural hair colour
- * nearly always, a face type, and sneakers. His own random numbers (the women's are dealt as they always were).
+ * and then, 170 to 188 cm tall, one of his short cuts (MEN_HAIR) in black or dark brown, a face type, and sneakers. His own random numbers (the women's are dealt as they always were).
  */
 function randomManLook(i: number, seed: number): Look {
   const r = rng(70003 + i * 6007 + seed * 104729);
@@ -621,12 +624,15 @@ function randomManLook(i: number, seed: number): Look {
   const legLength = r() < 0.35 ? Math.round((0.22 + r() * 0.15) * 100) / 100 : 1;
   const longSleeves = r() < 0.3;
   const heightCm = Math.round((2 + r() * 18) * 2) / 2;
-  const style = r() < 0.85 ? pick(MALE_HAIR_STYLES.slice(0, 6)) : pick(MALE_HAIR_STYLES.slice(6));
-  const natural = HAIR_COLOURS.slice(0, 12).filter((c) => c.id !== 'strawberry-blonde'), dyed = HAIR_COLOURS.slice(12);
-  const colour = r() < 0.96 ? (r() < 0.5 ? pick(natural.slice(0, 4)) : pick(natural)) : pick(dyed.length ? dyed : natural);
+  // (v0.93.1, Joshua: "make all the men for now with dark brown or black hair, and also not do long hair at the
+  // moment… it's hard to tell the male from female if they have similar looks": his six men's cuts only, black or
+  // dark brown. The r() calls are kept as they were, so each man is otherwise who he was.)
+  const style = (r(), pick(MEN_HAIR));
+  r(); r(); r();
+  const colour = HAIR_COLOURS.find((c) => c.id === (r() < 0.5 ? 'black' : 'dark-brown')) ?? HAIR_COLOURS[0];
   const face: Record<string, number> = { [pick(FACE_TYPES).id]: Math.round((0.5 + r() * 0.5) * 100) / 100 };
-  // (a long style at any length; his short cuts mostly near their full length, so a crew cut stays a crew cut)
-  const length = MALE_HAIR_STYLES.indexOf(style) < 6 ? Math.round((0.6 + r() * 0.4) * 100) / 100 : Math.round(r() * 100) / 100;
+  // (his short cuts near their full length, so a crew cut stays a crew cut)
+  const length = Math.round((0.6 + r() * 0.4) * 100) / 100;
   return {
     name: `Man ${i + 1}`, male: true, bump: 0, bust: 0, bustDetail: 1, navel: 0, heightCm, top, legs, capri: false, legLength, longSleeves,
     head: { style: style.id, length, colour: colour.colour, face },
@@ -966,7 +972,7 @@ export async function startDevRoom(embed?: CrowdHost): Promise<Crowd | void> {
             deinterleave(scene);
             return scene;
           };
-          const styles = def.male ? MALE_HAIR_STYLES : HAIR_STYLES;
+          const styles = def.male ? MEN_HAIR : HAIR_STYLES;
           try {
             const got = await Promise.all(styles.map((style) => one(BUILDER + style.lightFile.replace(/^models\//, ''))));
             styles.forEach((style, k) => hairs.set(style.id, got[k]));
