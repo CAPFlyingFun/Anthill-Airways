@@ -6,6 +6,7 @@
 // world itself is tycoon/airfield.ts. This file wires it to the HUD and runs the main loop (the same shape as
 // homeMain.ts: saving, offline earnings, auto quality, the minimap, first/third person).
 // ============================================================================
+import { offlineState, saveForOffline } from '../builderFiles';
 import * as THREE from 'three';
 import type { Hud } from '../ui/hud';
 import type { Sfx } from '../core/audio';
@@ -238,6 +239,37 @@ export async function startTycoon({ app, renderer, save, hud, sfx, input, progre
     if (!field.people) hud.banner('🐛 Bugs are back', 'New passengers are aphids again', 2600);
     writeSave(save);
     peopleLabel();
+  });
+
+  // 📥 (v0.93.2) the Character Builder's people kept on this phone: saved as they're first fetched, or all at once here
+  const offlineBtn = document.getElementById('offlineBtn') as HTMLButtonElement;
+  let saving = false;
+  const offlineLabel = async () => {
+    if (saving) return;
+    const s = await offlineState();
+    offlineBtn.textContent = s.saved >= s.total
+      ? `✅ People saved on this phone (${s.mb.toFixed(0)} MB) · tap to download again`
+      : s.saved > 0
+        ? `📥 Save people for offline (${s.saved} of ${s.total} files saved, ${s.mb.toFixed(0)} MB)`
+        : '📥 Save people for offline (about 35 MB: best on Wi-Fi)';
+  };
+  void offlineLabel();
+  offlineBtn.addEventListener('click', async () => {
+    if (saving) return;
+    saving = true;
+    offlineBtn.disabled = true;
+    try {
+      const mb = await saveForOffline((done, total, file, files) => {
+        offlineBtn.textContent = `📥 Downloading people… ${done.toFixed(1)} MB · file ${file} of ${files}${total > done ? ` (${total.toFixed(0)} MB)` : ''}`;
+      });
+      hud.banner('✅ People saved', `${mb.toFixed(0)} MB kept on this phone: they load without the internet now`, 3600);
+    } catch (e) {
+      hud.banner('📥 Download stopped', `${e instanceof Error ? e.message : String(e)} · try again on a better connection`, 4200);
+    } finally {
+      saving = false;
+      offlineBtn.disabled = false;
+      void offlineLabel();
+    }
   });
 
   document.getElementById('howtoBtn')!.addEventListener('click', () => {

@@ -82,13 +82,13 @@ export default defineConfig({
           {
             // 🧍 (v0.93.2) the Character Builder's bodies and hairstyles (its own site, the same host as this game):
             // about 16 MB for hers and 19 MB for his, downloaded once and kept on the phone. Before, they were not
-            // kept, and on a slow connection every visit fetched them again (all bugs until they were in). Kept for a
-            // week, then fetched afresh, so a change to them in the builder reaches the game.
+            // kept, and on a slow connection every visit fetched them again (all bugs until they were in). Kept until
+            // Settings' "Save people for offline" fetches them afresh (builderFiles.ts).
             urlPattern: /\/Custom-Character-Builder-System\/models\/.+\.(glb|bin|png|webp)(\?.*)?$/,
             handler: 'CacheFirst',
             options: {
               cacheName: 'builder-models',
-              expiration: { maxEntries: 40, maxAgeSeconds: 7 * 24 * 3600 },
+              expiration: { maxEntries: 40 },
               cacheableResponse: { statuses: [200] },
             },
           },

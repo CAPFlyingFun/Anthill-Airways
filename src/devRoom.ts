@@ -46,12 +46,8 @@ import { FACE_TYPES } from './vendor/ccbs/sarahlab/faceShapes';
 import { faceFieldOn, headPoints } from './vendor/ccbs/sarahlab/faceShapeFields';
 import { MOTION_TARGETS, motionWeights, restingBellySpring, stepBellySpring, stepBreastSpring, walkBounceAccel, walkSwayAccel, type BellySpring } from './vendor/ccbs/bellyMotion';
 
-/** The builder's published models (GitHub Pages: the same origin as this game when it's live). */
-// (🧪 in development, ?localccbs reads the builder's files from this server's own /_ccbs/ folder: a test machine
-// that can't reach the builder's site)
-const BUILDER = import.meta.env.DEV && new URLSearchParams(location.search).has('localccbs')
-  ? `${import.meta.env.BASE_URL}_ccbs/`
-  : 'https://capflyingfun.github.io/Custom-Character-Builder-System/models/';
+// (the builder's site, and the files of it the crowd wears: builderFiles.ts, which Settings can save for offline)
+import { BUILDER, MEN_HAIR_IDS } from './builderFiles';
 
 /**
  * 🧍 THE CROWD, IN A GAME (v0.78). The same people as this room's, made and drawn by the same code, but standing in
@@ -600,7 +596,7 @@ function randomHead(r: () => number): NonNullable<Look['head']> {
 
 /** 👨 The men's hairstyles in the crowd (v0.93.1): his short cuts only, no man bun and none of her long styles (only
  *  these are downloaded). */
-const MEN_HAIR = MALE_HAIR_STYLES.filter((s) => ['crew', 'buzz', 'side-part', 'slicked-back', 'curly-top'].includes(s.id));
+const MEN_HAIR = MALE_HAIR_STYLES.filter((s) => MEN_HAIR_IDS.includes(s.id));
 
 /**
  * 👨 A RANDOM MAN (v0.93): a tee in any colour over shorts or trousers (half of them dark neutrals), long sleeves now
