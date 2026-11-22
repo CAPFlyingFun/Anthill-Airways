@@ -36,7 +36,10 @@ import { poseHuman, humanStride } from './vendor/ccbs/humanPose';
 import { walkWeight, weighWalk } from './vendor/ccbs/walkWeight';
 import type { HumanMeasure, MutableJointTurn } from './vendor/ccbs/humanRig';
 // The builder's heads (v0.57, a copy at its commit 6e0b67b): its hairstyles and their colours, and its face types
-import { HAIR_STYLES, HAIR_LENGTH_MORPH } from './vendor/ccbs/sarahlab/hairStyles';
+import { HAIR_STYLES, HAIR_LENGTH_MORPH, MALE_HAIR_STYLES } from './vendor/ccbs/sarahlab/hairStyles';
+// (v0.93: his face's frame, so the face types are laid on his head as the builder lays them)
+import { MALE_FACE } from './vendor/ccbs/sarahlab/maleFace';
+import type { FaceFrame } from './vendor/ccbs/sarahlab/faceRig';
 import { HAIR_COLOURS } from './vendor/ccbs/sarahlab/hairColours';
 import { patchHairMaterial, setHairColour } from './vendor/ccbs/sarahlab/hairMaterial';
 import { FACE_TYPES } from './vendor/ccbs/sarahlab/faceShapes';
@@ -70,8 +73,11 @@ export interface CrowdPerson {
 export interface Crowd {
   /** Her body and hair have loaded: add() gives people from now on. */
   ready: Promise<boolean>;
-  /** A new woman: her belly's size in %, whether she wears the cloth tee (else a painted one), and a number she is dealt her looks from. */
-  add(opts: { bump: number; cloth: boolean }): CrowdPerson | null;
+  /** A new woman: her belly's size in %, whether she wears the cloth tee (else a painted one), and a number she is dealt her looks from.
+   *  `male` (v0.93): a man of the builder's instead (null until his body is in: see `men`). */
+  add(opts: { bump: number; cloth: boolean; male?: boolean }): CrowdPerson | null;
+  /** 👨 The builder's male body has loaded too (v0.93): add({ male: true }) gives men from now on. */
+  readonly men: boolean;
   /** One frame: everybody's detail, pose, tee. */
   step(dt: number): void;
   /** What the room's own readout says, for the game's Settings. */
@@ -85,11 +91,26 @@ interface ModelDef {
   label: string;
   files: string[];       // loaded once, then cloned per person
   builder: boolean;      // the builder's body: random shape + stand-in outfits
+  /** 👨 (v0.93) the builder's MALE base model: his hairstyles, his face's frame, his looks. */
+  male?: boolean;
 }
 const MODELS: ModelDef[] = [
   { key: 'builder', label: "Builder body", files: [BUILDER + 'sarah-v2-body-slim.glb'], builder: true }, // (her hair: one of HAIR_STYLES' light files a person, loaded beside her)
   { key: 'game', label: "Game's Sarah", files: [`${import.meta.env.BASE_URL}models/h-sarah.glb`], builder: false },
+  // 👨 (v0.93; Joshua, 2026-11-22: "male models now that we can randomize") the builder's Male Base Model, his
+  // hairstyles beside him (models/hair/male/: six men's cuts and her six as he wears them)
+  { key: 'male', label: 'Builder man', files: [BUILDER + 'male-base.glb'], builder: true, male: true },
 ];
+const MALE_MODEL = MODELS[2];
+
+/**
+ * WHERE THE STAND-IN CLOTHES GO ON A BODY (v0.93): heights up the body and distances out from its middle, as shares
+ * of its height in its own rest pose. Hers are the numbers the room has always painted with; his are read off his file
+ * (his shoulders are broader, his hands hang further out). GAME TUNING.
+ */
+interface PaintFit { waist: number; collar: number; armpit: number; torsoX: number; sleeveX: number; legX: number; shoe: number }
+const FIT_HER: PaintFit = { waist: 0.57, collar: 0.835, armpit: 0.71, torsoX: 0.115, sleeveX: 0.2, legX: 0.125, shoe: 0.04 };
+const FIT_HIM: PaintFit = { waist: 0.57, collar: 0.835, armpit: 0.71, torsoX: 0.13, sleeveX: 0.21, legX: 0.135, shoe: 0.04 };
 /** How many people the room can hold (v0.49; Joshua: "a slider from 1-400 people but also where I can manually type in a specific number"). */
 const MOST_PEOPLE = 400;
 const HEIGHT = 2.8; // people are this tall in the game
@@ -203,6 +224,8 @@ interface Look {
   shoe?: number;
   /** (the crowd in a game) her tee is painted on even where the cloth tee is worn. */
   paint?: boolean;
+  /** 👨 (v0.93) a man's look: painted on his body's own fit, no belly or bust of hers. */
+  male?: boolean;
 }
 /** The name a face type has among a mesh's shapes. */
 const FACE_SHAPE = (id: string) => `faceType:${id}`;
@@ -228,7 +251,7 @@ function hairMaterialFor(base: THREE.Material, colour: string | null, fade?: { v
  * worked out ONCE for a mesh's own points, as one more of its shapes beside the belly's and the bust's: a person's face
  * is then a weight or two, blended like the rest of her. Her hair gets the same seven, so her hairline stays on her head.
  */
-function addFaceTypes(mesh: THREE.Mesh, morph0: THREE.BufferGeometry['morphAttributes']) {
+function addFaceTypes(mesh: THREE.Mesh, morph0: THREE.BufferGeometry['morphAttributes'], frame?: FaceFrame) {
   const g = mesh.geometry, pos = g.attributes.position, nrm = g.attributes.normal, n = pos.count;
   const basePos = new Float32Array(n * 3);
   for (let v = 0; v < n; v++) { basePos[v * 3] = pos.getX(v); basePos[v * 3 + 1] = pos.getY(v); basePos[v * 3 + 2] = pos.getZ(v); }
@@ -236,7 +259,7 @@ function addFaceTypes(mesh: THREE.Mesh, morph0: THREE.BufferGeometry['morphAttri
   const withNormals = !!nrm && !!(morph0.normal?.length || !morph0.position?.length);
   let baseNrm: Float32Array | null = null;
   if (withNormals) { baseNrm = new Float32Array(n * 3); for (let v = 0; v < n; v++) { baseNrm[v * 3] = nrm.getX(v); baseNrm[v * 3 + 1] = nrm.getY(v); baseNrm[v * 3 + 2] = nrm.getZ(v); } }
-  const points = headPoints(basePos);
+  const points = headPoints(basePos, frame);
   const fields = new Map<string, ReturnType<typeof faceFieldOn>>();
   const positions = (morph0.position ??= []), normals = withNormals ? (morph0.normal ??= []) : null;
   const dict = (mesh.morphTargetDictionary ??= {}), influences = (mesh.morphTargetInfluences ??= []);
@@ -244,7 +267,7 @@ function addFaceTypes(mesh: THREE.Mesh, morph0: THREE.BufferGeometry['morphAttri
     const dp = new Float32Array(n * 3), dn = withNormals ? new Float32Array(n * 3) : null;
     for (const [slider, w] of Object.entries(type.look)) {
       let f = fields.get(slider);
-      if (!f) fields.set(slider, (f = faceFieldOn(slider, basePos, baseNrm, points)));
+      if (!f) fields.set(slider, (f = faceFieldOn(slider, basePos, baseNrm, points, frame)));
       for (let k = 0; k < f.index.length; k++) {
         const v = f.index[k] * 3;
         for (let c = 0; c < 3; c++) { dp[v + c] += f.pos[k * 3 + c] * w; if (dn && f.nrm) dn[v + c] += f.nrm[k * 3 + c] * w; }
@@ -575,6 +598,65 @@ function randomHead(r: () => number): NonNullable<Look['head']> {
   return { style: pick(HAIR_STYLES).id, length: Math.round(r() * 100) / 100, colour: colour.colour, face };
 }
 
+/**
+ * 👨 A RANDOM MAN (v0.93): a tee in any colour over shorts or trousers (half of them dark neutrals), long sleeves now
+ * and then, 170 to 188 cm tall, any of his twelve hairstyles (his six cuts most of the time), a natural hair colour
+ * nearly always, a face type, and sneakers. His own random numbers (the women's are dealt as they always were).
+ */
+function randomManLook(i: number, seed: number): Look {
+  const r = rng(70003 + i * 6007 + seed * 104729);
+  const pick = <T,>(list: readonly T[]) => list[Math.min(list.length - 1, Math.floor(r() * list.length))];
+  const color = (h: number, sat: number, light: number) => {
+    const skinLike = h < 0.15 || h > 0.94;
+    return new THREE.Color().setHSL(h, skinLike ? Math.max(sat, 0.72) : sat, skinLike ? Math.min(light, 0.46) : light).getHex();
+  };
+  const top = color(r(), 0.3 + r() * 0.45, 0.3 + r() * 0.38);
+  // (his trousers: dark neutrals half the time, then denim, khaki, and now and then a colour)
+  const lr = r();
+  const legs = lr < 0.5 ? color(r(), 0.04 + r() * 0.1, 0.12 + r() * 0.2)
+    : lr < 0.75 ? color(0.6 + r() * 0.04, 0.35 + r() * 0.25, 0.2 + r() * 0.2)
+      : lr < 0.9 ? color(0.1 + r() * 0.03, 0.25 + r() * 0.2, 0.42 + r() * 0.16)
+        : color(r(), 0.35 + r() * 0.35, 0.22 + r() * 0.18);
+  // (shorts a third of the time, else trousers to the ankle)
+  const legLength = r() < 0.35 ? Math.round((0.22 + r() * 0.15) * 100) / 100 : 1;
+  const longSleeves = r() < 0.3;
+  const heightCm = Math.round((2 + r() * 18) * 2) / 2;
+  const style = r() < 0.85 ? pick(MALE_HAIR_STYLES.slice(0, 6)) : pick(MALE_HAIR_STYLES.slice(6));
+  const natural = HAIR_COLOURS.slice(0, 12).filter((c) => c.id !== 'strawberry-blonde'), dyed = HAIR_COLOURS.slice(12);
+  const colour = r() < 0.96 ? (r() < 0.5 ? pick(natural.slice(0, 4)) : pick(natural)) : pick(dyed.length ? dyed : natural);
+  const face: Record<string, number> = { [pick(FACE_TYPES).id]: Math.round((0.5 + r() * 0.5) * 100) / 100 };
+  // (a long style at any length; his short cuts mostly near their full length, so a crew cut stays a crew cut)
+  const length = MALE_HAIR_STYLES.indexOf(style) < 6 ? Math.round((0.6 + r() * 0.4) * 100) / 100 : Math.round(r() * 100) / 100;
+  return {
+    name: `Man ${i + 1}`, male: true, bump: 0, bust: 0, bustDetail: 1, navel: 0, heightCm, top, legs, capri: false, legLength, longSleeves,
+    head: { style: style.id, length, colour: colour.colour, face },
+    shoe: Math.min(SHOE_COLOURS.length - 1, Math.floor(r() * SHOE_COLOURS.length)),
+  };
+}
+
+/**
+ * EACH OF A POINT'S VALUES IN AN ARRAY OF ITS OWN (v0.93). His file keeps a point's place, facing, picture spot, bones
+ * and weights packed together, 52 bytes a point; hers is stored a value to an array. The room reads `attribute.array`
+ * by `point * itemSize` when it bakes a person's lighter body, which on his packed data read other values: his body
+ * came apart in spikes. So a packed attribute is unpacked once, as the file is read.
+ */
+function deinterleave(root: THREE.Object3D) {
+  root.traverse((o) => {
+    const g = (o as THREE.Mesh).geometry;
+    if (!g) return;
+    const fix = (a: THREE.BufferAttribute | THREE.InterleavedBufferAttribute) => {
+      if (!(a as THREE.InterleavedBufferAttribute).isInterleavedBufferAttribute) return a;
+      const ia = a as THREE.InterleavedBufferAttribute;
+      const Arr = ia.data.array.constructor as new (n: number) => THREE.TypedArray;
+      const out = new Arr(ia.count * ia.itemSize);
+      for (let i = 0; i < ia.count; i++) for (let c = 0; c < ia.itemSize; c++) out[i * ia.itemSize + c] = ia.getComponent(i, c);
+      return new THREE.BufferAttribute(out, ia.itemSize, ia.normalized);
+    };
+    for (const name of Object.keys(g.attributes)) g.setAttribute(name, fix(g.attributes[name]) as THREE.BufferAttribute);
+    for (const kind of Object.keys(g.morphAttributes)) g.morphAttributes[kind] = g.morphAttributes[kind].map((m) => fix(m) as THREE.BufferAttribute);
+  });
+}
+
 /** A small seeded random (the same person looks the same every time). */
 function rng(seed: number) {
   let s = seed >>> 0;
@@ -592,7 +674,7 @@ function rng(seed: number) {
  * body, distance from her middle). One compiled program for everyone; each
  * clone has its own two colours.
  */
-function paintedMaterial(base: THREE.Material, box: THREE.Box3, look: Look, fine = true, fade?: { value: number }) {
+function paintedMaterial(base: THREE.Material, box: THREE.Box3, look: Look, fine = true, fade?: { value: number }, fit: PaintFit = FIT_HER) {
   const m = base.clone();
   // (her skin's bump detail is drawn from a second picture, the normal map. On a much lighter body the
   // picture no longer lines up with the big triangles, and it shows as dark blotches on her face: off below 25%)
@@ -601,8 +683,11 @@ function paintedMaterial(base: THREE.Material, box: THREE.Box3, look: Look, fine
     uTop: { value: new THREE.Color(look.top) },
     uLegs: { value: new THREE.Color(look.legs) },
     uShoe: { value: new THREE.Color(SHOE_COLOURS[look.shoe ?? 0] ?? SNEAKERS) }, // (under her sneakers, and in their place far off)
-    uLegEnd: { value: look.legLength !== undefined ? 0.57 - Math.min(1, Math.max(0.1, look.legLength)) * 0.53 : look.capri ? 0.17 : 0.04 },      // where the leggings end (height up her body)
-    uSleeveEnd: { value: look.longSleeves ? 0.56 : 0.71 }, // where the sleeves end
+    uLegEnd: { value: look.legLength !== undefined ? fit.waist - Math.min(1, Math.max(0.1, look.legLength)) * (fit.waist - fit.shoe) : look.capri ? 0.17 : 0.04 },      // where the leggings end (height up her body)
+    uSleeveEnd: { value: look.longSleeves ? fit.waist - 0.01 : fit.armpit }, // where the sleeves end
+    // (v0.93: where each piece goes on this body: FIT_HER, or his)
+    uWaist: { value: fit.waist }, uCollar: { value: fit.collar }, uArmpit: { value: fit.armpit },
+    uTorsoX: { value: fit.torsoX }, uSleeveX: { value: fit.sleeveX }, uLegX: { value: fit.legX }, uShoeY: { value: fit.shoe },
     uY0: { value: box.min.y },
     uH: { value: box.max.y - box.min.y },
     // (how much of the levelling of her bust's tips she takes under her tee: all of it at 0 detail; the patch
@@ -617,18 +702,18 @@ function paintedMaterial(base: THREE.Material, box: THREE.Box3, look: Look, fine
       .replace('#include <beginnormal_vertex>', '#include <beginnormal_vertex>\nobjectNormal += softNrm * uSoften;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\ntransformed += softPos * uSoften;\nvRest = vec2(abs(position.x) / uH, (position.y - uY0) / uH);');
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', '#include <common>\nvarying vec2 vRest;\nuniform vec3 uTop;\nuniform vec3 uLegs;\nuniform vec3 uShoe;\nuniform float uLegEnd;\nuniform float uSleeveEnd;\nfloat drCloth = 0.0;')
+      .replace('#include <common>', '#include <common>\nvarying vec2 vRest;\nuniform vec3 uTop;\nuniform vec3 uLegs;\nuniform vec3 uShoe;\nuniform float uLegEnd;\nuniform float uSleeveEnd;\nuniform float uWaist;\nuniform float uCollar;\nuniform float uArmpit;\nuniform float uTorsoX;\nuniform float uSleeveX;\nuniform float uLegX;\nuniform float uShoeY;\nfloat drCloth = 0.0;')
       .replace(
         '#include <color_fragment>',
         `#include <color_fragment>
         {
           // leggings: waist down to their hem. tee: waist to collar, with its sleeves. sneakers.
-          float legs = step(uLegEnd, vRest.y) * step(vRest.y, 0.57) * step(vRest.x, 0.125); // (her hands hang further out than her hips)
-          float torso = step(0.55, vRest.y) * step(vRest.y, 0.835) * step(vRest.x, 0.115);
+          float legs = step(uLegEnd, vRest.y) * step(vRest.y, uWaist) * step(vRest.x, uLegX); // (her hands hang further out than her hips)
+          float torso = step(uWaist - 0.02, vRest.y) * step(vRest.y, uCollar) * step(vRest.x, uTorsoX);
           // (below her shoulder, only what is out at her arm is sleeve)
-          float sleeve = step(uSleeveEnd, vRest.y) * step(vRest.y, 0.835) * step(vRest.x, 0.2) * max(step(0.71, vRest.y), step(0.115, vRest.x));
+          float sleeve = step(uSleeveEnd, vRest.y) * step(vRest.y, uCollar) * step(vRest.x, uSleeveX) * max(step(uArmpit, vRest.y), step(uTorsoX, vRest.x));
           float topMask = max(torso, sleeve);
-          float shoe = step(vRest.y, 0.04);
+          float shoe = step(vRest.y, uShoeY);
           diffuseColor.rgb = mix(diffuseColor.rgb, uLegs, legs * (1.0 - topMask));
           diffuseColor.rgb = mix(diffuseColor.rgb, uTop, topMask);
           diffuseColor.rgb = mix(diffuseColor.rgb, uShoe, shoe);
@@ -640,7 +725,7 @@ function paintedMaterial(base: THREE.Material, box: THREE.Box3, look: Look, fine
       .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(roughnessFactor, 0.85, drCloth);');
     if (fade) fadeShader(shader, fade);
   };
-  m.customProgramCacheKey = () => (fine ? 'devroom-painted' : 'devroom-painted-plain') + (fade ? '-fade' : '');
+  m.customProgramCacheKey = () => (fine ? 'devroom-painted-v2' : 'devroom-painted-plain-v2') + (fade ? '-fade' : '');
   m.userData.devRoomOwn = true;
   return m;
 }
@@ -852,7 +937,7 @@ export async function startDevRoom(embed?: CrowdHost): Promise<Crowd | void> {
 
   // ---- Loading a model (once), then cloning it per person ----
   const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
-  interface Loaded { shoes?: CrowdShoes | null; hairs: Map<string, THREE.Object3D>; parts: THREE.Object3D[]; scale: number; minY: number; box: THREE.Box3; tris: number; mb: number; ms: number }
+  interface Loaded { male: boolean; shoes?: CrowdShoes | null; hairs: Map<string, THREE.Object3D>; parts: THREE.Object3D[]; scale: number; minY: number; box: THREE.Box3; tris: number; mb: number; ms: number }
   const cache = new Map<string, Promise<Loaded>>();
   const load = (def: ModelDef) => {
     let p = cache.get(def.key);
@@ -865,6 +950,7 @@ export async function startDevRoom(embed?: CrowdHost): Promise<Crowd | void> {
           const buf = await (await fetch(url)).arrayBuffer();
           bytes += buf.byteLength;
           const gltf = await loader.parseAsync(buf, '');
+          deinterleave(gltf.scene);
           parts.push(gltf.scene);
         }
         // HER HAIR (v0.57): the builder's hairstyles, each one's LIGHT file (about 5k triangles, a fifth of the full
@@ -876,13 +962,18 @@ export async function startDevRoom(embed?: CrowdHost): Promise<Crowd | void> {
             if (!res.ok) throw new Error(`${res.status}`);
             const buf = await res.arrayBuffer();
             bytes += buf.byteLength;
-            return (await loader.parseAsync(buf, '')).scene;
+            const scene = (await loader.parseAsync(buf, '')).scene;
+            deinterleave(scene);
+            return scene;
           };
+          const styles = def.male ? MALE_HAIR_STYLES : HAIR_STYLES;
           try {
-            const got = await Promise.all(HAIR_STYLES.map((style) => one(BUILDER + style.lightFile.replace(/^models\//, ''))));
-            HAIR_STYLES.forEach((style, k) => hairs.set(style.id, got[k]));
-          } catch {
+            const got = await Promise.all(styles.map((style) => one(BUILDER + style.lightFile.replace(/^models\//, ''))));
+            styles.forEach((style, k) => hairs.set(style.id, got[k]));
+          } catch (e) {
             hairs.clear();
+            // (his: what of them did come is all he has; hers: the one hairstyle she had before)
+            if (def.male) throw e;
             hairs.set('ponytail', await one(BUILDER + 'sarah-v2-hair.glb'));
           }
           parts.push(...hairs.values());
@@ -907,7 +998,7 @@ export async function startDevRoom(embed?: CrowdHost): Promise<Crowd | void> {
           });
         }
         const h = Math.max(0.001, world.max.y - world.min.y);
-        return { hairs, parts, scale: HEIGHT / h, minY: world.min.y, box: rest, tris: Math.round(tris), mb: bytes / 1e6, ms: performance.now() - t0 };
+        return { male: !!def.male, hairs, parts, scale: HEIGHT / h, minY: world.min.y, box: rest, tris: Math.round(tris), mb: bytes / 1e6, ms: performance.now() - t0 };
       })();
       cache.set(def.key, p);
     }
@@ -929,10 +1020,10 @@ export async function startDevRoom(embed?: CrowdHost): Promise<Crowd | void> {
         const keep: GeoKeep = (g.userData.devRoom ??= { index0: g.index, morph0: g.morphAttributes, lods: new Map() });
         const isHair = (mesh.material as THREE.Material).name === 'sarahHair';
         // (v0.57, once: the builder's face types, as seven more shapes of her skin's and of each hairstyle's)
-        if (!keep.faces && src.hairs.size && (isHair || (mesh.material as THREE.Material).name === 'Material_0')) { keep.faces = true; addFaceTypes(mesh, keep.morph0); }
+        if (!keep.faces && src.hairs.size && (isHair || (mesh.material as THREE.Material).name === 'Material_0')) { keep.faces = true; addFaceTypes(mesh, keep.morph0, src.male ? MALE_FACE.frame : undefined); }
         // (her skin only, once: what smoothing the tips of her bust under a tee would move: bustSmoothing)
         if (keep.flat === undefined) {
-          const isSkin = src.box.max.y > src.box.min.y && (mesh.material as THREE.Material).name === 'Material_0';
+          const isSkin = !src.male && src.box.max.y > src.box.min.y && (mesh.material as THREE.Material).name === 'Material_0';
           keep.flat = isSkin ? bustSmoothing(g, keep, (mesh as THREE.Mesh).morphTargetDictionary ?? {}, src.box) : null;
           // (as two extra values on each of her points, which her painted material adds in by her own amount)
           const softPos = new Float32Array(g.attributes.position.count * 3), softNrm = new Float32Array(g.attributes.position.count * 3);
@@ -1151,18 +1242,22 @@ export async function startDevRoom(embed?: CrowdHost): Promise<Crowd | void> {
     return out;
   };
 
+  /** Her skin is the part carrying the builder's `_cloth_cover`; his file has none: his is the skinned mesh in Material_0. */
+  const isSkinOf = (mesh: THREE.Mesh, src: Loaded) =>
+    !!mesh.geometry.getAttribute('_cloth_cover') || (src.male && (mesh as THREE.SkinnedMesh).isSkinnedMesh && (mesh.material as THREE.Material).name === 'Material_0');
   const makePerson = (def: ModelDef, src: Loaded, i: number): Person => {
     const r = rng(1000 + i * 7919);
     const root = new THREE.Group();
     const inner = new THREE.Group();
     // Which look she wears: Joshua's three in turn, or the plain standard body
-    const picked = !def.builder || state.looks === 'off' ? PLAIN : state.looks === 'random' ? randomLook(i, state.seed) : LOOKS[i % LOOKS.length];
+    const picked = def.male ? randomManLook(i, state.seed) : !def.builder || state.looks === 'off' ? PLAIN : state.looks === 'random' ? randomLook(i, state.seed) : LOOKS[i % LOOKS.length];
+    const fit = def.male ? FIT_HIM : FIT_HER;
     // (a test's own changes to a look, for side-by-side comparisons: window.devRoom.tweak = (look, i) => ({ ...look, navel: -100 }))
     const tweaked = def.builder && hooks.tweak ? hooks.tweak(picked, i) : picked;
     // (the cloth tee's wearer has its colour painted on her skin beneath it, so a point of skin showing between the
     // cloth's own points is the tee's colour too)
     // (v0.41: everybody, as a clothing option. The first keeps Sarah's own red; the rest wear it in their own colour)
-    const wearsCloth = def.builder && state.cloth !== 'off' && !tweaked.paint;
+    const wearsCloth = def.builder && !def.male && state.cloth !== 'off' && !tweaked.paint;
     const look = wearsCloth ? { ...tweaked, top: i === 0 ? new THREE.Color(SARAH_TEE.colour).getHex() : tweaked.top, longSleeves: false } : tweaked;
     const tall = 1 + look.heightCm / STANDARD_CM;
     inner.scale.setScalar(src.scale * tall);
@@ -1194,7 +1289,7 @@ export async function startDevRoom(embed?: CrowdHost): Promise<Crowd | void> {
         const body = def.builder && part === src.parts[0];
         let auto: PersonLod | undefined; // (this mesh's entry under AUTO detail, if it has one)
         const dict = mesh.morphTargetDictionary;
-        if (body && dict && mesh.isSkinnedMesh && mesh.geometry.getAttribute('_cloth_cover')) skin = { mesh, dict };
+        if (body && dict && mesh.isSkinnedMesh && isSkinOf(mesh, src)) skin = { mesh, dict };
         const isHair = (mesh.material as THREE.Material).name === 'sarahHair';
         if (isHair && dict && mesh.morphTargetInfluences && mesh.geometry.morphAttributes.position?.length) {
           // (her hair's own shapes: how long it is, and her face's, so it sits on the head she has)
@@ -1276,12 +1371,12 @@ export async function startDevRoom(embed?: CrowdHost): Promise<Crowd | void> {
           if (!state.plain) {
             const base = mesh.material;
             mesh.material = Array.isArray(mesh.material)
-              ? mesh.material.map((m) => paintedMaterial(m, src.box, look, state.detail >= 25 && !auto, fade))
-              : paintedMaterial(mesh.material, src.box, look, state.detail >= 25 && !auto, fade);
+              ? mesh.material.map((m) => paintedMaterial(m, src.box, look, state.detail >= 25 && !auto, fade, fit))
+              : paintedMaterial(mesh.material, src.box, look, state.detail >= 25 && !auto, fade, fit);
             if (auto) {
               // (AUTO: a second material with her fine bump picture, for the levels heavy enough to carry it)
               auto.plain = mesh.material;
-              auto.fine = Array.isArray(base) ? base.map((m) => paintedMaterial(m, src.box, look, true, fade)) : paintedMaterial(base, src.box, look, true, fade);
+              auto.fine = Array.isArray(base) ? base.map((m) => paintedMaterial(m, src.box, look, true, fade, fit)) : paintedMaterial(base, src.box, look, true, fade, fit);
             }
           }
           if (state.shapes === 'live' && dict && mesh.morphTargetInfluences) {
@@ -1320,7 +1415,7 @@ export async function startDevRoom(embed?: CrowdHost): Promise<Crowd | void> {
           try {
             if (!src.shoes) {
               let template: THREE.SkinnedMesh | undefined;
-              src.parts[0].traverse((o) => { const m = o as THREE.SkinnedMesh; if (m.isSkinnedMesh && m.geometry.getAttribute('_cloth_cover')) template = m; });
+              src.parts[0].traverse((o) => { const m = o as THREE.SkinnedMesh; if (m.isSkinnedMesh && isSkinOf(m, src)) template = m; });
               if (!template) throw new Error('no skin to build them on');
               src.shoes = makeCrowdShoes(template, src.parts[0], [measure.joints.ankleL, measure.joints.ankleR]);
             }
@@ -2067,15 +2162,30 @@ export async function startDevRoom(embed?: CrowdHost): Promise<Crowd | void> {
   onBuilt = paint;
   if (embed) {
     // 🧍 THE CROWD'S HANDLE for the game (see Crowd, at the top)
-    let dealt = 0;
+    // (🧪 development builds only: a test machine draws at 1 to 4 fps, so smart FPS draws nobody; this lets a test
+    // switch it off to take a picture)
+    if (import.meta.env.DEV) (window as unknown as { __crowd: unknown }).__crowd = { state, smart };
+    let dealt = 0, dealtMen = 0;
+    // 👨 HIS BODY (v0.93), loaded once hers is in (so the women walk in first), and made ready as hers is
+    let maleSrc: Loaded | null = null;
+    void firstBuild.then(async () => {
+      try {
+        const src = await load(MALE_MODEL);
+        await applyModelSettings(src);
+        maleSrc = src;
+        console.info(`[devroom] his body is in: ${src.mb.toFixed(1)} MB, ${src.hairs.size} hairstyles, ${src.tris} triangles`);
+      } catch (e) { cache.delete(MALE_MODEL.key); console.error('[devroom] no male body', e); }
+    });
     return {
       ready: firstBuild.then(() => !!lastSrc),
-      add: ({ bump, cloth }) => {
-        if (!lastSrc) return null;
-        // (her looks dealt as the room's random ones are, then her belly as the game rolled it)
-        hooks.tweak = (look) => ({ ...look, bump, paint: !cloth });
+      get men() { return !!maleSrc; },
+      add: ({ bump, cloth, male }) => {
+        if (male && !maleSrc) return null;
+        if (!male && !lastSrc) return null;
+        // (her looks dealt as the room's random ones are, then her belly as the game rolled it; his are his own)
+        hooks.tweak = male ? null : (look) => ({ ...look, bump, paint: !cloth });
         let p: Person;
-        try { p = makePerson(state.model, lastSrc, dealt++); } finally { hooks.tweak = null; }
+        try { p = male ? makePerson(MALE_MODEL, maleSrc!, dealtMen++) : makePerson(state.model, lastSrc!, dealt++); } finally { hooks.tweak = null; }
         people.push(p);
         return {
           root: p.root,
@@ -2085,7 +2195,7 @@ export async function startDevRoom(embed?: CrowdHost): Promise<Crowd | void> {
         };
       },
       step: (dt) => tick(performance.now(), dt),
-      info: () => `${drawn} of ${people.length} women drawn · smart FPS ${smart.doing}, up to ${smart.count} to ${(smart.range / METRE).toFixed(0)} m · ${smart.rate.toFixed(0)} fps`,
+      info: () => `${drawn} of ${people.length} people drawn${maleSrc ? '' : ' (his body loading)'} · smart FPS ${smart.doing}, up to ${smart.count} to ${(smart.range / METRE).toFixed(0)} m · ${smart.rate.toFixed(0)} fps`,
 
     };
   }
@@ -2093,5 +2203,5 @@ export async function startDevRoom(embed?: CrowdHost): Promise<Crowd | void> {
   renderer.info.autoReset = false;
 
   // (for the headless tests)
-  (window as unknown as { devRoom: unknown }).devRoom = Object.assign(hooks, { stressTest: STRESS, stressLines: () => stress.lines, state, people, renderer, looks: LOOKS, randomLook, get fps() { return fps; } });
+  (window as unknown as { devRoom: unknown }).devRoom = Object.assign(hooks, { stressTest: STRESS, stressLines: () => stress.lines, state, people, renderer, looks: LOOKS, randomLook, randomManLook, get fps() { return fps; } });
 }

@@ -43,3 +43,15 @@ with v0.9.40 and are unchanged since `6e0b67b`. Not re-copied: `softBody.ts`, `b
 (small changes in the builder since) and the builder's newer garments (its cloth shirt, tunic and brief, its sixteen
 painted tops and the drawn bottoms): the airport's women wear the one cloth tee the DEV Room has, frozen once dressed,
 or its painted tee, over painted leggings.
+
+## His body, his hair and his face's frame (2026-11-22, builder commit `1b53eae`, v0.9.72)
+
+Re-copied unchanged from `src/sarahlab/`: `faceRig.ts`, `faceShapeFields.ts`, `hairStyles.ts` (it gained
+`MALE_HAIR_STYLES`), `hairMaterial.ts`, `headLook.ts`, `faceLook.ts`; added `maleFace.ts` (his face's frame,
+`MALE_FACE`). The posing code (`humanRig.ts`, `humanPose.ts`, `humanSkeleton.ts`, `walkWeight.ts`, `HumanRig.ts`)
+was compared and is the same: it finds bones by role, so it poses him as it poses her.
+
+The crowd (`src/devRoom.ts`) loads the builder's `male-base.glb` and his twelve hairstyles' light files
+(`models/hair/male/`) once her body is in, and the airport's men are his from then on. His file stores its points
+interleaved; the crowd unpacks it as it is read (`deinterleave`). His clothes are the room's stand-in paint, laid
+by his own fit (`FIT_HIM`).

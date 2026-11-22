@@ -156,6 +156,21 @@ export class Passengers {
     m.root.userData.sitDrop = SIZE.person * 0.47 * 0.82;
     return Object.assign(m, { seats: [] as THREE.Object3D[] });
   }
+  /** 👨 A man of the builder's (v0.93): his own random looks; no belly of a pregnancy. */
+  private man(): (CreatureModel & { seats: THREE.Object3D[] }) | null {
+    const him = this.crowd?.add({ bump: 0, cloth: false, male: true });
+    if (!him) return null;
+    const m = newModel(SIZE.person, SIZE.person * 0.3);
+    m.root.scale.setScalar(SIZE.person / CROWD_HEIGHT);
+    m.root.add(him.root);
+    m.drive = (_dt, speed) => {
+      him.speed = speed;
+    };
+    m.root.userData.crowd = him;
+    m.root.userData.bump = 0;
+    m.root.userData.sitDrop = SIZE.person * 0.47 * 0.82;
+    return Object.assign(m, { seats: [] as THREE.Object3D[] });
+  }
   /** A traveller has gone for good: what was hers alone is let go of. */
   gone(p: Pax) {
     (p.model.root.userData.crowd as CrowdPerson | undefined)?.dispose();
@@ -168,9 +183,15 @@ export class Passengers {
   private person(): (CreatureModel & { seats: THREE.Object3D[] }) | null {
     if (!this.people) return null;
     // (half are women: the builder's, once its body is in)
-    if (this.crowd && Math.random() < 0.5) {
+    const woman = Math.random() < 0.5;
+    if (this.crowd && woman) {
       const her = this.woman();
       if (her) return her;
+    }
+    // 👨 (v0.93) the men: the builder's too, once his body is in (the story's men stand in until then)
+    if (this.crowd?.men && !woman) {
+      const him = this.man();
+      if (him) return him;
     }
     const ready = MEN.filter((k) => hasModel(k.file));
     if (!ready.length) return null;
