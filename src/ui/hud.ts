@@ -911,6 +911,14 @@ export class Hud {
       show(1);
       onChange(1);
     });
+    // (the presets: 0.5x, 2x, 5x)
+    document.querySelectorAll<HTMLButtonElement>('.speed-reset[data-speed]').forEach((b) =>
+      b.addEventListener('click', () => {
+        const v = Number(b.dataset.speed);
+        slider.value = String(v);
+        show(v);
+        onChange(v);
+      }));
   }
 
   /** 🎵 Music + 🔊 Effects sliders (0..1). */

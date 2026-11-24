@@ -9,6 +9,7 @@
 // They're small aphids for now (a giant aphid is ~4–5 mm: they fit two to a ladybug). Bigger planes later will
 // carry bigger travellers.
 // ============================================================================
+import { pace } from '../core/pace';
 import { PEOPLE_LOD, setPersonLod } from '../actors/creatures';
 import { newModel, type CreatureModel } from '../actors/models';
 import { CROWD_HEIGHT, type Crowd, type CrowdPerson } from '../devRoom';
@@ -425,7 +426,8 @@ export class Passengers {
       if (p.route.length > 1) d.subVectors(p.route[0], p.pos).setY(0);
     } else p.route = null;
     const leg = d.length();
-    const step = Math.min(leg, TY.passengerSpeed * dt);
+    // (v0.93.4: the travellers follow Settings' Movement speed, as the ants do: 0.5x is about a real person's walk)
+    const step = Math.min(leg, TY.passengerSpeed * pace.move * dt);
     if (leg > 1e-6) p.pos.addScaledVector(d.normalize(), step);
     // 🧍 not through one another: a walker is eased aside from anybody within a shoulder's width (never into a wall)
     // (not on its last steps: a place at a counter is closer to its neighbours than that, and it has to get there)
@@ -446,6 +448,6 @@ export class Passengers {
       p.pos.y = Math.max(p.pos.y + (p.target.y - p.pos.y) * Math.min(1, step / dist), this.ground(p.pos.x, p.pos.z));
     } else p.pos.y = Math.max(p.target.y * (1 - Math.min(1, dist / 3)), this.ground(p.pos.x, p.pos.z)); // (up the ramp near the end)
     faceToward(p.model, d.x, d.z, dt, 10);
-    animateCreature(p.model, dt, TY.passengerSpeed);
+    animateCreature(p.model, dt, TY.passengerSpeed * pace.move);
   }
 }

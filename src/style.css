@@ -630,7 +630,7 @@ body.launch-on .up-btn { display: none; } /* (the launch button takes the bottom
 .speed-label { font-weight: 800; font-size: 15px; margin-bottom: 4px; }
 .speed-row input[type='range'] { width: 100%; accent-color: #2d6cdf; height: 28px; }
 .speed-ends { display: flex; justify-content: space-between; align-items: center; font-size: 12px; opacity: 0.85; }
-.speed-reset { border: none; border-radius: 10px; padding: 3px 10px; font: inherit; font-weight: 800; background: #e8eefc; color: #2d6cdf; }
+.speed-reset { border: none; border-radius: 10px; padding: 8px 16px; min-width: 56px; font: inherit; font-weight: 800; background: #e8eefc; color: #2d6cdf; }
 
 /* 🎓 Tutorial: the small "Skip" button in the quest card's top row */
 .hint-skip {

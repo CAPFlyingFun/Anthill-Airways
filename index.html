@@ -174,9 +174,10 @@
           <!-- 🐢 slower ... 🐇 faster: how fast everyone WALKS (ants, people, dinos...) -->
           <div class="speed-row">
             <div id="speedLabel" class="speed-label">🐜 Movement speed: 1.0x (normal)</div>
-            <input id="speedSlider" type="range" min="0.2" max="3" step="0.1" value="1" aria-label="Movement speed" />
-            <p class="speed-note">Ants, people, dinos and other creatures. Machines and food keep their normal pace.</p>
-            <div class="speed-ends"><span>0.2x</span><button id="speedReset" class="speed-reset">Normal</button><span>3x</span></div>
+            <input id="speedSlider" type="range" min="0.2" max="5" step="0.1" value="1" aria-label="Movement speed" />
+            <p class="speed-note">Ants, people (travellers too), dinos and other creatures. Planes, machines and food keep their normal pace. 0.5x is about a real person's walk.</p>
+            <!-- (v0.93.4: four presets, Joshua: "x0.5, x1, x2, x5") -->
+            <div class="speed-ends"><button class="speed-reset" data-speed="0.5">0.5x</button><button id="speedReset" class="speed-reset">1x</button><button class="speed-reset" data-speed="2">2x</button><button class="speed-reset" data-speed="5">5x</button></div>
           </div>
           <button id="updateBtn" class="menu-btn">Check for updates</button>
           <p id="updateStatus" class="ver"></p>
