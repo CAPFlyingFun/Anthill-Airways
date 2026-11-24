@@ -222,6 +222,140 @@ interface Look {
   paint?: boolean;
   /** 👨 (v0.93) a man's look: painted on his body's own fit, no belly or bust of hers. */
   male?: boolean;
+  /** 👕 (v0.94) the style of the outfit: neckline, hem, sleeves, trims, a skirt or shorts over the legs, socks, a belt. */
+  outfit?: Outfit;
+}
+
+/**
+ * 👕 AN OUTFIT'S STYLE (v0.94; Joshua, 2026-11-24: "randomize the style of outfits… make a list of male/female outfits
+ * available and then decide on which ones to include"; of the list, "All look good… add the catsuit with a lot of the
+ * other ones minus the heavy cloth sims"). Every style is paint on the body (no cloth, nothing extra to load): one more
+ * set of numbers for the same program. Leg heights here are like `legLength`: 0 at the waist, 1 at the shoe.
+ */
+interface Outfit {
+  /** The style's name (shown in the DEV Room's look, and handy in a test). */
+  name: string;
+  /** Neckline at the front: 0 crew, 1 V, 2 scoop. */
+  neck: 0 | 1 | 2;
+  /** How far the front of the neckline dips under the collar (a share of the body's height). */
+  neckDepth: number;
+  /** Where the top ends, as a height up the body (FIT's waist is a tee's). */
+  hem: number;
+  /** Sleeves: 0 as `longSleeves` says, 1 none (a muscle tee), 2 none with thin straps (a tank, a sports bra). */
+  sleeves: 0 | 1 | 2;
+  /** A second colour for the trims (a ringer's bands, a raglan's sleeves, a collar and placket). */
+  trim?: number;
+  /** A ringer: bands of the trim colour round the neck and the sleeves' ends. */
+  ringer?: boolean;
+  /** A raglan: the sleeves and a diagonal over the shoulders in the trim colour. */
+  raglan?: boolean;
+  /** 1 a polo (collar and a short placket with buttons), 2 a button-up (collar, a placket to the hem, a chest pocket),
+   *  3 a henley (a short placket with buttons, no collar). */
+  collar?: 0 | 1 | 2 | 3;
+  /** An open jacket's colour over the top (the tee shows down the front). */
+  jacket?: number;
+  /** A skirt, or shorts over tights: its colour and how far down the leg it reaches. */
+  outer?: number;
+  outerEnd?: number;
+  /** Socks: their colour and how far up the leg they reach (crew socks about 0.92, knee socks 0.55). */
+  sock?: number;
+  sockTop?: number;
+  /** A belt at the waist. */
+  belt?: number;
+  /** Joggers: a darker cuff at the trousers' end. */
+  cuff?: boolean;
+}
+
+/** The colours of the airport crew's uniform (X3): a sky blue shirt, navy collar, navy trousers. */
+const CREW_SHIRT = 0x9cc6ec, CREW_NAVY = 0x1d2c4f;
+
+/**
+ * 👕 DEAL AN OUTFIT onto a random look (v0.94). Its own random numbers, so a person keeps the colours, height and head
+ * the earlier versions gave them; the style can change what of them is worn (a catsuit is one colour, a dress has no
+ * leggings). The weights are GAME TUNING: mostly everyday tees and trousers, the rest now and then.
+ */
+function dealOutfit(look: Look, i: number, seed: number, fit: PaintFit): Look {
+  const r = rng(55511 + i * 3301 + seed * 104729 + (look.male ? 977 : 0));
+  const pickW = <T,>(list: readonly [T, number][]) => {
+    let t = r() * list.reduce((s, [, w]) => s + w, 0);
+    for (const [v, w] of list) if ((t -= w) <= 0) return v;
+    return list[list.length - 1][0];
+  };
+  const shade = (hex: number, k: number) => new THREE.Color(hex).multiplyScalar(k).getHex();
+  const anyColour = (sat = 0.4 + r() * 0.4, light = 0.3 + r() * 0.35) => {
+    const h = r(), skinLike = h < 0.15 || h > 0.94;
+    return new THREE.Color().setHSL(h, skinLike ? Math.max(sat, 0.72) : sat, skinLike ? Math.min(light, 0.46) : light).getHex();
+  };
+  const out = { ...look };
+  const tee: Outfit = { name: 'tee', neck: 0, neckDepth: 0.012, hem: fit.waist - 0.02, sleeves: 0 };
+  // (the trim colour: a contrasting one for a ringer or raglan, white or a darker shade of the top half the time)
+  const contrast = () => (r() < 0.35 ? 0xf2f2f2 : r() < 0.4 ? shade(look.top, 0.45) : anyColour(0.5, 0.35));
+  const socks = (o: Outfit, knee: number) => {
+    const s = r();
+    if (s < knee) { o.sock = r() < 0.6 ? 0xf2f2f2 : r() < 0.6 ? 0x26262b : anyColour(); o.sockTop = 0.55; }
+    else if (s < knee + 0.5) { o.sock = r() < 0.65 ? 0xf2f2f2 : r() < 0.6 ? 0x26262b : anyColour(); o.sockTop = 0.92; }
+  };
+  const belt = (o: Outfit, chance: number) => { if (r() < chance) o.belt = r() < 0.5 ? 0x3a2618 : r() < 0.6 ? 0x1c1c1f : 0x7a5230; };
+  let o: Outfit;
+  if (look.male) {
+    const top = pickW<string>([['tee', 26], ['vneck', 14], ['tank', 9], ['polo', 10], ['henley', 5], ['buttonup', 9], ['ringer', 7], ['raglan', 6], ['jacket', 9], ['crew', 5]]);
+    o = { ...tee, name: top };
+    if (top === 'vneck') { o.neck = 1; o.neckDepth = 0.05; }
+    else if (top === 'tank') { o.sleeves = 1; o.neck = 2; o.neckDepth = 0.035; out.longSleeves = false; }
+    else if (top === 'polo') { o.collar = 1; o.trim = r() < 0.6 ? shade(look.top, 0.8) : contrast(); out.longSleeves = false; }
+    else if (top === 'henley') { o.collar = 3; o.trim = shade(look.top, 0.8); out.longSleeves = r() < 0.4; }
+    else if (top === 'buttonup') { o.collar = 2; o.trim = shade(look.top, 0.82); out.longSleeves = r() < 0.6; }
+    else if (top === 'ringer') { o.ringer = true; o.trim = contrast(); }
+    else if (top === 'raglan') { o.raglan = true; o.trim = contrast(); out.longSleeves = r() < 0.5; }
+    else if (top === 'jacket') { o.jacket = r() < 0.5 ? anyColour(0.08, 0.15 + r() * 0.2) : anyColour(0.4, 0.25); out.longSleeves = true; }
+    else if (top === 'crew') { o.collar = 2; o.trim = CREW_NAVY; out.top = CREW_SHIRT; out.legs = CREW_NAVY; out.legLength = 1; out.longSleeves = r() < 0.4; o.belt = 0x1c1c1f; return { ...out, outfit: o }; }
+    const bottom = pickW<string>([['trousers', 40], ['shorts', 25], ['joggers', 20], ['athletic', 15]]);
+    if (bottom === 'trousers') { out.legLength = 1; belt(o, 0.45); }
+    else if (bottom === 'shorts') { out.legLength = Math.round((0.22 + r() * 0.15) * 100) / 100; belt(o, 0.35); socks(o, 0); }
+    else if (bottom === 'joggers') { out.legLength = 1; o.cuff = true; o.name += ' + joggers'; out.legs = r() < 0.6 ? anyColour(0.05, 0.15 + r() * 0.35) : out.legs; }
+    else { out.legLength = r() < 0.5 ? 1 : 0.85; out.legs = anyColour(0.05, 0.1 + r() * 0.1); o.outer = anyColour(0.45, 0.3); o.outerEnd = 0.28 + r() * 0.08; o.name += ' + athletic shorts'; socks(o, 0); }
+    if (bottom !== 'joggers' && bottom !== 'athletic') o.name += ' + ' + bottom;
+  } else {
+    const top = pickW<string>([['tee', 20], ['vneck', 12], ['scoop', 10], ['tank', 12], ['crop', 8], ['sportsbra', 5], ['ringer', 6], ['raglan', 6], ['buttonup', 4], ['polo', 3], ['catsuit', 5], ['dress', 6], ['crew', 3]]);
+    o = { ...tee, name: top };
+    if (top === 'vneck') { o.neck = 1; o.neckDepth = 0.065; }
+    else if (top === 'scoop') { o.neck = 2; o.neckDepth = 0.05; }
+    else if (top === 'tank') { o.sleeves = 2; o.neck = 2; o.neckDepth = 0.06; out.longSleeves = false; }
+    else if (top === 'crop') { o.hem = fit.waist + 0.06; out.longSleeves = r() < 0.2; }
+    else if (top === 'sportsbra') { o.sleeves = 2; o.neck = 2; o.neckDepth = 0.06; o.hem = fit.armpit - 0.05; out.longSleeves = false; }
+    else if (top === 'ringer') { o.ringer = true; o.trim = contrast(); }
+    else if (top === 'raglan') { o.raglan = true; o.trim = contrast(); out.longSleeves = r() < 0.5; }
+    else if (top === 'buttonup') { o.collar = 2; o.trim = shade(look.top, 0.82); out.longSleeves = r() < 0.5; }
+    else if (top === 'polo') { o.collar = 1; o.trim = r() < 0.6 ? shade(look.top, 0.8) : contrast(); out.longSleeves = false; }
+    else if (top === 'catsuit') {
+      // (one colour from her neck to her ankles and wrists: a crew or a scoop neck)
+      if (r() < 0.4) { o.neck = 2; o.neckDepth = 0.04; }
+      out.legs = out.top; out.legLength = 1; out.longSleeves = true; o.hem = fit.waist - 0.03;
+      return { ...out, outfit: o };
+    } else if (top === 'dress') {
+      // (her top and a skirt in one colour; bare legs, or dark tights a quarter of the time)
+      o.neck = r() < 0.4 ? 0 : r() < 0.5 ? 1 : 2; o.neckDepth = o.neck === 0 ? 0.012 : 0.05;
+      if (r() < 0.35) o.sleeves = 2;
+      out.longSleeves = false;
+      o.outer = out.top; o.outerEnd = 0.25 + r() * 0.35;
+      if (r() < 0.25) { out.legLength = 1; out.legs = anyColour(0.05, 0.1 + r() * 0.08); } else { out.legLength = 0; socks(o, 0.15); }
+      if (r() < 0.3) o.belt = shade(out.top, 0.5);
+      return { ...out, outfit: o };
+    } else if (top === 'crew') { o.collar = 2; o.trim = CREW_NAVY; out.top = CREW_SHIRT; out.legs = CREW_NAVY; out.legLength = 1; out.longSleeves = r() < 0.3; o.belt = 0x1c1c1f; return { ...out, outfit: o }; }
+    const bottom = pickW<string>([['leggings', 30], ['capri', 12], ['shorts', 16], ['bike', 10], ['skirt', 22]]);
+    o.name += ' + ' + bottom;
+    if (bottom === 'leggings') out.legLength = 1;
+    else if (bottom === 'capri') out.legLength = 0.72;
+    else if (bottom === 'shorts') { out.legLength = Math.round((0.2 + r() * 0.12) * 100) / 100; socks(o, 0.2); belt(o, 0.15); }
+    else if (bottom === 'bike') { out.legLength = 0.36; out.legs = r() < 0.6 ? anyColour(0.05, 0.12 + r() * 0.12) : out.legs; socks(o, 0.1); }
+    else {
+      // (a skirt from mini to the knee, over bare legs or leggings)
+      o.outer = r() < 0.5 ? out.legs : anyColour(0.45, 0.3 + r() * 0.25); o.outerEnd = 0.22 + r() * 0.3;
+      if (r() < 0.4) { out.legLength = 1; out.legs = anyColour(0.05, 0.1 + r() * 0.12); } else { out.legLength = 0; socks(o, 0.25); }
+      belt(o, 0.15);
+    }
+  }
+  return { ...out, outfit: o };
 }
 /** The name a face type has among a mesh's shapes. */
 const FACE_SHAPE = (id: string) => `faceType:${id}`;
@@ -719,15 +853,30 @@ function paintedMaterial(base: THREE.Material, box: THREE.Box3, look: Look, fine
   // (her skin's bump detail is drawn from a second picture, the normal map. On a much lighter body the
   // picture no longer lines up with the big triangles, and it shows as dark blotches on her face: off below 25%)
   if (!fine) (m as THREE.MeshStandardMaterial).normalMap = null;
+  const o = look.outfit;
+  // (a leg height like legLength -- 0 at the waist, 1 at the shoe -- as a height up the body; 0 or less: none)
+  const legAt = (f: number) => fit.waist - Math.min(1, f) * (fit.waist - fit.shoe);
+  const legEnd = look.legLength !== undefined ? (look.legLength <= 0 ? 9 : legAt(Math.max(0.1, look.legLength))) : look.capri ? 0.17 : 0.04;
   const uniforms = {
     uTop: { value: new THREE.Color(look.top) },
     uLegs: { value: new THREE.Color(look.legs) },
     uShoe: { value: new THREE.Color(SHOE_COLOURS[look.shoe ?? 0] ?? SNEAKERS) }, // (under her sneakers, and in their place far off)
-    uLegEnd: { value: look.legLength !== undefined ? fit.waist - Math.min(1, Math.max(0.1, look.legLength)) * (fit.waist - fit.shoe) : look.capri ? 0.17 : 0.04 },      // where the leggings end (height up her body)
+    uLegEnd: { value: legEnd },      // where the leggings end (height up her body)
     uSleeveEnd: { value: look.longSleeves ? fit.waist - 0.01 : fit.armpit }, // where the sleeves end
     // (v0.93: where each piece goes on this body: FIT_HER, or his)
     uWaist: { value: fit.waist }, uCollar: { value: fit.collar }, uArmpit: { value: fit.armpit },
     uTorsoX: { value: fit.torsoX }, uSleeveX: { value: fit.sleeveX }, uLegX: { value: fit.legX }, uShoeY: { value: fit.shoe },
+    // 👕 (v0.94: the outfit's style. x neckline kind, y its depth, z the top's hem, w sleeves' kind)
+    uStyle: { value: new THREE.Vector4(o?.neck ?? 0, o?.neckDepth ?? 0.012, o?.hem ?? fit.waist - 0.02, o?.sleeves ?? 0) },
+    // (x ringer, y raglan, z collar kind, w jacket)
+    uTrims: { value: new THREE.Vector4(o?.ringer ? 1 : 0, o?.raglan ? 1 : 0, o?.collar ?? 0, o?.jacket !== undefined ? 1 : 0) },
+    uTrim: { value: new THREE.Color(o?.trim ?? look.top) },
+    uJacket: { value: new THREE.Color(o?.jacket ?? look.top) },
+    uOuter: { value: new THREE.Color(o?.outer ?? look.legs) },
+    uSock: { value: new THREE.Color(o?.sock ?? 0xffffff) },
+    uBelt: { value: new THREE.Color(o?.belt ?? 0) },
+    // (x the skirt's or over-shorts' end (9: none), y the socks' top (-1: none), z a belt, w joggers' cuff)
+    uLower: { value: new THREE.Vector4(o?.outer !== undefined ? legAt(o.outerEnd ?? 0.3) : 9, o?.sock !== undefined ? legAt(o.sockTop ?? 0.92) : -1, o?.belt !== undefined ? 1 : 0, o?.cuff ? 1 : 0) },
     uY0: { value: box.min.y },
     uH: { value: box.max.y - box.min.y },
     // (how much of the levelling of her bust's tips she takes under her tee: all of it at 0 detail; the patch
@@ -738,26 +887,62 @@ function paintedMaterial(base: THREE.Material, box: THREE.Box3, look: Look, fine
   m.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, uniforms);
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', '#include <common>\nvarying vec2 vRest;\nuniform float uY0;\nuniform float uH;\nuniform float uSoften;\nattribute vec3 softPos;\nattribute vec3 softNrm;')
+      .replace('#include <common>', '#include <common>\nvarying vec3 vRest;\nuniform float uY0;\nuniform float uH;\nuniform float uSoften;\nattribute vec3 softPos;\nattribute vec3 softNrm;')
       .replace('#include <beginnormal_vertex>', '#include <beginnormal_vertex>\nobjectNormal += softNrm * uSoften;')
-      .replace('#include <begin_vertex>', '#include <begin_vertex>\ntransformed += softPos * uSoften;\nvRest = vec2(abs(position.x) / uH, (position.y - uY0) / uH);');
+      // (v0.94: across her (signed: +x her left), up her, and forward (+z her front), each a share of her height)
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\ntransformed += softPos * uSoften;\nvRest = vec3(position.x / uH, (position.y - uY0) / uH, position.z / uH);');
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', '#include <common>\nvarying vec2 vRest;\nuniform vec3 uTop;\nuniform vec3 uLegs;\nuniform vec3 uShoe;\nuniform float uLegEnd;\nuniform float uSleeveEnd;\nuniform float uWaist;\nuniform float uCollar;\nuniform float uArmpit;\nuniform float uTorsoX;\nuniform float uSleeveX;\nuniform float uLegX;\nuniform float uShoeY;\nfloat drCloth = 0.0;')
+      .replace('#include <common>', '#include <common>\nvarying vec3 vRest;\nuniform vec3 uTop;\nuniform vec3 uLegs;\nuniform vec3 uShoe;\nuniform vec3 uTrim;\nuniform vec3 uJacket;\nuniform vec3 uOuter;\nuniform vec3 uSock;\nuniform vec3 uBelt;\nuniform vec4 uStyle;\nuniform vec4 uTrims;\nuniform vec4 uLower;\nuniform float uLegEnd;\nuniform float uSleeveEnd;\nuniform float uWaist;\nuniform float uCollar;\nuniform float uArmpit;\nuniform float uTorsoX;\nuniform float uSleeveX;\nuniform float uLegX;\nuniform float uShoeY;\nfloat drCloth = 0.0;')
       .replace(
         '#include <color_fragment>',
         `#include <color_fragment>
         {
-          // leggings: waist down to their hem. tee: waist to collar, with its sleeves. sneakers.
-          float legs = step(uLegEnd, vRest.y) * step(vRest.y, uWaist) * step(vRest.x, uLegX); // (her hands hang further out than her hips)
-          float torso = step(uWaist - 0.02, vRest.y) * step(vRest.y, uCollar) * step(vRest.x, uTorsoX);
-          // (below her shoulder, only what is out at her arm is sleeve)
-          float sleeve = step(uSleeveEnd, vRest.y) * step(vRest.y, uCollar) * step(vRest.x, uSleeveX) * max(step(uArmpit, vRest.y), step(uTorsoX, vRest.x));
+          float ax = abs(vRest.x), y = vRest.y;
+          // (her front: forward of her middle, which is further back at her neck -- MEASURED on both bodies)
+          float front = step(mix(-0.01, -0.04, smoothstep(0.76, 0.84, y)), vRest.z);
+          // socks, leggings (and a joggers' cuff), a skirt or shorts over them
+          float sock = step(uShoeY, y) * step(y, uLower.y) * step(ax, uLegX);
+          float legs = step(uLegEnd, y) * step(y, uWaist) * step(ax, uLegX); // (her hands hang further out than her hips)
+          float cuff = legs * uLower.w * step(y, uLegEnd + 0.045);
+          float outer = step(uLower.x, y) * step(y, uWaist + 0.005) * step(ax, uLegX);
+          // the top: its body to its hem, its neckline cut at the front
+          float torso = step(uStyle.z, y) * step(y, uCollar) * step(ax, uTorsoX);
+          float w = 0.05, k = clamp(ax / w, 0.0, 1.0);
+          float dip = uStyle.x < 0.5 ? 0.0 : uStyle.x < 1.5 ? uStyle.y * (1.0 - k) : uStyle.y * sqrt(max(0.0, 1.0 - k * k));
+          float neckLine = uCollar - dip * front * step(ax, w);
+          torso *= step(y, neckLine);
+          // (a tank's straps: over her shoulders only a strap's width either side of her neck is left)
+          torso *= 1.0 - step(1.5, uStyle.w) * step(uArmpit, y) * (1.0 - step(ax, 0.072)) ;
+          // (below her shoulder, only what is out at her arm is sleeve; none on a sleeveless top)
+          // (a sleeveless top keeps off her upper arms, which hang inside its width under her armpits)
+          torso *= 1.0 - step(0.5, uStyle.w) * step(uTorsoX - 0.024, ax);
+          float sleeve = step(uSleeveEnd, y) * step(y, neckLine) * step(ax, uSleeveX) * max(step(uArmpit, y), step(uTorsoX, ax)) * step(uStyle.w, 0.5);
           float topMask = max(torso, sleeve);
-          float shoe = step(vRest.y, uShoeY);
-          diffuseColor.rgb = mix(diffuseColor.rgb, uLegs, legs * (1.0 - topMask));
-          diffuseColor.rgb = mix(diffuseColor.rgb, uTop, topMask);
+          // its trims: a ringer's bands, a raglan's sleeves, a collar and placket
+          float band = step(neckLine - 0.012, y) + sleeve * step(uTorsoX, ax) * step(y, uSleeveEnd + 0.012);
+          float trim = uTrims.x * min(1.0, band);
+          float ragl = sleeve * step(uTorsoX, ax) + step(uArmpit, y) * step((uCollar - y) / (uCollar - uArmpit) * (uTorsoX - 0.04), ax - 0.04);
+          trim = max(trim, uTrims.y * min(1.0, ragl));
+          float collarBand = step(0.5, uTrims.z) * step(uTrims.z, 2.5) * step(uCollar - 0.016, y);
+          float plLen = uTrims.z > 1.5 && uTrims.z < 2.5 ? 1.0 : 0.075;
+          float placket = step(0.5, uTrims.z) * front * step(ax, 0.008) * step(uCollar - plLen, y);
+          float buttons = placket * step(fract((uCollar - y) / 0.022), 0.25) * step(ax, 0.004);
+          float pocket = step(1.5, uTrims.z) * step(uTrims.z, 2.5) * front * step(0.03, vRest.x) * step(vRest.x, 0.065) * step(0.72, y) * step(y, 0.76);
+          trim = max(trim, max(collarBand, max(placket, pocket * 0.6)));
+          vec3 topCol = mix(uTop, uTrim, trim * topMask);
+          topCol = mix(topCol, uTop * 0.55, buttons * topMask);
+          // an open jacket over it all, the tee down her front
+          float jacket = uTrims.w * topMask * (1.0 - front * step(ax, 0.035));
+          topCol = mix(topCol, uJacket, jacket);
+          float belt = uLower.z * step(uWaist - 0.012, y) * step(y, uWaist + 0.004) * step(ax, uTorsoX);
+          float shoe = step(y, uShoeY);
+          diffuseColor.rgb = mix(diffuseColor.rgb, uSock, sock);
+          diffuseColor.rgb = mix(diffuseColor.rgb, mix(uLegs, uLegs * 0.6, cuff), legs);
+          diffuseColor.rgb = mix(diffuseColor.rgb, uOuter, outer);
+          diffuseColor.rgb = mix(diffuseColor.rgb, topCol, topMask);
+          diffuseColor.rgb = mix(diffuseColor.rgb, uBelt, belt);
           diffuseColor.rgb = mix(diffuseColor.rgb, uShoe, shoe);
-          drCloth = max(max(legs, topMask), shoe);
+          drCloth = max(max(max(legs, topMask), max(shoe, sock)), max(outer, belt));
         }`,
       )
       // (cloth is smooth: her skin's fine detail isn't drawn through it, as under the builder's paint)
@@ -765,7 +950,7 @@ function paintedMaterial(base: THREE.Material, box: THREE.Box3, look: Look, fine
       .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(roughnessFactor, 0.85, drCloth);');
     if (fade) fadeShader(shader, fade);
   };
-  m.customProgramCacheKey = () => (fine ? 'devroom-painted-v2' : 'devroom-painted-plain-v2') + (fade ? '-fade' : '');
+  m.customProgramCacheKey = () => (fine ? 'devroom-painted-v3' : 'devroom-painted-plain-v3') + (fade ? '-fade' : '');
   m.userData.devRoomOwn = true;
   return m;
 }
@@ -1292,8 +1477,9 @@ export async function startDevRoom(embed?: CrowdHost): Promise<Crowd | void> {
     const root = new THREE.Group();
     const inner = new THREE.Group();
     // Which look she wears: Joshua's three in turn, or the plain standard body
-    const picked = def.male ? randomManLook(i, state.seed) : !def.builder || state.looks === 'off' ? PLAIN : state.looks === 'random' ? randomLook(i, state.seed) : LOOKS[i % LOOKS.length];
     const fit = def.male ? FIT_HIM : FIT_HER;
+    // (v0.94: a random look wears a random outfit's style; Joshua's three keep their tee and leggings)
+    const picked = def.male ? dealOutfit(randomManLook(i, state.seed), i, state.seed, fit) : !def.builder || state.looks === 'off' ? PLAIN : state.looks === 'random' ? dealOutfit(randomLook(i, state.seed), i, state.seed, fit) : LOOKS[i % LOOKS.length];
     // (a test's own changes to a look, for side-by-side comparisons: window.devRoom.tweak = (look, i) => ({ ...look, navel: -100 }))
     const tweaked = def.builder && hooks.tweak ? hooks.tweak(picked, i) : picked;
     // (the cloth tee's wearer has its colour painted on her skin beneath it, so a point of skin showing between the
@@ -2248,5 +2434,5 @@ export async function startDevRoom(embed?: CrowdHost): Promise<Crowd | void> {
   renderer.info.autoReset = false;
 
   // (for the headless tests)
-  (window as unknown as { devRoom: unknown }).devRoom = Object.assign(hooks, { stressTest: STRESS, stressLines: () => stress.lines, state, people, renderer, looks: LOOKS, randomLook, randomManLook, get fps() { return fps; } });
+  (window as unknown as { devRoom: unknown }).devRoom = Object.assign(hooks, { stressTest: STRESS, stressLines: () => stress.lines, state, people, renderer, looks: LOOKS, randomLook, randomManLook, dealOutfit, get fps() { return fps; } });
 }
