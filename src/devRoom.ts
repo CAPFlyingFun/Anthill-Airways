@@ -848,7 +848,39 @@ function rng(seed: number) {
  * body, distance from her middle). One compiled program for everyone; each
  * clone has its own two colours.
  */
-function paintedMaterial(base: THREE.Material, box: THREE.Box3, look: Look, fine = true, fade?: { value: number }, fit: PaintFit = FIT_HER) {
+/**
+ * 💪 WHICH BONES ARE HER ARMS (v0.94.1; Joshua: "Is there a way to exempt the paint from the arms? I see a few people with
+ * paint ending up on their arms. The CCBS room doesn't have that issue"). The builder tells her arm's skin by her bones
+ * (fabricNotArm); the crowd's paint went by where a point stands, and her arms hang beside her body inside a top's or a
+ * pair of shorts' width. So: each upper arm is the bone at shoulder height well out from her middle (MEASURED on both
+ * bodies, as shares of the skeleton's height: her upper arms 0.095 out at 0.85 up, his 0.116 at 0.83; the collarbones
+ * 0.025 and 0.041, which stay the shirt's; the thighs at 0.54), and her arm is it and every bone below it. A point is
+ * arm skin when those bones carry half of it or more. One number a bone, kept per skeleton.
+ */
+const ARM_BONES_MOST = 96; // (the shader keeps them as uArmBone[24], four a slot)
+const armBoneCache = new WeakMap<object, Float32Array>();
+function armBones(mesh: THREE.Object3D): Float32Array {
+  const out = new Float32Array(ARM_BONES_MOST);
+  const sk = (mesh as THREE.SkinnedMesh).skeleton;
+  if (!sk || !sk.bones.length) return out;
+  const key = sk.boneInverses[0];
+  const kept = armBoneCache.get(key);
+  if (kept) return kept;
+  const at = sk.boneInverses.map((m) => new THREE.Vector3().setFromMatrixPosition(m.clone().invert()));
+  let lo = Infinity, hi = -Infinity;
+  for (const p of at) { lo = Math.min(lo, p.y); hi = Math.max(hi, p.y); }
+  const span = Math.max(1e-6, hi - lo), cx = at[0].x;
+  const roots = new Set<THREE.Object3D>();
+  sk.bones.forEach((b, i) => { if (Math.abs(at[i].x - cx) / span > 0.07 && (at[i].y - lo) / span > 0.75) roots.add(b); });
+  sk.bones.forEach((b, i) => {
+    if (i >= ARM_BONES_MOST) return;
+    for (let o: THREE.Object3D | null = b; o; o = o.parent) if (roots.has(o)) { out[i] = 1; break; }
+  });
+  armBoneCache.set(key, out);
+  return out;
+}
+
+function paintedMaterial(base: THREE.Material, box: THREE.Box3, look: Look, fine = true, fade?: { value: number }, fit: PaintFit = FIT_HER, arm: Float32Array = new Float32Array(ARM_BONES_MOST)) {
   const m = base.clone();
   // (her skin's bump detail is drawn from a second picture, the normal map. On a much lighter body the
   // picture no longer lines up with the big triangles, and it shows as dark blotches on her face: off below 25%)
@@ -877,6 +909,8 @@ function paintedMaterial(base: THREE.Material, box: THREE.Box3, look: Look, fine
     uBelt: { value: new THREE.Color(o?.belt ?? 0) },
     // (x the skirt's or over-shorts' end (9: none), y the socks' top (-1: none), z a belt, w joggers' cuff)
     uLower: { value: new THREE.Vector4(o?.outer !== undefined ? legAt(o.outerEnd ?? 0.3) : 9, o?.sock !== undefined ? legAt(o.sockTop ?? 0.92) : -1, o?.belt !== undefined ? 1 : 0, o?.cuff ? 1 : 0) },
+    // (four bones to a slot: a phone's vertex stage has room for about 256)
+    uArmBone: { value: Array.from({ length: ARM_BONES_MOST / 4 }, (_, k) => new THREE.Vector4(arm[k * 4], arm[k * 4 + 1], arm[k * 4 + 2], arm[k * 4 + 3])) },
     uY0: { value: box.min.y },
     uH: { value: box.max.y - box.min.y },
     // (how much of the levelling of her bust's tips she takes under her tee: all of it at 0 detail; the patch
@@ -887,26 +921,28 @@ function paintedMaterial(base: THREE.Material, box: THREE.Box3, look: Look, fine
   m.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, uniforms);
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', '#include <common>\nvarying vec3 vRest;\nuniform float uY0;\nuniform float uH;\nuniform float uSoften;\nattribute vec3 softPos;\nattribute vec3 softNrm;')
+      .replace('#include <common>', '#include <common>\nvarying vec3 vRest;\nvarying float vArm;\nuniform vec4 uArmBone[24];\nfloat drArmBone(float i) { int k = int(i + 0.5); vec4 v = uArmBone[k / 4]; int c = k - (k / 4) * 4; return c == 0 ? v.x : c == 1 ? v.y : c == 2 ? v.z : v.w; }\nuniform float uY0;\nuniform float uH;\nuniform float uSoften;\nattribute vec3 softPos;\nattribute vec3 softNrm;')
       .replace('#include <beginnormal_vertex>', '#include <beginnormal_vertex>\nobjectNormal += softNrm * uSoften;')
       // (v0.94: across her (signed: +x her left), up her, and forward (+z her front), each a share of her height)
-      .replace('#include <begin_vertex>', '#include <begin_vertex>\ntransformed += softPos * uSoften;\nvRest = vec3(position.x / uH, (position.y - uY0) / uH, position.z / uH);');
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\ntransformed += softPos * uSoften;\nvRest = vec3(position.x / uH, (position.y - uY0) / uH, position.z / uH);\n#ifdef USE_SKINNING\nvArm = dot(skinWeight, vec4(drArmBone(skinIndex.x), drArmBone(skinIndex.y), drArmBone(skinIndex.z), drArmBone(skinIndex.w)));\n#else\nvArm = 0.0;\n#endif');
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', '#include <common>\nvarying vec3 vRest;\nuniform vec3 uTop;\nuniform vec3 uLegs;\nuniform vec3 uShoe;\nuniform vec3 uTrim;\nuniform vec3 uJacket;\nuniform vec3 uOuter;\nuniform vec3 uSock;\nuniform vec3 uBelt;\nuniform vec4 uStyle;\nuniform vec4 uTrims;\nuniform vec4 uLower;\nuniform float uLegEnd;\nuniform float uSleeveEnd;\nuniform float uWaist;\nuniform float uCollar;\nuniform float uArmpit;\nuniform float uTorsoX;\nuniform float uSleeveX;\nuniform float uLegX;\nuniform float uShoeY;\nfloat drCloth = 0.0;')
+      .replace('#include <common>', '#include <common>\nvarying vec3 vRest;\nvarying float vArm;\nuniform vec3 uTop;\nuniform vec3 uLegs;\nuniform vec3 uShoe;\nuniform vec3 uTrim;\nuniform vec3 uJacket;\nuniform vec3 uOuter;\nuniform vec3 uSock;\nuniform vec3 uBelt;\nuniform vec4 uStyle;\nuniform vec4 uTrims;\nuniform vec4 uLower;\nuniform float uLegEnd;\nuniform float uSleeveEnd;\nuniform float uWaist;\nuniform float uCollar;\nuniform float uArmpit;\nuniform float uTorsoX;\nuniform float uSleeveX;\nuniform float uLegX;\nuniform float uShoeY;\nfloat drCloth = 0.0;')
       .replace(
         '#include <color_fragment>',
         `#include <color_fragment>
         {
           float ax = abs(vRest.x), y = vRest.y;
+          // (her arm's skin, by her bones: only a sleeve goes on it)
+          float arm = step(0.5, vArm), body = 1.0 - arm;
           // (her front: forward of her middle, which is further back at her neck -- MEASURED on both bodies)
           float front = step(mix(-0.01, -0.04, smoothstep(0.76, 0.84, y)), vRest.z);
           // socks, leggings (and a joggers' cuff), a skirt or shorts over them
-          float sock = step(uShoeY, y) * step(y, uLower.y) * step(ax, uLegX);
-          float legs = step(uLegEnd, y) * step(y, uWaist) * step(ax, uLegX); // (her hands hang further out than her hips)
+          float sock = step(uShoeY, y) * step(y, uLower.y) * step(ax, uLegX) * body;
+          float legs = step(uLegEnd, y) * step(y, uWaist) * step(ax, uLegX) * body; // (her hands hang further out than her hips)
           float cuff = legs * uLower.w * step(y, uLegEnd + 0.045);
-          float outer = step(uLower.x, y) * step(y, uWaist + 0.005) * step(ax, uLegX);
+          float outer = step(uLower.x, y) * step(y, uWaist + 0.005) * step(ax, uLegX) * body;
           // the top: its body to its hem, its neckline cut at the front
-          float torso = step(uStyle.z, y) * step(y, uCollar) * step(ax, uTorsoX);
+          float torso = step(uStyle.z, y) * step(y, uCollar) * step(ax, uTorsoX) * body;
           float w = 0.05, k = clamp(ax / w, 0.0, 1.0);
           float dip = uStyle.x < 0.5 ? 0.0 : uStyle.x < 1.5 ? uStyle.y * (1.0 - k) : uStyle.y * sqrt(max(0.0, 1.0 - k * k));
           float neckLine = uCollar - dip * front * step(ax, w);
@@ -914,14 +950,13 @@ function paintedMaterial(base: THREE.Material, box: THREE.Box3, look: Look, fine
           // (a tank's straps: over her shoulders only a strap's width either side of her neck is left)
           torso *= 1.0 - step(1.5, uStyle.w) * step(uArmpit, y) * (1.0 - step(ax, 0.072)) ;
           // (below her shoulder, only what is out at her arm is sleeve; none on a sleeveless top)
-          // (a sleeveless top keeps off her upper arms, which hang inside its width under her armpits)
-          torso *= 1.0 - step(0.5, uStyle.w) * step(uTorsoX - 0.024, ax);
-          float sleeve = step(uSleeveEnd, y) * step(y, neckLine) * step(ax, uSleeveX) * max(step(uArmpit, y), step(uTorsoX, ax)) * step(uStyle.w, 0.5);
+          // (a sleeve: her arm's skin down to its end, and her shoulder's over her armpit; none on a sleeveless top)
+          float sleeve = step(uSleeveEnd, y) * step(y, neckLine) * step(ax, uSleeveX) * max(step(uArmpit, y), arm) * step(uStyle.w, 0.5);
           float topMask = max(torso, sleeve);
           // its trims: a ringer's bands, a raglan's sleeves, a collar and placket
-          float band = step(neckLine - 0.012, y) + sleeve * step(uTorsoX, ax) * step(y, uSleeveEnd + 0.012);
+          float band = step(neckLine - 0.012, y) + sleeve * arm * step(y, uSleeveEnd + 0.012);
           float trim = uTrims.x * min(1.0, band);
-          float ragl = sleeve * step(uTorsoX, ax) + step(uArmpit, y) * step((uCollar - y) / (uCollar - uArmpit) * (uTorsoX - 0.04), ax - 0.04);
+          float ragl = sleeve * arm + step(uArmpit, y) * step((uCollar - y) / (uCollar - uArmpit) * (uTorsoX - 0.04), ax - 0.04);
           trim = max(trim, uTrims.y * min(1.0, ragl));
           float collarBand = step(0.5, uTrims.z) * step(uTrims.z, 2.5) * step(uCollar - 0.016, y);
           float plLen = uTrims.z > 1.5 && uTrims.z < 2.5 ? 1.0 : 0.075;
@@ -934,7 +969,7 @@ function paintedMaterial(base: THREE.Material, box: THREE.Box3, look: Look, fine
           // an open jacket over it all, the tee down her front
           float jacket = uTrims.w * topMask * (1.0 - front * step(ax, 0.035));
           topCol = mix(topCol, uJacket, jacket);
-          float belt = uLower.z * step(uWaist - 0.012, y) * step(y, uWaist + 0.004) * step(ax, uTorsoX);
+          float belt = uLower.z * step(uWaist - 0.012, y) * step(y, uWaist + 0.004) * step(ax, uTorsoX) * body;
           float shoe = step(y, uShoeY);
           diffuseColor.rgb = mix(diffuseColor.rgb, uSock, sock);
           diffuseColor.rgb = mix(diffuseColor.rgb, mix(uLegs, uLegs * 0.6, cuff), legs);
@@ -950,7 +985,7 @@ function paintedMaterial(base: THREE.Material, box: THREE.Box3, look: Look, fine
       .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(roughnessFactor, 0.85, drCloth);');
     if (fade) fadeShader(shader, fade);
   };
-  m.customProgramCacheKey = () => (fine ? 'devroom-painted-v3' : 'devroom-painted-plain-v3') + (fade ? '-fade' : '');
+  m.customProgramCacheKey = () => (fine ? 'devroom-painted-v4' : 'devroom-painted-plain-v4') + (fade ? '-fade' : '');
   m.userData.devRoomOwn = true;
   return m;
 }
@@ -1599,12 +1634,12 @@ export async function startDevRoom(embed?: CrowdHost): Promise<Crowd | void> {
           if (!state.plain) {
             const base = mesh.material;
             mesh.material = Array.isArray(mesh.material)
-              ? mesh.material.map((m) => paintedMaterial(m, src.box, look, state.detail >= 25 && !auto, fade, fit))
-              : paintedMaterial(mesh.material, src.box, look, state.detail >= 25 && !auto, fade, fit);
+              ? mesh.material.map((m) => paintedMaterial(m, src.box, look, state.detail >= 25 && !auto, fade, fit, armBones(mesh)))
+              : paintedMaterial(mesh.material, src.box, look, state.detail >= 25 && !auto, fade, fit, armBones(mesh));
             if (auto) {
               // (AUTO: a second material with her fine bump picture, for the levels heavy enough to carry it)
               auto.plain = mesh.material;
-              auto.fine = Array.isArray(base) ? base.map((m) => paintedMaterial(m, src.box, look, true, fade, fit)) : paintedMaterial(base, src.box, look, true, fade, fit);
+              auto.fine = Array.isArray(base) ? base.map((m) => paintedMaterial(m, src.box, look, true, fade, fit, armBones(mesh))) : paintedMaterial(base, src.box, look, true, fade, fit, armBones(mesh));
             }
           }
           if (state.shapes === 'live' && dict && mesh.morphTargetInfluences) {
