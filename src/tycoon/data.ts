@@ -139,6 +139,10 @@ export const AT = {
   tower: { x: 62, z: -30 },
   /** 🧳 The BAG DROP: bags slide out of the terminal here (just outside its airside doorway). */
   bagDrop: { x: 0, z: 1 },
+  /** 🧳 (v0.95) The north field's BAG DROP, by the crossing's north end: the north gates' bags come up there out of
+   *  the 🕳️ bag tunnel from the terminal (its mouth beside the BAG DROP: `tunnel`, from the drop's middle). */
+  bagDropNorth: { x: -66, z: -88 },
+  tunnel: { x: 3.4, z: 0 },
   /** ⬆️ The STAFF OFFICE (upgrades for every ant job): inside the terminal, left of the check-in ant (in the
    *  terminal's own space; v0.71: it was a pad out by the nest). */
   staffLocal: { x: -3.5, z: -5.75 },

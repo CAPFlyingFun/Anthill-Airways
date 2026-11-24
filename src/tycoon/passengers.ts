@@ -90,6 +90,8 @@ export interface Stop {
  */
 /** 🧍 How near two travellers come before the walking one is eased aside (world units; a person is about 1.3 across the shoulders). GAME TUNING. */
 const PERSONAL = 1.25;
+/** (a gate over the crossing: asked for its waypoints, which are the crossing's two ends) */
+const GATES_ACROSS = 99;
 /** How many of the builder's women wear the cloth tee (the rest a painted one). 0 since v0.82: the DEV Room's own
  * settings, "Cloth tee: off" (Joshua: "Match the settings exactly"); it was 0.7. */
 const CLOTH_SHARE = 0;
@@ -114,6 +116,9 @@ export class Passengers {
   gateCap: number[] = [];
   /** x check-in speed (⬆️ staff). */
   checkMult = 1;
+  /** 🚸 May travellers walk over the crossing now? (v0.95: the airfield says no while a plane is on Runway 1 or its
+   *  taxiway there.) They wait at the curb and cross once it's clear. */
+  crossingOpen: () => boolean = () => true;
   /** Called when a passenger finishes checking in (the airfield pays + gives XP). */
   onCheckIn: (p: Pax) => void = () => {};
   private arriveT = 2;
@@ -381,6 +386,8 @@ export class Passengers {
   private followVia(p: Pax) {
     if (!p.via.length) return false;
     if (p.there && p.target.distanceTo(p.via[0]) < 0.01) {
+      // 🚸 at one end of the crossing with the other end next: wait at the curb while a plane is on the runway
+      if (p.via.length > 1 && this.crossLeg(p.via[0], p.via[1]) && !this.crossingOpen()) return true;
       p.via.shift();
       if (p.offBridge > 0) p.offBridge--;
       p.there = false;
@@ -388,6 +395,14 @@ export class Passengers {
     }
     p.target.copy(p.via[0]);
     return true;
+  }
+
+  /** 🚸 Is the walk from `a` to `b` the crossing itself (from one of its ends straight to the other)? */
+  private crossLeg(a: THREE.Vector3, b: THREE.Vector3) {
+    const ends = this.spots.cross?.(GATES_ACROSS);
+    if (!ends || ends.length < 2) return false;
+    const at = (v: THREE.Vector3, e: THREE.Vector3) => Math.abs(v.x - e.x) < 0.5 && Math.abs(v.z - e.z) < 0.5;
+    return (at(a, ends[0]) && at(b, ends[1])) || (at(a, ends[1]) && at(b, ends[0]));
   }
 
   /** The open gate with the fewest waiting (and room for more), or -1. */

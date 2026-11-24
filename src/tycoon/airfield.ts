@@ -223,6 +223,14 @@ export class Airfield {
   /** 🧳 The BAG DROP outside the terminal's airside doorway. */
   private bagDrop!: Stack;
   private bagDropZone!: Zone;
+  /** 🧳 (v0.95; Phase 1: "A second bag drop on the north side, so bags for Gates 5 to 8 don't cross the whole field")
+   *  The north BAG DROP, what is still in the 🕳️ bag tunnel on its way there, and what shows only once the north field
+   *  is open. */
+  private bagDropN!: Stack;
+  private bagDropNZone!: Zone;
+  private tunnel!: Stack;
+  private tunnelT = 0;
+  private northBagBits: THREE.Object3D[] = [];
   private selRing: THREE.Group;
   private deskSign!: TextSprite;
   private timers = new Map<object, number>();
@@ -289,7 +297,8 @@ export class Airfield {
       const it: StackItem = { mesh: makeItem('seedbag'), type: 'seedbag', value: 0, flying: false };
       it.mesh.position.copy(desk.front).setY(1.5);
       this.scene.add(it.mesh);
-      this.flyers.pushInto(it, this.bagDrop, 0.8);
+      // (🕳️ v0.95: a north gate's bag goes down the bag tunnel by the BAG DROP and comes up at the north BAG DROP)
+      this.flyers.pushInto(it, p.gate >= GATES_PER_FIELD && this.fieldOpen(FIELDS[1]) ? this.tunnel : this.bagDrop, 0.8);
       this.tutorial.did(STEP.checkIn);
     };
 
@@ -464,7 +473,9 @@ export class Airfield {
       this.blockers.push({ minX: x - r, maxX: x + r, minZ: z - r, maxZ: z + r });
     };
     artScatter(s, 'pebbles', area, 46, (x, z) => busy(x, z) || onPaths(x, z, firstPaths, 3), 3, built, pebble);
-    artScatter(s, 'leaves', area, 30, (x, z) => busy(x, z) || onPaths(x, z, firstPaths, 10) || onRunway(x, z, 10, first), 4, built);
+    // 🍂 (v0.95) the big leaf south of Gate 3 (at 24, 0) is hidden, as a built tile hides one: the deal is as it was.
+    const leafGone = (x: number, z: number) => built(x, z) || Math.hypot(x - 24, z) < 4;
+    artScatter(s, 'leaves', area, 30, (x, z) => busy(x, z) || onPaths(x, z, firstPaths, 10) || onRunway(x, z, 10, first), 4, leafGone);
     // (twigs are long: only out by the edge, where they can't lie across a tile or a path)
     const twig = (x: number, z: number, sc: [number, number, number], yaw: number) =>
       this.blockers.push(...along(x, z, yaw, sc[0], sc[0] * 0.05 + 0.2));
@@ -622,6 +633,55 @@ export class Airfield {
     label.setText('🧳 BAG DROP');
     label.sprite.position.set(x, 3.6, z);
     this.scene.add(label.sprite);
+    // 🕳️ (v0.95) the bag tunnel's mouth beside it, and the north BAG DROP where it comes up (shown with the north field)
+    const hole = (hx: number, hz: number) => {
+      const h = new THREE.Group();
+      h.position.set(hx, 0, hz);
+      const rim = mesh(new THREE.CylinderGeometry(1.05, 1.3, 0.35, 16), mat(0x9a6a40, { rough: 1, flat: true }));
+      rim.position.y = 0.17;
+      const pit = mesh(new THREE.CylinderGeometry(0.75, 0.75, 0.05, 16), mat(0x1c120a, { rough: 1 }), false);
+      pit.position.y = 0.36;
+      h.add(rim, pit);
+      this.scene.add(h);
+      return h;
+    };
+    const T = AT.tunnel;
+    const mouth = hole(x + T.x, z + T.z);
+    const tsign = new TextSprite(0.8, '#e8c9a0');
+    tsign.setText('🧳 TO NORTH');
+    tsign.sprite.position.set(x + T.x, 2.4, z + T.z);
+    this.scene.add(tsign.sprite);
+    const tg = new THREE.Group();
+    tg.position.set(x + T.x, -1, z + T.z); // (in it: out of sight)
+    this.scene.add(tg);
+    this.tunnel = new Stack(tg, (_i, _t, out) => out.set(0, 0, 0), 99);
+    const N = AT.bagDropNorth;
+    const npad = makePad(3.4, 3.4, 'BAG DROP', '#5fb4ff');
+    npad.position.set(N.x, 0.05, N.z);
+    this.scene.add(npad);
+    const ng = new THREE.Group();
+    ng.position.set(N.x, 0, N.z);
+    this.scene.add(ng);
+    this.bagDropN = new Stack(ng, gridLayout(4, 4, 0.7, 0.62, 0.08), TY.bagDropMax);
+    this.bagDropNZone = new Zone(N.x, N.z, 1.7, 1.7);
+    const nlabel = new TextSprite(1.0, '#8fd3ff');
+    nlabel.setText('🧳 NORTH BAGS');
+    nlabel.sprite.position.set(N.x, 3.6, N.z);
+    this.scene.add(nlabel.sprite);
+    const exitHole = hole(N.x + T.x, N.z + T.z);
+    this.northBagBits = [mouth, tsign.sprite, npad, nlabel.sprite, exitHole];
+    for (const o of this.northBagBits) shown(o, this.fieldOpen(FIELDS[1]));
+  }
+
+  /** 🕳️ The bag tunnel: a bag at a time comes up at the north BAG DROP (when there's room on it). GAME TUNING: 0.6 s. */
+  private stepTunnel(dt: number) {
+    if ((this.tunnelT -= dt) > 0) return;
+    if (!this.tunnel.canPop() || this.bagDropN.full) return;
+    this.tunnelT = 0.6;
+    const it = this.tunnel.pop()!;
+    it.mesh.removeFromParent();
+    const up = this.bagDropN.addInstant('seedbag');
+    this.flyers.grow(up.mesh, 0.3);
   }
   /** Each gate's spur + runway link (hidden until the gate is bought). */
   private gateRoads: THREE.Object3D[][] = [];
@@ -1364,6 +1424,22 @@ export class Airfield {
     (this.cafe.oven as unknown as { cookTime: number }).cookTime = OVEN.cookTime / (this.owns('ty-chef') ? CONFIG.bakery.fastOvenMultiplier : 1) / (1 + 0.15 * this.up('cafe.oven'));
   }
 
+  /**
+   * 🚸 Is a plane on Runway 1, or taxiing past the crossing (v0.95; Phase 1: "Travellers wait at the north crossing
+   * while a plane is on Runway 1, then cross")? On the runway: lining up, rolling for take-off, or landing (from its
+   * final approach to turning off). Taxiing: on the first field's taxiway within 12 of the crossing. GAME TUNING.
+   */
+  private planeAtCrossing() {
+    const f = FIELDS[0], c = AT.crossing;
+    if (this.runwayUser[0]?.onRunway) return true;
+    return this.gates.some((g) => {
+      if (!g.open || g.plane.field !== f) return false;
+      if (g.plane.onRunway) return true;
+      const p = g.plane.pos;
+      return (g.plane.state === 'taxiOut' || g.plane.state === 'taxiIn') && Math.abs(p.z - f.taxiZ) < 5 && Math.abs(p.x - c.x) < 12;
+    });
+  }
+
   /** Put the staff levels to work: helpers' speed and carry, check-in speed, the Banker's grab, your backpack. */
   private applyStaff() {
     for (const w of this.workers) {
@@ -1628,7 +1704,10 @@ export class Airfield {
       if (animate) this.flyers.grow(a.root);
     } else if (/^ty-bags\d?$/.test(id)) {
       // 🧳 carries seed-bags from the BAG DROP to the gate that needs them most
-      const w = new Worker(this.scene, nest.x, nest.z, () => this.bagRoute(), { color: 0x5fb4ff }, 2.1);
+      // (🧳 v0.95: Baggage Ants 4 and 5 are the north field's: they start at the north BAG DROP and work its gates)
+      const north = id === 'ty-bags4' || id === 'ty-bags5';
+      const home = north ? AT.bagDropNorth : nest;
+      const w = new Worker(this.scene, home.x, home.z, () => this.bagRoute(north), { color: 0x5fb4ff }, 2.1);
       w.baseCarry = w.stack.max = TY.bagCarry;
       Object.assign(w.model.root.userData, { job: 'bags', carry0: w.baseCarry });
       titleTag(w.model, '🧳 BAGGAGE', TITLE.ant);
@@ -1665,6 +1744,7 @@ export class Airfield {
       const g = this.gates[n];
       // 🛫 (Gate 5 builds the north field: its runway and taxiway are laid, and the crossing to it is painted)
       shown(this.crossing, this.fieldOpen(FIELDS[1]));
+      for (const o of this.northBagBits) shown(o, this.fieldOpen(FIELDS[1]));
       if (animate && id === 'ty-gate5') this.hud.banner('🛫 The NORTH FIELD is open!', 'A second runway and Gate 5: walk over the 🚸 crossing, west of Gate 1', 4200);
       this.buildPaved(); // (open the runway's and the taxiway's borders where this gate's paths join them)
       g.open = true;
@@ -1759,11 +1839,36 @@ export class Airfield {
   /** 🧳 The BAG DROP -> the open gate that needs bags most. Nobody needing any: wait at the BAG DROP (and bring
    *  back any bags still carried). */
   private idleBags = new Stack(new THREE.Group(), gridLayout(1, 1, 1, 1, 0), 1);
-  private bagRoute() {
-    const gates = this.gates.filter((g) => g.open && this.bagsNeeded(g) > 0);
-    if (!gates.length) return { src: this.idleBags, srcZone: this.bagDropZone, dst: this.bagDrop, dstZone: this.bagDropZone };
-    const pick = gates.reduce((a, b) => (this.bagsNeeded(b) > this.bagsNeeded(a) ? b : a));
-    return { src: this.bagDrop, srcZone: this.bagDropZone, dst: pick.bags, dstZone: pick.bagZone };
+  private bagRoute(north = false) {
+    // 🧳 (v0.95) each side's gates from its own BAG DROP: the first field's from the BAG DROP by the terminal, the north
+    // field's from the north BAG DROP (its bags come up the 🕳️ tunnel). North ants work only the north; the others
+    // work the south, and the north too while no north ant is hired. A north gate still short of bags with none
+    // coming up the tunnel (a save from before the tunnel, its bags at the terminal) is taken from the terminal's.
+    const isNorth = (g: Gate) => this.gates.indexOf(g) >= GATES_PER_FIELD;
+    const most = (list: Gate[]) => list.reduce((a, b) => (this.bagsNeeded(b) > this.bagsNeeded(a) ? b : a));
+    const needs = this.gates.filter((g) => g.open && this.bagsNeeded(g) > 0);
+    const northNeeds = needs.filter(isNorth), southNeeds = needs.filter((g) => !isNorth(g));
+    const comingNorth = this.bagDropN.count + this.tunnel.count;
+    if (north) {
+      if (!northNeeds.length || !this.bagDropN.count) return { src: this.idleBags, srcZone: this.bagDropNZone, dst: this.bagDropN, dstZone: this.bagDropNZone };
+      const g = most(northNeeds);
+      return { src: this.bagDropN, srcZone: this.bagDropNZone, dst: g.bags, dstZone: g.bagZone };
+    }
+    if (southNeeds.length) {
+      const g = most(southNeeds);
+      return { src: this.bagDrop, srcZone: this.bagDropZone, dst: g.bags, dstZone: g.bagZone };
+    }
+    const northAnts = this.owns('ty-bags4') || this.owns('ty-bags5');
+    if (northNeeds.length && !northAnts && this.bagDropN.count) {
+      const g = most(northNeeds);
+      return { src: this.bagDropN, srcZone: this.bagDropNZone, dst: g.bags, dstZone: g.bagZone };
+    }
+    const short = northNeeds.filter(() => comingNorth === 0);
+    if (short.length && this.bagDrop.count) {
+      const g = most(short);
+      return { src: this.bagDrop, srcZone: this.bagDropZone, dst: g.bags, dstZone: g.bagZone };
+    }
+    return { src: this.idleBags, srcZone: this.bagDropZone, dst: this.bagDrop, dstZone: this.bagDropZone };
   }
 
   /** ⛽ The fullest open flower -> the open gate with the least fuel. */
@@ -1798,8 +1903,8 @@ export class Airfield {
     'ty-runner3': ['⛽ Fuel Runner 3 hired!', 'Flower → the gate with the least fuel, by himself'],
     'ty-runner4': ['⛽ Fuel Runner 4 hired!', 'The nearest flower with nectar → the gate with the least fuel'],
     'ty-runner5': ['⛽ Fuel Runner 5 hired!', 'The nearest flower with nectar → the gate with the least fuel'],
-    'ty-bags4': ['🧳 Baggage Ant 4 hired!', 'BAG DROP → the gate that needs bags most'],
-    'ty-bags5': ['🧳 Baggage Ant 5 hired!', 'BAG DROP → the gate that needs bags most'],
+    'ty-bags4': ['🧳 Baggage Ant 4 hired!', 'NORTH BAG DROP → the north gate that needs bags most'],
+    'ty-bags5': ['🧳 Baggage Ant 5 hired!', 'NORTH BAG DROP → the north gate that needs bags most'],
     'ty-flower3': ['🌼 Nectar Flower 3 is growing!', 'Nectar for the north field, right beside its gates'],
     'ty-bags2': ['🧳 Baggage Ant 2 hired!', 'BAG DROP → the gate that needs bags most'],
     'ty-bags3': ['🧳 Baggage Ant 3 hired!', 'BAG DROP → the gate that needs bags most'],
@@ -2254,6 +2359,11 @@ export class Airfield {
     this.every(this.bagDropZone, dt, this.bagDropZone.contains(p) && wantsBags, iv, () => {
       if (me.canTake('seedbag') && this.flyers.transfer(this.bagDrop, me.stack)) this.sfx.pickup();
     });
+    // 🕳️ (v0.95) bags come up the tunnel at the north BAG DROP, and you can take them there too
+    this.stepTunnel(dt);
+    this.every(this.bagDropNZone, dt, this.fieldOpen(FIELDS[1]) && this.bagDropNZone.contains(p) && wantsBags, iv, () => {
+      if (me.canTake('seedbag') && this.flyers.transfer(this.bagDropN, me.stack)) this.sfx.pickup();
+    });
 
 
     // 🍪 The café: take crumbs at the pile, drop them at the kitchen's IN; snacks hop through the hatch
@@ -2276,6 +2386,7 @@ export class Airfield {
     // 🧭 (the travellers' grid follows what is built and shown)
     this.nav.sync(this.blockers);
     this.pax.nav = this.nav;
+    this.pax.crossingOpen = () => !this.planeAtCrossing();
     this.pax.update(dt);
     if (this.crowd && this.crowd !== 'loading') this.crowd.step(dt);
 
@@ -2398,7 +2509,8 @@ export class Airfield {
     const zone = `🛫 Anthill Airfield · ${this.weather.label()}`;
     if (zone !== this.zoneShown) this.hud.setZone((this.zoneShown = zone));
 
-    for (const w of this.workers) w.update(dt, this.flyers);
+    // 🧭 (v0.95) the worker ants go round things on the travellers' grid
+    for (const w of this.workers) { w.nav = this.nav; w.update(dt, this.flyers); }
     for (const b of this.bankers) b.update(dt, this.flyers);
 
     // ✨ Glowing tiles: stand on one to pour cash in
@@ -2640,6 +2752,7 @@ export class Airfield {
       ...this.events.markers(),
       { x: this.cashPad.zone.x, z: this.cashPad.zone.z, icon: '💵', alert: this.cashPad.stack.count > 0 },
       { x: this.bagDropZone.x, z: this.bagDropZone.z, icon: '🧳', label: 'Bags', alert: this.bagDrop.count >= TY.bagDropMax - 2 },
+      ...(this.fieldOpen(FIELDS[1]) ? [{ x: this.bagDropNZone.x, z: this.bagDropNZone.z, icon: '🧳', label: 'North bags', alert: this.bagDropN.count >= TY.bagDropMax - 2 }] : []),
       ...(this.cafeOpen
         ? [
             { x: this.cafe.pile.zone.x, z: this.cafe.pile.zone.z, icon: '🧺' },

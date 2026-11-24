@@ -31,6 +31,16 @@ export interface Route {
 
 type State = 'toSource' | 'load' | 'toDest' | 'unload';
 
+/**
+ * 🧭 A way round things (the tycoon's nav.ts grid; v0.95, Joshua's Phase 1: "Fuel, baggage, janitor and cargo ants use
+ * the same path finding the travellers got in v0.86, so nobody walks through counters, bread or stones"). `version`
+ * goes up when the grid is laid again; `path` gives the places to walk to in turn, the last of them the goal.
+ */
+export interface PathFinder {
+  version: number;
+  path(a: THREE.Vector3, b: THREE.Vector3): THREE.Vector3[];
+}
+
 /** A little hat on top of a bug's head. */
 export function addHat(m: CreatureModel, color: number, flat = false) {
   const r = m.length * 0.13;
@@ -75,6 +85,11 @@ export class Worker {
   private offset = new THREE.Vector3((Math.random() - 0.5) * 1.0, 0, (Math.random() - 0.5) * 1.0);
   /** Seconds stuck waiting (an empty source, or a full destination): after a moment it thinks again (v0.69). */
   private stuckT = 0;
+  /** 🧭 The world's way round things (none: it walks straight, as it always did). */
+  nav: PathFinder | null = null;
+  private way: THREE.Vector3[] | null = null;
+  private wayTo = new THREE.Vector3();
+  private wayOn = -1;
 
   /**
    * @param pickRoute called at the start of each trip; returns where to go.
@@ -141,11 +156,23 @@ export class Worker {
       animateCreature(this.model, dt, 0);
       return true;
     }
+    // 🧭 round what is in the way: the next place on its way, planned again when its goal or the grid changes
+    let lx = dx, lz = dz;
+    if (this.nav) {
+      if (!this.way || this.wayOn !== this.nav.version || this.wayTo.distanceToSquared(this.target) > 0.04) {
+        this.way = this.nav.path(p, this.target);
+        this.wayTo.copy(this.target);
+        this.wayOn = this.nav.version;
+      }
+      while (this.way.length > 1 && Math.hypot(this.way[0].x - p.x, this.way[0].z - p.z) < 0.3) this.way.shift();
+      if (this.way.length > 1) { lx = this.way[0].x - p.x; lz = this.way[0].z - p.z; }
+    }
+    const leg = Math.hypot(lx, lz) || 1e-6;
     const speed = this.speed * this.mult * pace.move; // (upgrades x level x the Movement speed slider)
-    const step = Math.min(d, speed * dt);
-    p.x += (dx / d) * step;
-    p.z += (dz / d) * step;
-    faceToward(this.model, dx, dz, dt);
+    const step = Math.min(leg, speed * dt);
+    p.x += (lx / leg) * step;
+    p.z += (lz / leg) * step;
+    faceToward(this.model, lx, lz, dt);
     animateCreature(this.model, dt, speed);
     return false;
   }
