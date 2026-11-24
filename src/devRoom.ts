@@ -283,7 +283,10 @@ function dealOutfit(look: Look, i: number, seed: number, fit: PaintFit): Look {
   };
   const shade = (hex: number, k: number) => new THREE.Color(hex).multiplyScalar(k).getHex();
   const anyColour = (sat = 0.4 + r() * 0.4, light = 0.3 + r() * 0.35) => {
-    const h = r(), skinLike = h < 0.15 || h > 0.94;
+    // (a skin-like hue is made strong and dark so it never reads as bare skin -- but only a real colour: a grey asked
+    // for, with a little warmth in it, stays a grey. Joshua, of grey tights that came out rust red under green shorts:
+    // "why does it look like this person had two layers of pants?")
+    const h = r(), skinLike = (h < 0.15 || h > 0.94) && sat >= 0.2;
     return new THREE.Color().setHSL(h, skinLike ? Math.max(sat, 0.72) : sat, skinLike ? Math.min(light, 0.46) : light).getHex();
   };
   const out = { ...look };
