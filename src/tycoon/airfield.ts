@@ -42,6 +42,7 @@ import { SURFACE, artBaggageCart, artBackdrop, artBug, artDewTank, artFuelFlower
 import { Plane } from './plane';
 import { Passengers, type Pax, type Stop } from './passengers';
 import { Nav } from './nav';
+import { MOOD, arriveMultFor, clampMood, recordMood, starLabel, starsFrom, tipFor } from './mood';
 import { FLEET, ROUTES, ROUTE_LV_MAX, bestPlane, routeFare, routeLvCost, routeOf, type PlaneType, type RouteDef } from './fleet';
 import { RouteMap, type RoutePin } from './routeMap';
 import { STAFF, STAFF_MAX, buyStaff, staffCost, staffFx, type StaffId } from './staff';
@@ -286,7 +287,8 @@ export class Airfield {
     this.pax.gates = this.gates.filter((g) => g.open).length;
     this.pax.onCheckIn = (p) => {
       // (👑 a VIP pays more for the same seat)
-      this.bill(this.ticket * (p.vip ? TY.vipTicket : 1), desk.front);
+      // (⭐ v0.96: over 3 stars every ticket carries a tip)
+      this.bill(this.ticket * (p.vip ? TY.vipTicket : 1) * (1 + tipFor(this.stars)), desk.front);
       this.st.passengers++;
       bump('sold');
       this.progress.addXp(TY.xpCheckIn);
@@ -1580,6 +1582,8 @@ export class Airfield {
     pad.userData.gatePad = true;
     piece.root.userData.pad = pad;
     plane.onAirborne = () => {
+      // 😀 (v0.96) a plane that went on time cheers its riders up
+      for (const r of gate.riders) if (r.lateT <= MOOD.latePatience) r.mood = clampMood(r.mood + MOOD.onTimeLift);
       this.st.flights++;
       this.progress.addXp(TY.xpFlight);
       this.count('flights', 1);
@@ -1619,8 +1623,9 @@ export class Airfield {
       // (its next trip: the flight that will bring it home)
       plane.inbound = this.newFlight();
       plane.outbound = null;
-      // The travellers have flown off to their destination
+      // The travellers have flown off to their destination (⭐ v0.96: how they felt is written down)
       for (const p of gate.riders) {
+        this.rate(p);
         p.model.root.removeFromParent();
         this.pax.gone(p);
         this.paxRemove(p);
@@ -1638,6 +1643,7 @@ export class Airfield {
       // Everyone off (the landing fees are counted with the fare of where they came from: then it's done): they pay their landing fee and walk away into the lawn
       plane.unseat(this.scene);
       for (const p of gate.riders) {
+        this.rate(p); // (⭐ v0.96: an arrival is done with us as it gets off: how it felt about the wait to land)
         p.state = 'leaving';
         this.pax.leave(p, [...gate.path].reverse(), this.gates.indexOf(gate));
         this.bill(TY.landingFee * (plane.inbound?.fare ?? 1), plane.pos);
@@ -2228,6 +2234,20 @@ export class Airfield {
     this.deskSign.setText(this.bagDrop.full ? '🧳 BAG DROP FULL · MOVE THE BAGS' : full ? '🎫 GATES FULL · WAIT FOR A PLANE' : '🎫 CHECK-IN');
   }
 
+  /** ⭐ (v0.96, mood.ts) The airport's rating, from the last travellers' moods. */
+  get stars() {
+    return starsFrom(this.st.moods ?? []);
+  }
+  /** A traveller is done with the airport: its mood is written down (and a whole star gained or lost is said). */
+  private rate(p: Pax) {
+    const was = Math.floor(this.stars);
+    recordMood((this.st.moods ??= []), p.mood);
+    const now = Math.floor(this.stars);
+    if (now !== was && (this.st.moods.length >= MOOD.prior)) {
+      this.hud.banner(now > was ? `⭐ Your airport is now ${now} stars!` : `⭐ Down to ${now} stars`, now > was ? 'Happy travellers come more often and tip' : 'Long waits and late planes upset travellers', 3200);
+    }
+  }
+
   private paxRemove(p: Pax) {
     const i = this.pax.all.indexOf(p);
     if (i >= 0) this.pax.all.splice(i, 1);
@@ -2312,6 +2332,11 @@ export class Airfield {
     // ⛽ Gates: fuel them, board, go
     this.gates.forEach((g, i) => {
       if (!g.open) return;
+      // 😀⏰ (v0.96) sat aboard a plane that hasn't gone, or circling one that hasn't landed: a late plane
+      if (g.plane.parked || g.plane.waiting) for (const r of g.riders) {
+        r.lateT += dt;
+        if (r.lateT > MOOD.latePatience) r.mood = clampMood(r.mood - MOOD.lateDrop * dt);
+      }
       const hasFuel = me.stack.has('nectar') || me.stack.has('fuel');
       this.every(g.fuelZone, dt, g.fuelZone.contains(p) && hasFuel, iv * 1.5, () => {
         const jet = this.flyers.transferType(me.stack, g.fuel, 'fuel');
@@ -2387,6 +2412,11 @@ export class Airfield {
     this.nav.sync(this.blockers);
     this.pax.nav = this.nav;
     this.pax.crossingOpen = () => !this.planeAtCrossing();
+    // 😀⭐ (v0.96) what the moods are told, and what the rating does
+    this.pax.lizard = this.events.runwayBlocked;
+    this.pax.you.copy(p);
+    this.pax.pleasant = (q) => this.flowers.some((f) => f.piece.root.visible && Math.hypot(q.pos.x - f.zone.x, q.pos.z - f.zone.z) < MOOD.flowerNear);
+    this.pax.arriveMult = arriveMultFor(this.stars);
     this.pax.update(dt);
     if (this.crowd && this.crowd !== 'loading') this.crowd.step(dt);
 
@@ -2506,7 +2536,7 @@ export class Airfield {
     // 🌙🌧️🌬️ the sky turns (and the corner of the screen tells the time)
     this.weather.update(dt, !this.learning, p, FIELDS.filter((f) => this.fieldOpen(f)));
     this.st.sky = this.weather.saved();
-    const zone = `🛫 Anthill Airfield · ${this.weather.label()}`;
+    const zone = `🛫 Anthill Airfield · ${starLabel(this.stars)} · ${this.weather.label()}`;
     if (zone !== this.zoneShown) this.hud.setZone((this.zoneShown = zone));
 
     // 🧭 (v0.95) the worker ants go round things on the travellers' grid

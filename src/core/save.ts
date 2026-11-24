@@ -93,6 +93,8 @@ export interface TycoonSave {
   charters?: number;
   perks?: Record<string, number>;
   runBase?: number;
+  /** 😀 (v0.96, tycoon/mood.ts) The last travellers' moods (0 to 1, two decimals): the airport's ⭐ rating. */
+  moods?: number[];
   /** 🧍 Passengers are TRADDOMIUM's tiny people instead of bugs (v0.77, ⚙️ Settings). */
   people?: boolean;
   /** 🎯 Quests (v0.73, tycoon/quests.ts): how many are done, and the random one that's on. */

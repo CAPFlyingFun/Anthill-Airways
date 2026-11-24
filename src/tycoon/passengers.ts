@@ -20,6 +20,7 @@ import { animateCreature, faceToward } from '../actors/models';
 import { artBug, type ArtBug } from './art';
 import { TY } from './data';
 import { TextSprite } from '../world/labels';
+import { MOOD, clampMood, faceFor } from './mood';
 
 export type PaxState = 'arriving' | 'queue' | 'toGate' | 'waiting' | 'boarding' | 'seated' | 'leaving';
 
@@ -47,6 +48,15 @@ export class Pax {
   routeOn = -1;
   /** Climbing down off a plane: how many of its waypoints are the gate's bridge and ramp (the rest are on the ground). */
   offBridge = 0;
+  /** 😀 (v0.96, mood.ts) How it feels, 0 to 1; how long it's been in the state it's in (and which), and how long it
+   *  has sat aboard a plane that hasn't gone (or circled one that hasn't landed). */
+  mood = MOOD.start;
+  waitT = 0;
+  waitIn: PaxState | null = null;
+  lateT = 0;
+  /** Its face over its head (made the first time you come near). */
+  face: TextSprite | null = null;
+  faceShown = '';
   constructor(public model: ArtBug) {}
   get pos() {
     return this.model.root.position;
@@ -119,6 +129,13 @@ export class Passengers {
   /** 🚸 May travellers walk over the crossing now? (v0.95: the airfield says no while a plane is on Runway 1 or its
    *  taxiway there.) They wait at the curb and cross once it's clear. */
   crossingOpen: () => boolean = () => true;
+  /** ⭐ (v0.96) The rating's say in how often travellers come (mood.ts arriveMultFor), set by the airfield. */
+  arriveMult = 1;
+  /** 😀 What the airfield tells the moods each frame: a lizard on the runway, where you are (faces show near you),
+   *  and whether a traveller is somewhere pleasant (by a flower). */
+  lizard = false;
+  you = new THREE.Vector3(1e9, 0, 1e9);
+  pleasant: (p: Pax) => boolean = () => false;
   /** Called when a passenger finishes checking in (the airfield pays + gives XP). */
   onCheckIn: (p: Pax) => void = () => {};
   private arriveT = 2;
@@ -175,6 +192,7 @@ export class Passengers {
   /** A traveller has gone for good: what was hers alone is let go of. */
   gone(p: Pax) {
     (p.model.root.userData.crowd as CrowdPerson | undefined)?.dispose();
+    if (p.face) { const m = p.face.sprite.material as THREE.SpriteMaterial; m.map?.dispose(); m.dispose(); p.face = null; }
   }
 
   people = false;
@@ -292,7 +310,7 @@ export class Passengers {
     this.arriveT -= dt;
     if (this.arriveT <= 0 && this.line.length < this.queueMax) {
       // (busier as the airport grows: each open gate brings more travellers)
-      this.arriveT = (TY.arriveEvery / (0.6 + 0.4 * this.gates)) * (0.7 + Math.random() * 0.6);
+      this.arriveT = (TY.arriveEvery / (0.6 + 0.4 * this.gates) / this.arriveMult) * (0.7 + Math.random() * 0.6);
       const p = this.spawn(this.spots.edge);
       p.state = 'queue';
       p.via = this.spots.inbound.map((v) => v.clone());
@@ -335,6 +353,8 @@ export class Passengers {
           let done = false;
           if (s.has(p)) {
             s.buy(p);
+            // 😀 (v0.96) a stop they enjoyed, and the VIP lounge most of all
+            p.mood = clampMood(p.mood + (s.key === 'lounge' ? MOOD.loungeLift : MOOD.stopLift));
             done = true;
           } else if (p.stopT > s.maxWait) done = true;
           if (done) {
@@ -350,6 +370,8 @@ export class Passengers {
       this.gateSpot(g, i, p.target);
       if (p.state === 'toGate' && p.there) p.state = 'waiting';
     }));
+
+    this.stepMoods(dt);
 
     // 🧍 People are drawn by how far they are from the camera (a few times a second): the full model up close,
     // lighter triangle lists further off (creatures.ts PEOPLE_LOD: the DEV Room's "Auto", in the people's own metres)
@@ -395,6 +417,50 @@ export class Passengers {
     }
     p.target.copy(p.via[0]);
     return true;
+  }
+
+  /**
+   * 😀 Moods (v0.96, mood.ts): long waits in the line or at the gate wear on them, a crowded line too; a short line,
+   * a flower nearby help a little; a lizard on the runway frets everyone on the ground. (Aboard a plane, the airfield
+   * sees to it: a late plane.) Faces over their heads, only for those near you, a few times a second.
+   */
+  private faceT = 0;
+  private stepMoods(dt: number) {
+    for (const p of this.all) {
+      if (p.waitIn !== p.state) { p.waitIn = p.state; p.waitT = 0; }
+      p.waitT += dt;
+      let d = 0;
+      if (p.state === 'queue') {
+        if (p.waitT > MOOD.queuePatience) d -= MOOD.queueDrop;
+        if (this.line.length > MOOD.crowdLine) d -= MOOD.crowdDrop;
+        else if (this.line.length <= MOOD.shortLine) d += MOOD.shortLift;
+      } else if (p.state === 'waiting' && p.waitT > MOOD.gatePatience) d -= MOOD.gateDrop;
+      if (p.state !== 'seated' && p.state !== 'boarding') {
+        if (this.lizard) d -= MOOD.lizardDrop;
+        if (p.state !== 'leaving' && this.pleasant(p)) d += MOOD.flowerLift;
+      }
+      if (d) p.mood = clampMood(p.mood + d * dt);
+    }
+    if ((this.faceT -= dt) > 0) return;
+    this.faceT = 0.25;
+    for (const p of this.all) {
+      const near = p.state !== 'seated' && Math.hypot(p.pos.x - this.you.x, p.pos.z - this.you.z) < MOOD.faceNear;
+      if (!near) { if (p.face) p.face.sprite.visible = false; continue; }
+      if (!p.face) {
+        // (over a person's head, or an aphid's; higher still over a VIP's crown, in the world's units whatever the
+        // traveller's own root is scaled by)
+        // (a label sets its own scale from its size whenever its text changes: the size is given here)
+        const k = p.model.root.scale.y || 1, person = p.model.biped || !!p.model.root.userData.crowd;
+        const size = person ? SIZE.person * 0.45 : 2.4;
+        const top = person ? SIZE.person * (p.vip ? 1.5 : 1.3) : p.vip ? 4.6 : 3.0;
+        p.face = new TextSprite(size / k);
+        p.face.sprite.position.y = top / k;
+        p.model.root.add(p.face.sprite);
+      }
+      const f = faceFor(p.mood);
+      if (f !== p.faceShown) { p.face.setText(f); p.faceShown = f; }
+      p.face.sprite.visible = true;
+    }
   }
 
   /** 🚸 Is the walk from `a` to `b` the crossing itself (from one of its ends straight to the other)? */

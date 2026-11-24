@@ -24,6 +24,7 @@ import { Updater, versionLabel } from '../core/updater';
 import { Minimap } from '../ui/minimap';
 import { Airfield, clockText, type FlightRow } from './airfield';
 import { FlightUi } from './flightUi';
+import { starLabel, starsFrom } from './mood';
 
 export interface TycoonContext {
   app: HTMLElement;
@@ -61,6 +62,10 @@ const HOWTO_HTML = `
       plane to leave takes them and they pay at take-off, more on a far route.</li>
     <li>🗺️ <b>Destinations:</b> the 🗺️ button (top right) is a map of the garden. Open far-away places for cash:
       they pay a higher fare. 📣 Advertise a place to raise its fare, or switch its flights off and on.</li>
+    <li>😀 <b>Happy travellers:</b> walk near a traveller to see their face. Long lines, long waits at the gate, late
+      planes and a 🦎 lizard on the runway upset them; short lines, on-time flights, the café, the shop and the
+      flowers cheer them up. Your airport's <b>⭐ rating</b> (by the airfield's name) is how the last 50 felt: more
+      stars bring travellers more often, and over 3 stars they tip.</li>
     <li>📅 <b>Daily goals</b> (the bar under the airfield's name): finish each day's goals quickly for ⭐⭐⭐
       and a cash bonus.</li>
     <li>⬆️ <b>Upgrades:</b> a bouncing green arrow floats over anything you can afford to upgrade. Tap the building
@@ -373,6 +378,7 @@ export async function startTycoon({ app, renderer, save, hud, sfx, input, progre
       { icon: '🎫', label: 'Passengers checked in', value: t.passengers.toLocaleString() },
       { icon: '🧳', label: 'Bags loaded', value: (t.bagsLoaded ?? 0).toLocaleString() },
       { icon: '🛬', label: 'Landings', value: (t.landings ?? 0).toLocaleString() },
+      { icon: '😀', label: 'Airport rating', value: `${starLabel(starsFrom(t.moods ?? []))} · last ${(t.moods ?? []).length} travellers` },
       { icon: '📅', label: 'Days flown', value: `${t.day?.stars.length ?? 0} · ⭐ ${field.goals.totalStars}` },
       { icon: '🐜', label: 'Ants working', value: String(field.workers.length + field.bankers.length + (save.unlocked.includes('ty-checkin') ? 1 : 0) + (save.unlocked.includes('ty-atc') ? 1 : 0)) },
       { icon: '👑', label: 'Crowns earned', value: `${t.crownsAll ?? 0} · ${t.charters ?? 0} charter${t.charters === 1 ? '' : 's'}` },
