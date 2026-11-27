@@ -45,7 +45,7 @@ import { Nav } from './nav';
 import { MOOD, arriveMultFor, clampMood, recordMood, starLabel, starsFrom, tipFor } from './mood';
 import { FLEET, ROUTES, ROUTE_LV_MAX, bestPlane, routeFare, routeLvCost, routeOf, type PlaneType, type RouteDef } from './fleet';
 import { RouteMap, type RoutePin } from './routeMap';
-import { STAFF, STAFF_MAX, buyStaff, staffCost, staffFx, type StaffId } from './staff';
+import { STAFF, buyStaff, maxOf, staffCost, staffFx, type StaffId } from './staff';
 import { UPS, UpMenu, upPrice, type MenuRow, type UpDef } from './upgrades';
 import { Events } from './events';
 import { Guides, type GuideDef } from './guides';
@@ -1052,7 +1052,8 @@ export class Airfield {
     return Math.min(4, 1 + this.up('security.lanes'));
   }
   private get scanSecs() {
-    return TY.scanSecs * Math.pow(0.88, this.up('security.scan'));
+    // (🛂 v0.98: and security ants)
+    return TY.scanSecs * Math.pow(0.88, this.up('security.scan')) * staffFx.securityAnt(this.staffLv('securityAnt'));
   }
   private openSecurity(animate: boolean) {
     const sec = this.security;
@@ -1383,7 +1384,8 @@ export class Airfield {
   }
   /** How long gate `g`'s plane waits for more passengers once one's aboard. */
   private boardWait(g: Gate) {
-    return TY.boardWait * (1 - 0.1 * this.up(`gate${this.gates.indexOf(g)}.board`));
+    // (🛫 v0.98: gate agents shorten it too)
+    return TY.boardWait * (1 - 0.1 * this.up(`gate${this.gates.indexOf(g)}.board`)) * staffFx.gateAgent(this.staffLv('gateAgent'));
   }
   private pay(cost: number) {
     if (this.save.cash < cost) return false;
@@ -1460,12 +1462,16 @@ export class Airfield {
     this.addBuilding('tower', 'Control Tower', v(AT.tower.x, AT.tower.z + 5), 10, UPS.tower, () => this.owns('ty-tower'), 9);
 
     // ⬆️ The Staff Office: a row per hired job (levels in save.tycoon.staff)
-    const staffDesc: Record<string, string> = { cargo: '+12% speed · +1 carry / 2 Lv', fuel: '+12% speed · +1 carry / 2 Lv', bags: '+12% speed · +1 carry / 2 Lv', cafe: '+12% speed · +1 carry / 2 Lv', janitor: '+12% speed · +1 carry / 2 Lv', checkin: '+15% check-in speed', banker: '+20% grab speed', you: '+1 carry' };
+    const staffDesc: Record<string, string> = {
+      cargo: '+12% speed · +1 carry / 2 Lv', fuel: '+12% speed · +1 carry / 2 Lv', bags: '+12% speed · +1 carry / 2 Lv', cafe: '+12% speed · +1 carry / 2 Lv', janitor: '+12% speed · +1 carry / 2 Lv', checkin: '+15% check-in speed', banker: '+20% grab speed', you: '+1 carry',
+      // 👷 (v0.98) ants you can see at their posts
+      ticket: '+1 agent at the counter (check-in x1.9 a level)', gateAgent: 'an agent at every gate · -11% boarding wait', securityAnt: 'an ant at every lane · -13% scan time', atc: '+4% speed for every plane',
+    };
     this.addTarget(
       'staff', 'Staff upgrades', this.staffAt.clone(), 6, () => true,
       () => STAFF.filter((d) => !d.needs || this.owns(d.needs)).map((d) => {
         const lv = this.staffLv(d.id);
-        return { id: d.id, ic: d.icon, name: d.name, desc: staffDesc[d.id] ?? '', lv: `Lv ${lv}/${STAFF_MAX}`, cost: lv >= STAFF_MAX ? null : staffCost(d, lv) };
+        return { id: d.id, ic: d.icon, name: d.name, desc: staffDesc[d.id] ?? '', lv: `Lv ${lv}/${maxOf(d)}`, cost: lv >= maxOf(d) ? null : staffCost(d, lv) };
       }),
       (id) => {
         const spent = buyStaff((this.st.staff ??= {}), id, 1, this.save.cash);
@@ -1578,7 +1584,8 @@ export class Airfield {
   }
   /** Put the building upgrade levels to work (pads, lines, VIPs, the oven, every plane's speed). */
   private applyUps() {
-    const boost = (this.owns('ty-tower') ? TY.towerBoost * (1 + 0.05 * this.up('tower.boost')) : 1) * (1 + 0.06 * this.up('fleet.speed'));
+    // (🎧 v0.98: the tower controller's levels speed every plane too)
+    const boost = (this.owns('ty-tower') ? TY.towerBoost * (1 + 0.05 * this.up('tower.boost')) : 1) * (1 + 0.06 * this.up('fleet.speed')) * staffFx.atc(this.staffLv('atc'));
     this.gates.forEach((g, i) => {
       g.fuel.max = TY.fuelMax + 2 * this.up(`gate${i}.fuel`);
       this.pax.gateCap[i] = Math.max(6, g.plane.model.seats.length + 2) + 2 * this.up(`gate${i}.seats`);
@@ -1618,7 +1625,51 @@ export class Airfield {
       w.stack.max = (w.model.root.userData.carry0 as number) + staffFx.carry(lv);
     }
     for (const b of this.bankers) b.boost = staffFx.grab(this.staffLv('banker'));
-    this.pax.checkMult = staffFx.quick(this.staffLv('checkin'));
+    // (🎫 v0.98: and the ticket agents beside the check-in ant)
+    this.pax.checkMult = staffFx.quick(this.staffLv('checkin')) * staffFx.ticket(this.staffLv('ticket'));
+  }
+
+  // --------------------------------------------------------------------------
+  // 👷 STAFF AT THEIR POSTS (v0.98, Phase 4: "Ants you can see working at their posts, instead of upgrades that only
+  // change numbers": 🎫 ticket agents behind the check-in counter, 🛫 gate agents, 🛂 security ants at the lanes; the
+  // 🎧 tower controller's levels are the tower ant's). Hired and levelled in the Staff Office; each ant is made the first
+  // time its post is staffed, and stands there facing the travellers it serves.
+  // --------------------------------------------------------------------------
+  private posts: Record<'ticket' | 'gate' | 'security', CreatureModel[]> = { ticket: [], gate: [], security: [] };
+  private postTmp = new THREE.Vector3();
+  private postAnt(kind: 'ticket' | 'gate' | 'security', i: number, tag: string) {
+    let a = this.posts[kind][i];
+    if (!a) {
+      a = spawnCreature('worker', 2.1) ?? makeAnt(0x8e2f14);
+      // (side by side, one tag says what they all are: three read as one smudge; each gate's agent has its own)
+      if (i === 0 || kind === 'gate') titleTag(a, tag, TITLE.ant);
+      this.scene.add(a.root);
+      this.flyers.grow(a.root);
+      this.posts[kind][i] = a;
+    }
+    return a;
+  }
+  private stepPosts(dt: number) {
+    const place = (kind: 'ticket' | 'gate' | 'security', n: number, tag: string, at: (i: number, out: THREE.Vector3) => void) => {
+      for (let i = 0; i < Math.max(n, this.posts[kind].length); i++) {
+        if (i >= n) { if (this.posts[kind][i]) this.posts[kind][i].root.visible = false; continue; }
+        const a = this.postAnt(kind, i, tag);
+        a.root.visible = true;
+        at(i, a.root.position);
+        a.root.rotation.y = 0; // (facing +z: the travellers' side)
+        animateCreature(a, dt, 0);
+      }
+    };
+    // 🎫 beside the check-in ant behind the counter (to its right: the Staff Office is on its left)
+    const tickets = this.owns('ty-checkin') ? Math.min(3, this.staffLv('ticket')) : 0;
+    place('ticket', tickets, '🎫 TICKETS', (i, out) => out.set(this.deskZone.x + 2.4 * (i + 1), 0.5, this.deskZone.z));
+    // 🛫 one at every open gate, beside where its travellers wait
+    const gateLv = this.staffLv('gateAgent');
+    const openGates = this.gates.map((g, i) => (g.open ? i : -1)).filter((i) => i >= 0);
+    place('gate', gateLv > 0 ? openGates.length : 0, '🛫 GATE', (k, out) => out.copy(this.pax.gateWaitAt(openGates[k])).add(this.postTmp.set(-2.8, 0, 0.4)));
+    // 🛂 one at every lane, on the far side of its arch from the tray
+    const secLv = this.security.open ? this.staffLv('securityAnt') : 0;
+    place('security', secLv > 0 ? this.laneCount : 0, '🛂 SECURITY', (i, out) => this.laneAt(i, out).add(this.postTmp.set(-1.45, 0, 0.6)));
   }
 
   /** 🌼 A nectar flower (`open` = bought: the second one shows up later). */
@@ -2582,6 +2633,7 @@ export class Airfield {
     this.pax.crossingOpen = () => !this.planeAtCrossing();
     this.stepSecurity(dt);
     this.stepLounge(dt);
+    this.stepPosts(dt);
     // 😀⭐ (v0.96) what the moods are told, and what the rating does
     this.pax.lizard = this.events.runwayBlocked;
     this.pax.you.copy(p);

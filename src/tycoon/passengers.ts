@@ -496,7 +496,12 @@ export class Passengers {
     }
   }
 
-  /** 🚸 Is the walk from `a` to `b` the crossing itself (from one of its ends straight to the other)? */
+  /** (v0.98) Where gate `g`'s travellers wait (its gate agent stands beside it). */
+  gateWaitAt(g: number) {
+    return this.spots.gateWait[g];
+  }
+
+    /** 🚸 Is the walk from `a` to `b` the crossing itself (from one of its ends straight to the other)? */
   private crossLeg(a: THREE.Vector3, b: THREE.Vector3) {
     const ends = this.spots.cross?.(GATES_ACROSS);
     if (!ends || ends.length < 2) return false;

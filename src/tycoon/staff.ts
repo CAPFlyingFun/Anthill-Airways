@@ -12,7 +12,7 @@
 // ============================================================================
 import type { UpPanelModel, UpRowModel } from '../ui/hud';
 
-export type StaffId = 'fuel' | 'bags' | 'cafe' | 'janitor' | 'checkin' | 'shop' | 'banker' | 'cargo' | 'you';
+export type StaffId = 'fuel' | 'bags' | 'cafe' | 'janitor' | 'checkin' | 'shop' | 'banker' | 'cargo' | 'you' | 'ticket' | 'gateAgent' | 'securityAnt' | 'atc';
 
 export interface StaffDef {
   id: StaffId;
@@ -22,6 +22,13 @@ export interface StaffDef {
   needs: string | null;
   /** The first level's price (each next one ×STAFF_GROWTH). */
   base: number;
+  /** (v0.98) Its top level, if not STAFF_MAX (the ticket agents: one more at the counter a level, three at most). */
+  max?: number;
+}
+
+/** A job's top level. */
+export function maxOf(def: StaffDef) {
+  return def.max ?? STAFF_MAX;
 }
 
 export const STAFF_MAX = 10;
@@ -36,6 +43,11 @@ export const STAFF: StaffDef[] = [
   { id: 'janitor', icon: '🧹', name: 'Janitor ant', needs: 'ty-janitor', base: 120 },
   { id: 'cargo', icon: '📦', name: 'Cargo ants', needs: 'ty-cargoant', base: 400 },
   { id: 'you', icon: '🎒', name: 'Your backpack', needs: null, base: 70 },
+  // 👷 (v0.98, Phase 4: "Ants you can see working at their posts, instead of upgrades that only change numbers")
+  { id: 'ticket', icon: '🎫', name: 'Ticket agents', needs: 'ty-checkin', base: 600, max: 3 },
+  { id: 'gateAgent', icon: '🛫', name: 'Gate agents', needs: 'ty-gate2', base: 500 },
+  { id: 'securityAnt', icon: '🛂', name: 'Security ants', needs: 'ty-security', base: 700 },
+  { id: 'atc', icon: '🎧', name: 'Tower controller', needs: 'ty-atc', base: 800 },
 ];
 
 /** What a level does, in numbers. */
@@ -52,6 +64,15 @@ export const staffFx = {
   grab: (lv: number) => 1 + 0.2 * lv,
   /** You: extra carry. */
   backpack: (lv: number) => lv,
+  /** 🎫 (v0.98) Ticket agents: each one more at the counter checks the line in that much faster (x1.9 with one, x3.7
+   *  with three, beside the check-in ant). GAME TUNING. */
+  ticket: (lv: number) => 1 + 0.9 * lv,
+  /** 🛫 Gate agents: the wait before a plane leaves is shorter (÷1.12 a level), and an agent stands at every gate. */
+  gateAgent: (lv: number) => 1 / (1 + 0.12 * lv),
+  /** 🛂 Security ants: scanning is quicker (÷1.15 a level), an ant at every lane. */
+  securityAnt: (lv: number) => 1 / (1 + 0.15 * lv),
+  /** 🎧 Tower controller: every plane taxis, takes off and lands faster (+4% a level). */
+  atc: (lv: number) => 1 + 0.04 * lv,
 };
 
 /** The price of the next level. */
@@ -77,6 +98,14 @@ function effect(id: StaffId, lv: number) {
       return `${x(staffFx.grab(lv))} grab speed`;
     case 'you':
       return `+${staffFx.backpack(lv)} carry`;
+    case 'ticket':
+      return `${lv} agent${lv === 1 ? '' : 's'} · ${x(staffFx.ticket(lv))} check-in`;
+    case 'gateAgent':
+      return `${x(1 / staffFx.gateAgent(lv))} boarding`;
+    case 'securityAnt':
+      return `${x(1 / staffFx.securityAnt(lv))} scanning`;
+    case 'atc':
+      return `${x(staffFx.atc(lv))} plane speed`;
   }
 }
 
@@ -84,7 +113,8 @@ function effect(id: StaffId, lv: number) {
 export function staffPanel(levels: Record<string, number>, cash: number, owns: (id: string) => boolean): UpPanelModel {
   const rows: UpRowModel[] = STAFF.filter((d) => !d.needs || owns(d.needs)).map((d) => {
     const lv = levels[d.id] ?? 0;
-    const maxed = lv >= STAFF_MAX;
+    const top = maxOf(d);
+    const maxed = lv >= top;
     const buys: UpRowModel['buys'] = [];
     if (!maxed) {
       const one = staffCost(d, lv);
@@ -92,7 +122,7 @@ export function staffPanel(levels: Record<string, number>, cash: number, owns: (
       // MAX: as many levels as you can pay for right now
       let n = 0;
       let total = 0;
-      while (lv + n < STAFF_MAX && total + staffCost(d, lv + n) <= cash) total += staffCost(d, lv + n++);
+      while (lv + n < top && total + staffCost(d, lv + n) <= cash) total += staffCost(d, lv + n++);
       if (n >= 2) buys.push({ n, label: `MAX ×${n}`, cost: total, ok: true });
     }
     return {
@@ -100,8 +130,8 @@ export function staffPanel(levels: Record<string, number>, cash: number, owns: (
       icon: d.icon,
       name: d.name,
       sub: '',
-      level: maxed ? 'MAX' : `Lv ${lv}/${STAFF_MAX}`,
-      pips: Array.from({ length: STAFF_MAX }, (_, i) => ({ filled: i < lv, star: false })),
+      level: maxed ? 'MAX' : `Lv ${lv}/${top}`,
+      pips: Array.from({ length: top }, (_, i) => ({ filled: i < lv, star: false })),
       now: effect(d.id, lv),
       next: maxed ? null : effect(d.id, lv + 1),
       star: '',
@@ -117,7 +147,7 @@ export function buyStaff(levels: Record<string, number>, id: string, n: number, 
   if (!d) return 0;
   let lv = levels[id] ?? 0;
   let spent = 0;
-  for (let k = 0; k < n && lv < STAFF_MAX; k++) {
+  for (let k = 0; k < n && lv < maxOf(d); k++) {
     const c = staffCost(d, lv);
     if (spent + c > cash) break;
     spent += c;
