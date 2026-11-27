@@ -19,6 +19,8 @@ export interface PlaneInfo {
   icon: string;
   /** "Ladybug · 2 seats" */
   type: string;
+  /** 🎨 (v1.00) its name ("Spirit of the Hill"). */
+  name: string;
   /** Its flight number (null before one is booked) and where it's going / coming from. */
   flight: number | null;
   place: string | null;
@@ -51,6 +53,8 @@ export interface FlightUiHooks {
   board: () => void;
   /** ⬆️ The hangar's fleet menu (false: no hangar yet). */
   fleet: () => boolean;
+  /** 🎨 (v1.00) gate `g`'s plane: its name, paint and own upgrades. */
+  paint: (g: number) => void;
   /** ⚠️ An event that's on right now (the alert above the chips), or null. `bad`: red and pulsing. */
   alert: () => { text: string; bad: boolean } | null;
   /** The alert was tapped (look at it). */
@@ -118,7 +122,9 @@ export class FlightUi {
       <div class="fl-por"><span class="fl-ring"><i class="fl-ic"></i></span></div>
       <button class="fl-aim" aria-label="Watch this plane">🎯</button>
       <button class="fl-up" aria-label="Fleet upgrades">⬆</button>
+      <button class="fl-paint" aria-label="Name and paint this plane">🎨</button>
       <div class="fl-no"></div>
+      <div class="fl-name"></div>
       <div class="fl-type"></div>
       <div class="fl-route"></div>
       <div class="fl-stats">
@@ -128,11 +134,14 @@ export class FlightUi {
       </div>
       <div class="fl-pay"></div>
       <div class="fl-step"></div>`;
-    for (const k of ['ring', 'ic', 'no', 'type', 'route', 'pax', 'bags', 'fuel', 'pay', 'step']) this.c[k] = this.card.querySelector(`.fl-${k}`)!;
+    for (const k of ['ring', 'ic', 'no', 'name', 'type', 'route', 'pax', 'bags', 'fuel', 'pay', 'step']) this.c[k] = this.card.querySelector(`.fl-${k}`)!;
     this.card.querySelector('.fl-x')!.addEventListener('click', () => this.show(null));
     this.card.querySelector('.fl-up')!.addEventListener('click', () => {
       if (!hooks.fleet()) return;
       this.show(null);
+    });
+    this.card.querySelector('.fl-paint')!.addEventListener('click', () => {
+      if (this.open !== null) hooks.paint(this.open);
     });
     this.card.querySelector('.fl-aim')!.addEventListener('click', () => {
       if (this.open !== null) hooks.watch(this.open);
@@ -189,6 +198,7 @@ export class FlightUi {
     c.ring.style.setProperty('--p', `${Math.round(f.ring * 100)}`);
     put(c.ic, f.icon);
     put(c.no, f.flight ? `AA ${f.flight} · G${f.gate}` : `GATE ${f.gate}`);
+    put(c.name, `“${f.name}”`);
     put(c.type, f.type);
     put(c.route, f.place ? (f.dir === 'dep' ? `🐜 Anthill → ${f.place}` : `${f.place} → 🐜 Anthill`) : 'Next flight: not booked yet');
     put(c.pax, `${f.pax[0]}/${f.pax[1]}`);

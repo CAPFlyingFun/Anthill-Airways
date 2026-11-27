@@ -56,6 +56,9 @@ const HOWTO_HTML = `
       before landing. The arriving passengers pay a landing fee.</li>
     <li>✈️ Tap a chip at the bottom (or a plane) for its <b>flight card</b>: passengers, bags, nectar and what it's
       doing. 🎯 on the card points the camera at it until you walk. 📋 is the whole flight board.</li>
+    <li>🎨 Each gate's plane is <b>yours</b>: 🎨 on its flight card names it, paints it (a colour, a pattern and a
+      trim) and upgrades it alone: 🚀 engine (faster), 💺 seats and 🛋️ comfort (its passengers tip as it takes off).
+      Its name and paint stay with the gate, whichever bug it flies.</li>
     <li>🛫 <b>The north field</b> (the Runway 2 + Gate 5 tile, beyond the runway): four more gates with a runway of
       their own. Walk over the 🚸 crossing west of Gate 1. Its planes never wait for the first runway.</li>
     <li>📦 <b>Cargo</b> (the Cargo Depot tile, south-west of the terminal): carry its crates to a gate's <b>CARGO</b> pad. The next
@@ -164,6 +167,7 @@ export async function startTycoon({ app, renderer, save, hud, sfx, input, progre
     },
     board: openBoard,
     fleet: () => field.openTarget('hangar'),
+    paint: (g) => field.openPlane(g),
     // ⚠️ what's happening right now (the lizard, a feather: tap it to look there; else the rain or its rainbow)
     alert: () => {
       const a = field.events.alert() ?? field.weather.alert();

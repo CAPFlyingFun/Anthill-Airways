@@ -146,7 +146,7 @@ export function bee(a: BArgs): Bug {
 // 🪲 BEETLE — the cargo hauler. Shiny dark shell (green / blue / bronze by seed) split down the middle,
 // a darker pronotum + head with little mandibles, six cargo spots on the shell, smoky wings that unfold from under it.
 // ===========================================================================
-const BEETLE_COLOURS = [0x1f8a52, 0x2a5fd0, 0xb97428];
+export const BEETLE_COLOURS = [0x1f8a52, 0x2a5fd0, 0xb97428];
 export function beetle(a: BArgs): Bug {
   const L = SIZE.beetle;
   const m = newBug('beetle', 0.42 * L, L, a.scale);

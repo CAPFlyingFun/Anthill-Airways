@@ -1321,3 +1321,38 @@ body.tycoon .up-btn { bottom: calc(68px + var(--safe-b)); }
 .inv-row { display: flex; align-items: center; gap: 8px; width: 100%; }
 .inv-row .inv-slot { flex: none; }
 .inv-go { font-size: 12px; font-weight: 700; line-height: 1.2; text-align: left; max-width: 170px; }
+
+/* ============================================================================
+   🎨 v1.00 (Phase 6): each plane's name, paint and own upgrades
+   ============================================================================ */
+.fl-paint { position: absolute; top: 40px; right: 6px; width: 28px; height: 28px; border-radius: 50%; border: none; padding: 0; background: rgba(255, 255, 255, 0.25); font-size: 15px; box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.55); }
+.fl-name { font-size: 12px; font-weight: 900; color: #ffe39a; margin-top: 1px; padding: 0 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pl-panel { max-height: calc(100vh - 24px - var(--safe-t) - var(--safe-b)); overflow-y: auto; -webkit-overflow-scrolling: touch; }
+.pl-panel .gm-rows { overflow: visible; flex: none; }
+.pl-panel > * { flex: none; }
+.pl-type { color: #9fb6d6; font-size: 12px; text-align: center; margin: 2px 0 4px; }
+.pl-lab { display: block; color: #7c93b8; font-size: 11px; font-weight: 800; letter-spacing: 0.6px; margin: 10px 0 5px; }
+.pl-lab.dim, .pl-sw.dim { opacity: 0.4; }
+#hud .pl-name {
+  width: 100%; box-sizing: border-box; height: 38px; padding: 0 12px; border-radius: 10px; border: 1.5px solid #3a4f74;
+  background: #142540; color: #fff; font-size: 16px; font-weight: 700; font-family: -apple-system, Arial, sans-serif; outline: none;
+}
+#hud .pl-name:focus { border-color: #ffd166; }
+.pl-sw { display: flex; flex-wrap: wrap; gap: 7px; }
+#hud .pl-sw button { width: 32px; height: 32px; border-radius: 50%; border: 2px solid rgba(255, 255, 255, 0.25); padding: 0; }
+#hud .pl-sw button.on { border-color: #ffd166; box-shadow: 0 0 0 2px #ffd166; transform: scale(1.08); }
+.pl-pat { display: flex; flex-wrap: wrap; gap: 6px; }
+#hud .pl-pat button {
+  height: 32px; padding: 0 10px; border-radius: 16px; border: 1.5px solid #3a4f74; background: #142540; color: #cfe0ff;
+  font-size: 12px; font-weight: 700; font-family: -apple-system, Arial, sans-serif;
+}
+#hud .pl-pat button.on { background: #2a4a2a; border-color: #7cfc9b; color: #fff; }
+@media (orientation: landscape) and (max-height: 520px) {
+  .gm-panel.pl-panel { width: min(560px, calc(100vw - 24px)); }
+  #hud .pl-sw button { width: 28px; height: 28px; }
+  .pl-sw { gap: 6px; }
+  .pl-lab { margin: 7px 0 4px; }
+  .pl-panel .gm-rows { display: grid; grid-template-columns: repeat(3, 1fr); }
+  .pl-panel .gm-row .l2 { flex-direction: column; align-items: flex-start; gap: 1px; }
+  .pl-panel .gm-row .ds { text-align: left; }
+}

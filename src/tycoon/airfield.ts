@@ -42,6 +42,7 @@ import { SURFACE, artBaggageCart, artBackdrop, artBug, artDewTank, artFuelFlower
 import { Plane } from './plane';
 import { Passengers, type Pax, type Stop } from './passengers';
 import { Nav } from './nav';
+import { PLANE_FX, PLANE_UPS, PlanePanel, bodyColour, followPaint, paintPlane, planeName, repaint, type PlaneLook } from './livery';
 import { MOOD, arriveMultFor, clampMood, recordMood, starLabel, starsFrom, tipFor } from './mood';
 import { FLEET, ROUTES, ROUTE_LV_MAX, bestPlane, routeFare, routeLvCost, routeOf, type PlaneType, type RouteDef } from './fleet';
 import { RouteMap, type RoutePin } from './routeMap';
@@ -1339,6 +1340,8 @@ export class Airfield {
   // --------------------------------------------------------------------------
   private hangar!: ArtPiece;
   private menu = new UpMenu(document.getElementById('hud')!);
+  /** 🎨 (v1.00) one plane's name, paint and upgrades. */
+  private planePanel = new PlanePanel(document.getElementById('hud')!);
   private targets: { id: string; name: string; at: THREE.Vector3; r: number; live: () => boolean; rows: () => MenuRow[]; buy: (row: string) => void; arrow: THREE.Sprite; can: boolean }[] = [];
   private targetT = 0;
   private arrowT = 0;
@@ -1531,6 +1534,57 @@ export class Airfield {
     );
   }
 
+  /**
+   * 🎨 (v1.00, Phase 6) Gate `i`'s plane: its name, its paint and its own upgrades (engine, seats, comfort). A new
+   * pattern or trim shows at once; a new colour shows on its body at once and on its wings once it's next parked
+   * empty (it's built again then: `swap`, without picking a new aircraft). Seats likewise.
+   */
+  openPlane(i: number) {
+    const g = this.gates[i];
+    if (!g?.open) return;
+    this.sfx.popup();
+    this.planePanel.open({
+      model: () => {
+        if (!g.open) return null;
+        const pt = FLEET.find((f) => f.id === g.plane.model.root.userData.planeType) ?? FLEET[0];
+        return {
+          gate: i,
+          look: { ...(this.st.planes?.[i] ?? {}) },
+          type: `${pt.icon} ${pt.name} · ${g.plane.model.seats.length} seats`,
+          cash: this.save.cash,
+          ups: PLANE_UPS.map((d) => {
+            const lv = this.up(`plane${i}.${d.k}`);
+            return { k: d.k, ic: d.ic, name: d.name, desc: d.desc, lv, max: d.max, cost: lv >= d.max ? null : upPrice(d, lv) };
+          }),
+        };
+      },
+      setLook: (look: PlaneLook) => {
+        const planes = (this.st.planes ??= []);
+        const was = planes[i]?.color;
+        // (only what's set is kept: a plane back to its own colours keeps nothing but its name)
+        const keep: PlaneLook = {};
+        if (look.name) keep.name = look.name;
+        if (look.color) keep.color = look.color;
+        if (look.trim) keep.trim = look.trim;
+        if (look.pattern) keep.pattern = look.pattern;
+        planes[i] = keep;
+        repaint(g.plane.model, keep);
+        if (keep.color !== was) g.swap = true; // (its wings in the new colour when it's next home and empty)
+        this.sfx.pickup();
+      },
+      buy: (k: string) => {
+        const d = PLANE_UPS.find((x) => x.k === k);
+        if (!d) return;
+        const key = `plane${i}.${k}`;
+        const lv = this.up(key);
+        if (lv >= d.max || !this.pay(upPrice(d, lv))) return;
+        (this.st.ups ??= {})[key] = lv + 1;
+        if (k === 'seats') g.swap = true; // (its new seat when it's next home and empty)
+        this.applyUps();
+      },
+    });
+  }
+
   /** Open a target's menu. */
   openTarget(id: string) {
     const t = this.targets.find((x) => x.id === id);
@@ -1593,7 +1647,7 @@ export class Airfield {
       g.fuel.max = TY.fuelMax + 2 * this.up(`gate${i}.fuel`);
       this.pax.gateCap[i] = Math.max(6, g.plane.model.seats.length + 2) + 2 * this.up(`gate${i}.seats`);
       // (🌧️ a little slower in the rain; 🌬️ and it takes off and lands into the wind)
-      g.plane.boost = boost * this.typeFor(i).speed * this.weather.planeMult * (1 + PERK_FX.planes * this.perk('planes'));
+      g.plane.boost = boost * this.typeFor(i).speed * this.weather.planeMult * (1 + PERK_FX.planes * this.perk('planes')) * (1 + PLANE_FX.engine * this.up(`plane${i}.engine`));
       g.plane.wind = this.weather.dir;
     });
     this.flowers.forEach((f, i) => (f.stack.max = TY.flowerMax + 2 * this.up(`flower${i}.cap`)));
@@ -1727,11 +1781,15 @@ export class Airfield {
   private planeModel(i: number) {
     if (this.mixed && !this.st.types?.[i]) this.rollType(i); // (its first pick)
     const t = this.typeFor(i);
-    const m = artBug(t.kind, t.length, { seed: 3 + i * 4, color: t.color });
+    // 🎨 (v1.00) built in its livery's colour, and its pattern painted over that colour
+    const look = this.st.planes?.[i];
+    const built = bodyColour(look, t.kind, 3 + i * 4, t.color);
+    const m = artBug(t.kind, t.length, { seed: 3 + i * 4, color: built });
+    paintPlane(m, built, look);
     m.root.userData.planeType = t.id;
-    // 💺 as many seats as its type has (+ the hangar's Extra Seat levels): extra ones sit between the model's own
-    // seats, a little to each side
-    const want = t.seats + this.up('fleet.seats');
+    // 💺 as many seats as its type has (+ the hangar's Extra Seat levels, + 🎨 this plane's own): extra ones sit
+    // between the model's own seats, a little to each side
+    const want = t.seats + this.up('fleet.seats') + this.up(`plane${i}.seats`);
     const own = m.seats.length;
     m.seats.length = Math.min(own, want);
     for (let e = 0; m.seats.length < want; e++) {
@@ -1826,6 +1884,13 @@ export class Airfield {
         const bonus = Math.round(plane.aboard * this.ticket * (fare - 1));
         this.bill(bonus, plane.pos);
         if (this.near(plane.pos, 40)) this.hud.floatAt(plane.pos.clone().setY(plane.pos.y + 6), this.camera, `🗺️ ${routeOf(plane.outbound?.place).place} fares +$${bonus}`, 'gold');
+      }
+      // 🛋️ (v1.00) this plane's Comfort: every passenger aboard tips as it lifts off ($ a level, × the route's fare)
+      const comfort = PLANE_FX.comfort * this.up(`plane${this.gates.indexOf(gate)}.comfort`);
+      if (comfort > 0 && plane.aboard > 0) {
+        const tip = Math.round(plane.aboard * comfort * fare);
+        this.bill(tip, plane.pos);
+        if (this.near(plane.pos, 40)) this.hud.floatAt(plane.pos.clone().setY(plane.pos.y + 15), this.camera, `🛋️ Comfort tips +$${tip}`, 'gold');
       }
       // 🌙🌈 night flights, and flights under a rainbow, pay more: that share of every fare aboard (and of its freight)
       const more = this.weather.bonus;
@@ -2363,6 +2428,7 @@ export class Airfield {
         gate: i + 1,
         icon: pt.icon,
         type: `${pt.name} · ${seats} seats`,
+        name: planeName(this.st.planes?.[i], i),
         flight: flight?.no ?? null,
         place: flight?.place ?? null,
         dir: dep ? 'dep' : 'arr',
@@ -2595,6 +2661,7 @@ export class Airfield {
       this.st.fuel[i] = g.fuel.count;
       this.updateBoarding(g, dt);
       g.plane.update(dt);
+      if (g.open && g.plane.inSight) followPaint(g.plane.model); // (🎨 its pattern rides it)
     });
     this.updateRunway();
 

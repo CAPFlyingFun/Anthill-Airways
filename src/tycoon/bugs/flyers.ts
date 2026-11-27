@@ -171,7 +171,7 @@ export function dragonfly(a: BArgs): Bug {
 // gulf fritillary orange/black (seed 0), monarch, blue, or swallowtail yellow, picked by seed. Landed: wings straight up and
 // closed over the back. Flying: big, slow, floppy flaps.
 // ===========================================================================
-const BF_BASE = ['#f08a24', '#e8731c', '#3b8be0', '#f5d63a'];
+export const BF_BASE = ['#f08a24', '#e8731c', '#3b8be0', '#f5d63a'];
 export function butterfly(a: BArgs): Bug {
   const L = SIZE.butterfly;
   const m = newBug('butterfly', 0.3 * L, L, a.scale);
