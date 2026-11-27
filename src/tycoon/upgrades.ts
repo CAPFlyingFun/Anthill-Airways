@@ -49,6 +49,15 @@ export const UPS = {
   lounge: [
     { k: 'vips', ic: '👑', name: 'Word of Mouth', desc: '+3% more VIPs', max: 5, base: 400 },
     { k: 'fee', ic: '🛋️', name: 'Softer Sofa', desc: '+$3 lounge fee', max: 8, base: 300 },
+    // (v0.97, Phase 3: VIPs wait here for their plane)
+    { k: 'seats', ic: '💺', name: 'More Seats', desc: '+2 VIPs wait here', max: 3, base: 900 },
+    { k: 'comfort', ic: '🍯', name: 'Honey Bar', desc: '+25% lounge income', max: 6, base: 700 },
+  ],
+  // 🛂 (v0.97, Phase 3) the security checkpoint
+  security: [
+    { k: 'lanes', ic: '🛂', name: 'Another Lane', desc: '+1 lane (up to 4)', max: 3, base: 1200 },
+    { k: 'scan', ic: '⚡', name: 'Faster Scanner', desc: '-12% scan time', max: 6, base: 600 },
+    { k: 'fee', ic: '💵', name: 'Security Fee', desc: '+$1 a traveller', max: 8, base: 500 },
   ],
   recycler: [
     { k: 'speed', ic: '♻️', name: 'Faster Wheel', desc: '+20% speed', max: 5, base: 160 },

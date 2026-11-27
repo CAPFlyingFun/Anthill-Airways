@@ -25,6 +25,9 @@ export const MOOD = {
   /** ...and a short one is a little pleasant (a second). */
   shortLine: 3,
   shortLift: 0.002,
+  /** 🛂 (v0.97) Queuing at security: seconds before it wears on them, and how much a second after. */
+  securityPatience: 20,
+  securityDrop: 0.012,
   /** 🛫 Waiting at the gate: seconds before it wears on them, and how much a second after. */
   gatePatience: 45,
   gateDrop: 0.008,

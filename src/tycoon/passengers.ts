@@ -54,6 +54,15 @@ export class Pax {
   waitT = 0;
   waitIn: PaxState | null = null;
   lateT = 0;
+  /** 🛂👑 (v0.97) Out through the terminal's airside doorway already (on the way to a stop outside); its security
+   *  lane (-1: queuing) and how long it's been in the arch; a VIP called from the lounge, on its way to board. */
+  out = false;
+  lane = -1;
+  scanT = 0;
+  /** Its place in the security queue, and its seat in the lounge (-1: none). */
+  queueAt = 0;
+  loungeSeat = -1;
+  vipComing = false;
   /** Its face over its head (made the first time you come near). */
   face: TextSprite | null = null;
   faceShown = '';
@@ -92,6 +101,12 @@ export interface Stop {
   has: (p: Pax) => boolean;
   buy: (p: Pax) => void;
   maxWait: number;
+  /** (v0.97) Outside the terminal (🛂 security, 👑 the lounge): walked to out through the airside doorway, and from
+   *  it a traveller goes on straight to its gate (not back in through the terminal). */
+  outside?: boolean;
+  /** (v0.97) Where this traveller stands at the stop (a lane's arch, its place in the queue, a lounge seat): else the
+   *  stop's spot, spread a little. */
+  spotFor?: (p: Pax, out: THREE.Vector3) => THREE.Vector3;
 }
 
 /**
@@ -134,6 +149,8 @@ export class Passengers {
   /** 😀 What the airfield tells the moods each frame: a lizard on the runway, where you are (faces show near you),
    *  and whether a traveller is somewhere pleasant (by a flower). */
   lizard = false;
+  /** 🛂 How many are queuing at security (the airfield counts them). */
+  securityQueue = 0;
   you = new THREE.Vector3(1e9, 0, 1e9);
   pleasant: (p: Pax) => boolean = () => false;
   /** Called when a passenger finishes checking in (the airfield pays + gives XP). */
@@ -336,6 +353,8 @@ export class Passengers {
         // its stops first (the café, the shop, the lounge for a VIP), then out through the airside doorway
         front.stops = this.stops.filter((s) => s.who(front));
         front.stopT = 0;
+        front.out = false;
+        front.lane = -1;
         front.via = front.stops.length ? [] : [...this.spots.outbound.map((v) => v.clone()), ...this.wayOut(gate)];
         this.atGate[gate].push(front);
         this.onCheckIn(front);
@@ -347,7 +366,15 @@ export class Passengers {
       if (p.state === 'toGate' && p.stops.length) {
         // 🍪🎁👑 at a stop: buy (or relax), or give up after a while if there's nothing; then the next one
         const s = p.stops[0];
-        p.target.copy(s.spot).add(this.tmp.set(((p.model.root.id % 5) - 2) * 0.9, 0, 0));
+        // (🛂👑 v0.97: a stop outside is walked to out through the airside doorway)
+        if (s.outside && !p.out) {
+          if (!p.via.length) { p.via = this.spots.outbound.map((v) => v.clone()); p.target.copy(p.via[0]); p.there = false; }
+          if (this.followVia(p)) return;
+          p.out = true;
+          p.there = false;
+        }
+        if (s.spotFor) s.spotFor(p, p.target);
+        else p.target.copy(s.spot).add(this.tmp.set(((p.model.root.id % 5) - 2) * 0.9, 0, 0));
         if (p.there) {
           p.stopT += dt;
           let done = false;
@@ -361,14 +388,15 @@ export class Passengers {
             p.stops.shift();
             p.stopT = 0;
             p.there = false;
-            if (!p.stops.length) p.via = [...this.spots.outbound.map((v) => v.clone()), ...this.wayOut(g)];
+            // (out of the terminal already: straight on to the gate)
+            if (!p.stops.length) p.via = [...(p.out ? [] : this.spots.outbound.map((v) => v.clone())), ...this.wayOut(g)];
           }
         }
         return;
       }
       if (p.state === 'toGate' && this.followVia(p)) return;
       this.gateSpot(g, i, p.target);
-      if (p.state === 'toGate' && p.there) p.state = 'waiting';
+      if (p.state === 'toGate' && p.there) { p.state = 'waiting'; p.vipComing = false; }
     }));
 
     this.stepMoods(dt);
@@ -435,6 +463,11 @@ export class Passengers {
         if (this.line.length > MOOD.crowdLine) d -= MOOD.crowdDrop;
         else if (this.line.length <= MOOD.shortLine) d += MOOD.shortLift;
       } else if (p.state === 'waiting' && p.waitT > MOOD.gatePatience) d -= MOOD.gateDrop;
+      else if (p.state === 'toGate' && p.out && p.lane < 0 && p.stops[0]?.key === 'security') {
+        // 🛂 (v0.97) a long wait at security, and a crowded queue there
+        if (p.stopT > MOOD.securityPatience) d -= MOOD.securityDrop;
+        if (this.securityQueue > MOOD.crowdLine) d -= MOOD.crowdDrop;
+      }
       if (p.state !== 'seated' && p.state !== 'boarding') {
         if (this.lizard) d -= MOOD.lizardDrop;
         if (p.state !== 'leaving' && this.pleasant(p)) d += MOOD.flowerLift;

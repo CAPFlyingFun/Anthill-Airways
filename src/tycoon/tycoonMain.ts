@@ -78,7 +78,10 @@ const HOWTO_HTML = `
       everything else. Once it's open, passengers put wrappers in the bins: carry them to the recycler, or hire the
       🧹 <b>Janitor ant</b>.</li>
     <li>🗺️ <b>Route</b> tiles open longer routes that pay higher fares.</li>
-    <li>🎁 The <b>Gift Shop</b> sells pollen sweets to passengers; the 👑 <b>VIP Lounge</b> brings golden VIPs who pay ×3.</li>
+    <li>🎁 The <b>Gift Shop</b> sells pollen sweets to passengers; the 👑 <b>VIP Lounge</b> brings golden VIPs who pay ×3.
+      They wait in the lounge until their plane is boarding (the lounge earns while they relax), then board first.</li>
+    <li>🛂 The <b>Security Checkpoint</b> (a tile): every traveller goes through it on the way to the gates and pays a fee.
+      Add lanes and a faster scanner in its menu: a long security queue upsets travellers.</li>
     <li>🦎 Now and then something happens: a lizard sunbathing on the runway (walk up to shoo it), or a 🪶 feather
       to find.</li>
     <li>👑 Once the <b>North Field</b> is open, the Queen offers a <b>Royal Charter</b> (the 👑 button): hand the

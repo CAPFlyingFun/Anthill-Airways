@@ -308,6 +308,7 @@ export class Airfield {
     this.buildCafe(desk.cafe);
     this.buildShop(desk.shop);
     this.buildLounge();
+    this.buildSecurity();
     this.buildStaffPad(desk.staff);
     this.buildBins();
     this.buildRecycler();
@@ -831,9 +832,9 @@ export class Airfield {
   }
   private cafeOpen = false;
 
-  /** A new stop for passengers (kept in visiting order: 🍪 café, 🎁 shop, 👑 lounge). */
+  /** A new stop for passengers (kept in visiting order: 🍪 café, 🎁 shop, 🛂 security, 👑 lounge). */
   private addStop(s: Stop) {
-    const order = ['cafe', 'shop', 'lounge'];
+    const order = ['cafe', 'shop', 'security', 'lounge'];
     this.pax.stops = [...this.pax.stops.filter((x) => x.key !== s.key), s].sort((a, b) => order.indexOf(a.key) - order.indexOf(b.key));
   }
 
@@ -898,7 +899,7 @@ export class Airfield {
   // are VIPs (golden, with a crown): they pay ×3 for their ticket, relax here for a moment (a lounge fee), then
   // board first.
   // --------------------------------------------------------------------------
-  private lounge!: { parts: THREE.Object3D[]; spot: THREE.Vector3; open: boolean };
+  private lounge!: { parts: THREE.Object3D[]; spot: THREE.Vector3; open: boolean; cushions: THREE.Object3D[]; seats: (Pax | null)[]; payT: number };
   private buildLounge() {
     const { x, z } = AT.lounge;
     const g = new THREE.Group();
@@ -920,13 +921,50 @@ export class Airfield {
         g.add(post, knob);
       }
     }
+    // 💺 (v0.97) a leaf cushion for each seat (four to start, two more an upgrade), in two rows on the carpet
+    const cushionMat = mat(0x6fb04a, { rough: 0.8 });
+    const cushions: THREE.Object3D[] = [];
+    for (let i = 0; i < 10; i++) {
+      const c = mesh(new THREE.CylinderGeometry(0.62, 0.7, 0.3, 12), cushionMat);
+      const at = this.loungeSeatAt(i, new THREE.Vector3());
+      c.position.set(at.x - x, 0.15, at.z - z);
+      g.add(c);
+      cushions.push(c);
+    }
     this.scene.add(g);
     const sign = new TextSprite(1.1, '#ffd166');
     sign.setText('👑 VIP LOUNGE');
     sign.sprite.position.set(x, 6, z - 3);
     this.scene.add(sign.sprite);
-    this.lounge = { parts: [g, sign.sprite], spot: new THREE.Vector3(x, 0, z - 2.2), open: false };
+    this.lounge = { parts: [g, sign.sprite], spot: new THREE.Vector3(x, 0, z - 2.2), open: false, cushions, seats: [], payT: 0 };
     for (const o of this.lounge.parts) shown(o, false);
+  }
+  /** Lounge seat `i`'s place: five a row along the carpet, in front of the sofa. */
+  private loungeSeatAt(i: number, out: THREE.Vector3) {
+    const { x, z } = AT.lounge;
+    return out.set(x + ((i % 5) - 2) * 1.25, 0, z - 2.4 + Math.floor(i / 5) * 2.2);
+  }
+  private get loungeSeats() {
+    return TY.loungeSeats + 2 * this.up('lounge.seats');
+  }
+  /** Is gate `g`'s plane ready to board (parked and fuelled)? A VIP in the lounge goes then. */
+  private boardingAt(g: number) {
+    const gate = this.gates[g];
+    return !!gate && gate.open && gate.plane.parked && this.fuelUnits(gate) >= TY.fuelPerFlight;
+  }
+  /** 👑 Each frame: the cushions for the seats bought, a VIP's seat, and the lounge's own income while VIPs relax. */
+  private stepLounge(dt: number) {
+    const l = this.lounge;
+    if (!l.open) return;
+    const n = this.loungeSeats;
+    l.cushions.forEach((c, i) => (c.visible = i < n));
+    // (a seat whose VIP has gone on: free)
+    l.seats = l.seats.map((p) => (p && p.stops[0]?.key === 'lounge' && this.pax.all.includes(p) ? p : null));
+    const relaxing = l.seats.filter((p) => p && p.there).length;
+    if ((l.payT -= dt) <= 0) {
+      l.payT = 2;
+      if (relaxing) this.bill(TY.loungeRate * 2 * relaxing * (1 + 0.25 * this.up('lounge.comfort')), l.spot);
+    }
   }
 
   private openLounge(animate: boolean) {
@@ -941,15 +979,142 @@ export class Airfield {
     this.addStop({
       key: 'lounge',
       spot: l.spot,
-      who: (p) => p.vip,
-      maxWait: TY.loungeSecs + 1,
-      // (a VIP relaxes for a moment, then pays the lounge fee and heads for the gate)
-      has: (p) => p.stopT >= TY.loungeSecs,
-      buy: () => {
+      outside: true,
+      // (v0.97: a VIP takes a seat if one's free, and WAITS there until its plane is fuelled and boarding -- or a
+      // long while at the most -- then pays the lounge fee and walks over to board first: its plane waits for it)
+      who: (p) => p.vip && l.seats.filter(Boolean).length < this.loungeSeats,
+      maxWait: Infinity,
+      spotFor: (p, out) => {
+        if (p.loungeSeat < 0 || l.seats[p.loungeSeat] !== p) {
+          let i = l.seats.findIndex((q, k) => !q && k < this.loungeSeats);
+          if (i < 0) i = Math.min(this.loungeSeats, 10) > l.seats.length ? l.seats.length : -1;
+          if (i >= 0) { l.seats[i] = p; p.loungeSeat = i; }
+        }
+        return p.loungeSeat >= 0 ? this.loungeSeatAt(p.loungeSeat, out) : out.copy(l.spot);
+      },
+      has: (p) => p.stopT >= TY.loungeSecs && (this.boardingAt(p.gate) || p.stopT > TY.loungeMaxStay),
+      buy: (p) => {
+        if (p.loungeSeat >= 0 && l.seats[p.loungeSeat] === p) l.seats[p.loungeSeat] = null;
+        p.loungeSeat = -1;
+        p.vipComing = true;
         this.bill(TY.loungeFee + 3 * this.up('lounge.fee'), l.spot);
         this.progress.addXp(2);
       },
     });
+  }
+
+  // --------------------------------------------------------------------------
+  // 🛂 The SECURITY CHECKPOINT (v0.97, Phase 3: "every traveller goes through after check-in; you buy it as a tile,
+  // then extra lanes (1 to 4) and a faster scanner as upgrades. A long security queue lowers moods"). A row of twig
+  // arches between the terminal's airside doorway and the gates. Travellers queue on the terminal's side, one at a
+  // time a lane walks into an arch, is scanned (its light green), pays the security fee and goes on to its gate.
+  // --------------------------------------------------------------------------
+  private security!: { parts: THREE.Object3D[]; arches: THREE.Group[]; lights: THREE.Mesh[]; open: boolean; lanes: (Pax | null)[] };
+  /** How many are waiting in the queue (not yet in an arch). */
+  securityQueue = 0;
+  private static readonly LANE_GAP = 2.8;
+  private laneAt(i: number, out: THREE.Vector3) {
+    return out.set(AT.security.x + (i - 1.5) * Airfield.LANE_GAP, 0, AT.security.z);
+  }
+  private buildSecurity() {
+    const twig = mat(0x8a5a32, { rough: 0.9 });
+    const table = mat(0xb9b2a4, { rough: 0.85, flat: true });
+    const arches: THREE.Group[] = [], lights: THREE.Mesh[] = [];
+    for (let i = 0; i < 4; i++) {
+      const a = new THREE.Group();
+      this.laneAt(i, a.position);
+      for (const sx of [-1, 1]) {
+        const post = mesh(new THREE.CylinderGeometry(0.16, 0.2, 3.2, 7), twig);
+        post.position.set(sx * 0.95, 1.6, 0);
+        a.add(post);
+      }
+      const bar = mesh(new THREE.CylinderGeometry(0.17, 0.17, 2.3, 7).rotateZ(Math.PI / 2), twig);
+      bar.position.y = 3.2;
+      // its light: red while it's empty, green while it scans someone
+      const light = mesh(new THREE.SphereGeometry(0.26, 10, 8), new THREE.MeshStandardMaterial({ color: 0xff5a4a, emissive: 0xff2a1a, emissiveIntensity: 0.8 }));
+      light.position.y = 3.55;
+      // a pebble table beside it for their things
+      const tray = mesh(new THREE.BoxGeometry(0.7, 1.0, 2.4), table);
+      tray.position.set(1.35, 0.5, 0.9);
+      a.add(bar, light, tray);
+      this.scene.add(a);
+      arches.push(a);
+      lights.push(light);
+    }
+    const sign = new TextSprite(1.1, '#9fe0ff');
+    sign.setText('🛂 SECURITY');
+    sign.sprite.position.set(AT.security.x, 6, AT.security.z);
+    this.scene.add(sign.sprite);
+    this.security = { parts: [sign.sprite], arches, lights, open: false, lanes: [null, null, null, null] };
+    for (const o of [...arches, sign.sprite]) shown(o, false);
+  }
+  private get laneCount() {
+    return Math.min(4, 1 + this.up('security.lanes'));
+  }
+  private get scanSecs() {
+    return TY.scanSecs * Math.pow(0.88, this.up('security.scan'));
+  }
+  private openSecurity(animate: boolean) {
+    const sec = this.security;
+    sec.open = true;
+    shown(sec.parts[0], true);
+    for (let i = 0; i < 4; i++) {
+      shown(sec.arches[i], i < this.laneCount);
+      if (animate && i < this.laneCount) this.flyers.grow(sec.arches[i]);
+    }
+    const spot = new THREE.Vector3(AT.security.x, 0, AT.security.z);
+    this.addStop({
+      key: 'security',
+      spot,
+      outside: true,
+      who: () => true,
+      maxWait: Infinity, // (nobody skips security)
+      spotFor: (p, out) => {
+        if (p.lane >= 0) return this.laneAt(p.lane, out);
+        // the queue: rows of four on the terminal's side, the longest waiting at the front
+        const q = p.queueAt;
+        return out.set(AT.security.x + ((q % 4) - 1.5) * 1.7, 0, AT.security.z + 3 + Math.floor(q / 4) * 1.9);
+      },
+      has: (p) => p.lane >= 0 && p.scanT >= this.scanSecs,
+      buy: (p) => {
+        sec.lanes[p.lane] = null;
+        p.lane = -1;
+        this.bill(TY.securityFee + this.up('security.fee'), p.pos);
+        this.progress.addXp(1);
+      },
+    });
+  }
+  /** Each frame: free lanes take the next in the queue (the longest waiting first); a traveller in an arch is scanned. */
+  private stepSecurity(dt: number) {
+    const sec = this.security;
+    if (!sec.open) return;
+    const n = this.laneCount;
+    for (let i = 0; i < 4; i++) {
+      shown(sec.arches[i], i < n);
+      const p = sec.lanes[i];
+      // (a lane whose traveller has gone, or is no longer here: free)
+      if (p && (p.stops[0]?.key !== 'security' || !this.pax.all.includes(p))) sec.lanes[i] = null;
+    }
+    const here = this.pax.all.filter((p) => p.state === 'toGate' && p.out && p.stops[0]?.key === 'security');
+    const queue = here.filter((p) => p.lane < 0).sort((a, b) => b.stopT - a.stopT || a.model.root.id - b.model.root.id);
+    for (let i = 0; i < n && queue.length; i++) {
+      if (sec.lanes[i]) continue;
+      const p = queue.shift()!;
+      sec.lanes[i] = p;
+      p.lane = i;
+      p.scanT = 0;
+    }
+    queue.forEach((p, i) => (p.queueAt = i));
+    this.securityQueue = queue.length;
+    this.pax.securityQueue = queue.length;
+    for (let i = 0; i < 4; i++) {
+      const p = sec.lanes[i];
+      if (p && p.there) p.scanT += dt;
+      const m = sec.lights[i].material as THREE.MeshStandardMaterial;
+      const busy = !!p && p.there;
+      m.color.setHex(busy ? 0x5aff7a : 0xff5a4a);
+      m.emissive.setHex(busy ? 0x1aff3a : 0xff2a1a);
+    }
   }
 
   // --------------------------------------------------------------------------
@@ -1289,6 +1454,7 @@ export class Airfield {
     this.addBuilding('cafe', 'Café kitchen', v(AT.oven.x, AT.oven.z + 3), 7, UPS.cafe, () => this.cafeOpen, 6);
     this.addBuilding('shop', 'Gift shop', this.shop.spot.clone().setY(0), 5, UPS.shop, () => this.shop.open, 8);
     this.addBuilding('lounge', 'VIP Lounge', this.lounge.spot.clone().setY(0), 7, UPS.lounge, () => this.lounge.open, 7);
+    this.addBuilding('security', 'Security', new THREE.Vector3(AT.security.x, 0, AT.security.z), 7, UPS.security, () => this.security.open, 6);
     this.addBuilding('cargo', 'Cargo Depot', v(AT.cargo.x + 2, AT.cargo.z + 2), 9, UPS.cargo, () => this.cargoDepot.open, 7);
     this.addBuilding('recycler', 'Recycler', v(AT.recycler.x, AT.recycler.z + 2), 8, UPS.recycler, () => this.recycler.open, 7);
     this.addBuilding('tower', 'Control Tower', v(AT.tower.x, AT.tower.z + 5), 10, UPS.tower, () => this.owns('ty-tower'), 9);
@@ -1825,6 +1991,8 @@ export class Airfield {
       this.openShop(animate);
     } else if (id === 'ty-lounge') {
       this.openLounge(animate);
+    } else if (id === 'ty-security') {
+      this.openSecurity(animate);
     }
   }
 
@@ -2412,6 +2580,8 @@ export class Airfield {
     this.nav.sync(this.blockers);
     this.pax.nav = this.nav;
     this.pax.crossingOpen = () => !this.planeAtCrossing();
+    this.stepSecurity(dt);
+    this.stepLounge(dt);
     // 😀⭐ (v0.96) what the moods are told, and what the rating does
     this.pax.lizard = this.events.runwayBlocked;
     this.pax.you.copy(p);
@@ -2689,7 +2859,9 @@ export class Airfield {
     if (plane.aboard > 0) g.boardT += dt;
     // 🧳 everyone aboard needs their bag on the gate's BAGS pad (counted after this frame's passengers sat down)
     const bagsOk = g.bags.count >= plane.aboard;
-    const ready = plane.aboard > 0 && !g.boarding.length && (plane.freeSeats === 0 || g.boardT >= this.boardWait(g));
+    // (👑 v0.97: and waits for a VIP walking over from the lounge, while it has a seat for them)
+    const vipOnWay = this.pax.atGate[this.gates.indexOf(g)].some((p) => p.vipComing && p.state === 'toGate');
+    const ready = plane.aboard > 0 && !g.boarding.length && (plane.freeSeats === 0 || (g.boardT >= this.boardWait(g) && !vipOnWay));
     // (and nothing still flying onto its pads: a stack only gives up items that have landed)
     const settled = g.fuel.canPop() && (plane.aboard === 0 || g.bags.canPop());
     if (ready && fuelled && bagsOk && settled) {
@@ -2782,6 +2954,7 @@ export class Airfield {
       ...this.events.markers(),
       { x: this.cashPad.zone.x, z: this.cashPad.zone.z, icon: '💵', alert: this.cashPad.stack.count > 0 },
       { x: this.bagDropZone.x, z: this.bagDropZone.z, icon: '🧳', label: 'Bags', alert: this.bagDrop.count >= TY.bagDropMax - 2 },
+      ...(this.security.open ? [{ x: AT.security.x, z: AT.security.z, icon: '🛂', label: 'Security', alert: this.securityQueue > 10 }] : []),
       ...(this.fieldOpen(FIELDS[1]) ? [{ x: this.bagDropNZone.x, z: this.bagDropNZone.z, icon: '🧳', label: 'North bags', alert: this.bagDropN.count >= TY.bagDropMax - 2 }] : []),
       ...(this.cafeOpen
         ? [
@@ -3010,6 +3183,7 @@ export class Airfield {
     'ty-cargo': { ...AT.cargo, r: 5.5 },
     'ty-hangar': { ...AT.hangar, r: 16, dx: -1, dz: 0.45 },
     'ty-lounge': { ...AT.lounge, r: 6 },
+    'ty-security': { ...AT.security, r: 7, dx: 0, dz: 1 },
   };
   /** After a building appears: you're never left standing inside it (or in a wall). */
   private freePlayer(id: string) {
@@ -3131,8 +3305,15 @@ export class Airfield {
         id: 'ty-lounge',
         title: '👑 VIP Lounge',
         chain: ['👑 Golden VIPs', '🛋️ Lounge', '✈️ Board first'],
-        text: 'Golden VIP passengers now turn up. They pay <b>×3</b>, rest in the lounge and board first. Nothing to carry.',
+        text: 'Golden VIP passengers now turn up. They pay <b>×3</b>, wait in the lounge until their plane is boarding, and board first. The lounge earns while they relax. Nothing to carry.',
         look: () => new THREE.Vector3(AT.lounge.x, 0, AT.lounge.z),
+      },
+      {
+        id: 'ty-security',
+        title: '🛂 Security Checkpoint',
+        chain: ['🎫 Check-in', '🛂 Security', '🛫 Gate'],
+        text: 'Every traveller now goes through security on the way to their gate, and pays a <b>security fee</b>. Tap it to add <b>lanes</b> and a <b>faster scanner</b>: a long queue there makes travellers unhappy.',
+        look: () => new THREE.Vector3(AT.security.x, 0, AT.security.z),
       },
       {
         id: 'ty-route-picnic',

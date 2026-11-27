@@ -81,6 +81,16 @@ export const TY = {
   vipTicket: 3,
   loungeFee: 10,
   loungeSecs: 2.5,
+  /** 👑 (v0.97, Phase 3) VIPs WAIT in the lounge until their plane is fuelled and boarding, then walk over and board
+   *  first (the plane waits for them): its seats (more by an upgrade), the most a VIP waits there, and what the lounge
+   *  earns each second for each VIP relaxing in it (more by its comfort). GAME TUNING. */
+  loungeSeats: 4,
+  loungeMaxStay: 90,
+  loungeRate: 0.6,
+  /** 🛂 (v0.97, Phase 3) The SECURITY CHECKPOINT: every checked-in traveller goes through after the café and the shop:
+   *  one at a time a lane, `scanSecs` each (faster by an upgrade), and a fee each. GAME TUNING. */
+  scanSecs: 3,
+  securityFee: 3,
   /** ♻️ The Recycler (v0.71): nectar in for one drop of JET FUEL (worth a whole flight on a FUEL pad), what it
    *  pays for anything else (crumbs, sweets, litter), and how fast it works. 🗑️ A bin shows FULL at `binFull`
    *  wrappers and holds `binMax` before they're lost. */
@@ -156,6 +166,9 @@ export const AT = {
   recycler: { x: 6, z: 28 },
   /** 🎁 The Pollen Gift Shop's counter, inside the terminal (in its own space: right of the line). */
   shopLocal: { x: 10, z: 5 },
+  /** 🛂 (v0.97) The security checkpoint: its lanes' scanner arches in a row along x here (the queue on the terminal's
+   *  side, north of them: travellers walk on through toward the gates). */
+  security: { x: -8, z: -4 },
   /** 👑 The VIP Lounge: a leaf sofa on a red carpet, between the terminal and Gates 1-2. */
   lounge: { x: -20, z: -1 },
   /** 🗼 The holding pattern's centre: over the runway's far (west) end, where arrivals circle. */
@@ -255,6 +268,8 @@ export const TY_UNLOCKS: UnlockDef[] = [
   { id: 'ty-shop', name: 'Pollen Gift Shop', icon: '🎁', cost: 600, pos: [2, 16], requires: ['ty-cafe'], level: 5 },
   { id: 'ty-lounge', name: 'VIP Lounge (VIPs pay ×3)', icon: '👑', cost: 1500, pos: [-20, -1], requires: ['ty-gate2'], level: 7 },
   { id: 'ty-bags3', name: 'Baggage Ant 3', icon: '🧳', cost: 750, pos: [4, -6], requires: ['ty-gate3', 'ty-bags2'] },
+  // ---- v0.97 (Phase 3): 🛂 a security checkpoint between the terminal and the gates ----
+  { id: 'ty-security', name: 'Security Checkpoint (a fee from every traveller)', icon: '🛂', cost: 2500, pos: [-8, -4], requires: ['ty-gate2', 'ty-checkin'], level: 8 },
   // ---- v0.88: 🛫 the north field: a second runway and Gates 5 to 8, and help to keep them running ----
   { id: 'ty-gate5', name: 'North Field: Runway 2 + Gate 5', icon: '🛫', cost: 60000, pos: [-34, -100], requires: ['ty-gate4'], level: 16 },
   { id: 'ty-gate6', name: 'Gate 6 + Plane', icon: '✈️', cost: 45000, pos: [-10, -100], requires: ['ty-gate5'], level: 18 },
