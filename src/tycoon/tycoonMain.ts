@@ -82,8 +82,10 @@ const HOWTO_HTML = `
       They wait in the lounge until their plane is boarding (the lounge earns while they relax), then board first.</li>
     <li>🛂 The <b>Security Checkpoint</b> (a tile): every traveller goes through it on the way to the gates and pays a fee.
       Add lanes and a faster scanner in its menu: a long security queue upsets travellers.</li>
-    <li>🦎 Now and then something happens: a lizard sunbathing on the runway (walk up to shoo it), or a 🪶 feather
-      to find.</li>
+    <li>🦎 Now and then something happens: a lizard sunbathing on the runway (walk up to shoo it), a 🪶 feather
+      to find, a 🕸️ spider web across a gate (walk up to clear it: no boarding there till you do), a 🐦 bird
+      swooping over the runway (walk out under it), a 🧳 lost bag (carry it to the BAG DROP for a tip), or a 👑 VIP
+      charter (get that gate's plane off the ground before the clock runs out for a big bonus).</li>
     <li>👑 Once the <b>North Field</b> is open, the Queen offers a <b>Royal Charter</b> (the 👑 button): hand the
       airfield over and found a new one. It pays <b>crowns</b>: each one makes everything pay +5% for good, and they
       buy perks that stay. You keep your level and stats.</li>

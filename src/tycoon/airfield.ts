@@ -326,6 +326,9 @@ export class Airfield {
         this.hud.floatAt(at, this.camera, `${text} +$${cash}`, 'big gold');
       },
       level: () => this.save.level,
+      // (🕸️👑 v0.99: the open gates, and where their travellers wait)
+      gates: () => this.gates.map((g, i) => ({ i, at: this.pax.gateWaitAt(i).clone(), parked: g.plane.parked, open: g.open })).filter((g) => g.open),
+      bagDrop: () => new THREE.Vector3(this.bagDropZone.x, 0, this.bagDropZone.z),
     });
 
     // The glowing tiles
@@ -1799,6 +1802,7 @@ export class Airfield {
     pad.userData.gatePad = true;
     piece.root.userData.pad = pad;
     plane.onAirborne = () => {
+      this.events.airborne(this.gates.indexOf(gate)); // (👑 v0.99: a VIP charter's on time?)
       // 😀 (v0.96) a plane that went on time cheers its riders up
       for (const r of gate.riders) if (r.lateT <= MOOD.latePatience) r.mood = clampMood(r.mood + MOOD.onTimeLift);
       this.st.flights++;
@@ -2396,7 +2400,7 @@ export class Airfield {
           set('TAXIING TO THE RUNWAY', 'TAXI', 'go', p.etaTakeoff(), 1, 'TAXIING');
           break;
         case 'hold':
-          if (this.events.runwayBlocked) set('🦎 LIZARD ON THE RUNWAY', '🦎 BLOCKED', 'warn', null, 1, 'RUNWAY BLOCKED 🦎');
+          if (this.events.runwayBlocked) { const b = this.events.blockedBy; set(`${b.icon} ${b.name}`, `${b.icon} BLOCKED`, 'warn', null, 1, `RUNWAY BLOCKED ${b.icon}`); }
           else set('🗼 HOLDING SHORT · NEXT UP', 'HOLDING', 'go', null, 1, 'HOLDING SHORT');
           break;
         case 'lineUp':
@@ -2411,7 +2415,7 @@ export class Airfield {
           set('ON ITS WAY BACK', 'IN THE AIR', 'info', p.etaLanding(), p.routeFrac, 'ON TIME');
           break;
         case 'holding':
-          if (this.events.runwayBlocked) set('🦎 LIZARD ON THE RUNWAY', '🦎 BLOCKED', 'warn', null, 1, 'RUNWAY BLOCKED 🦎');
+          if (this.events.runwayBlocked) { const b = this.events.blockedBy; set(`${b.icon} ${b.name}`, `${b.icon} BLOCKED`, 'warn', null, 1, `RUNWAY BLOCKED ${b.icon}`); }
           else set('🗼 CIRCLING · NEXT TO LAND', 'CIRCLING', 'go', null, 1, 'CIRCLING');
           break;
         case 'landing':
@@ -2894,7 +2898,8 @@ export class Airfield {
     const nose = g.door;
     // Call more passengers while there are free seats (and the fuel to go)
     const free = plane.freeSeats - g.boarding.length;
-    if (fuelled && free > 0 && this.pax.atGate[this.gates.indexOf(g)].length) {
+    // (🕸️ v0.99: not while a web is strung over this gate)
+    if (fuelled && free > 0 && this.pax.atGate[this.gates.indexOf(g)].length && this.events.webGate !== this.gates.indexOf(g)) {
       plane.outbound ??= this.newFlight();
       g.boarding.push(...this.pax.callToBoard(this.gates.indexOf(g), free, g.path));
     }
