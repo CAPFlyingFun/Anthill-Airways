@@ -102,6 +102,9 @@ export function takeCharter(save: SaveData) {
     charters: (st.charters ?? 0) + 1,
     perks: st.perks,
     runBase: st.tally?.earned ?? 0,
+    // 🏆 (v1.01) achievements and records go with you (and this charter's crowns may be a record)
+    ach: st.ach,
+    rec: { ...(st.rec ?? {}), crowns: Math.max(st.rec?.crowns ?? 0, won) },
   };
   return won;
 }

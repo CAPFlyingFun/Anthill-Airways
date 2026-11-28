@@ -1356,3 +1356,38 @@ body.tycoon .up-btn { bottom: calc(68px + var(--safe-b)); }
   .pl-panel .gm-row .l2 { flex-direction: column; align-items: flex-start; gap: 1px; }
   .pl-panel .gm-row .ds { text-align: left; }
 }
+
+/* ============================================================================
+   🏆 v1.01 (Phase 7): achievements and the records board
+   ============================================================================ */
+#trophyBtn { position: relative; }
+.tr-panel { max-height: calc(100vh - 24px - var(--safe-t) - var(--safe-b)); }
+.tr-tabs { display: flex; gap: 6px; margin: 6px 0 2px; flex: none; }
+#hud .tr-tabs button {
+  flex: 1; height: 34px; border-radius: 10px; border: 1.5px solid #3a4f74; background: #142540; color: #9fb6d6;
+  font-size: 13px; font-weight: 800; font-family: -apple-system, Arial, sans-serif;
+}
+#hud .tr-tabs button.on { background: #2b4470; border-color: #ffd166; color: #fff; }
+.tr-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; display: flex; flex-direction: column; gap: 6px; padding: 2px 1px 8px; }
+.tr-group { color: #7c93b8; font-size: 11px; font-weight: 800; letter-spacing: 0.6px; text-transform: uppercase; margin: 6px 0 0; }
+.tr-ach, .tr-rec {
+  display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 12px;
+  background: #142540; border: 1.5px solid #2a3b5c;
+}
+.tr-ach.done { background: linear-gradient(90deg, #3d3214, #241f12); border-color: #c9a227; }
+.tr-ach:not(.done) .tr-ic { filter: grayscale(1); opacity: 0.55; }
+.tr-ic { font-size: 24px; width: 30px; text-align: center; flex: none; }
+.tr-tx { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.tr-tx b { color: #fff; font-size: 13.5px; }
+.tr-ach.done .tr-tx b { color: #ffe39a; }
+.tr-tx i { color: #9fb6d6; font-size: 11.5px; font-style: normal; }
+.tr-tx i.tr-n { color: #7c93b8; font-size: 10.5px; }
+.tr-bar { display: block; height: 5px; border-radius: 3px; background: #0b1628; margin-top: 3px; overflow: hidden; }
+.tr-bar span { display: block; height: 100%; background: linear-gradient(90deg, #4fb3f2, #7cfc9b); border-radius: 3px; }
+.tr-pr { flex: none; color: #ffd166; font-size: 12px; font-weight: 800; white-space: nowrap; }
+.tr-v { flex: none; color: #ffd166; font-size: 14px; font-weight: 900; white-space: nowrap; }
+@media (orientation: landscape) and (max-height: 520px) {
+  .gm-panel.tr-panel { width: min(720px, calc(100vw - 24px)); }
+  .tr-body { display: grid; grid-template-columns: 1fr 1fr; align-content: start; }
+  .tr-group { grid-column: 1 / -1; }
+}

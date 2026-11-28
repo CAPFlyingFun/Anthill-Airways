@@ -56,6 +56,9 @@ const HOWTO_HTML = `
       before landing. The arriving passengers pay a landing fee.</li>
     <li>✈️ Tap a chip at the bottom (or a plane) for its <b>flight card</b>: passengers, bags, nectar and what it's
       doing. 🎯 on the card points the camera at it until you walk. 📋 is the whole flight board.</li>
+    <li>🏆 Trophies (top right): <b>36 achievements</b> to chase, each paying cash or 👑 crowns, and a records board
+      of your bests (most flights in a day, biggest flight, farthest place…). Both stay with you through a Royal
+      Charter.</li>
     <li>🎨 Each gate's plane is <b>yours</b>: 🎨 on its flight card names it, paints it (a colour, a pattern and a
       trim) and upgrades it alone: 🚀 engine (faster), 💺 seats and 🛋️ comfort (its passengers tip as it takes off).
       Its name and paint stay with the gate, whichever bug it flies.</li>
@@ -215,6 +218,15 @@ export async function startTycoon({ app, renderer, save, hud, sfx, input, progre
   const routesBtn = document.getElementById('routesBtn') as HTMLButtonElement;
   routesBtn.hidden = false;
   routesBtn.addEventListener('click', () => field.openRouteMap());
+  // 🏆 (v1.01) achievements and the records board; its badge: how many were won since it was last opened
+  const trophyBtn = document.getElementById('trophyBtn') as HTMLButtonElement;
+  const trophyBadge = document.getElementById('trophyBadge')!;
+  trophyBtn.hidden = false;
+  trophyBtn.addEventListener('click', () => field.openTrophies());
+  field.trophies.onChange = () => {
+    trophyBadge.textContent = String(field.trophies.fresh);
+    trophyBadge.classList.toggle('hidden', field.trophies.fresh <= 0);
+  };
   // 👑 the Royal Charter (the button is there once the Queen has offered one, or you hold crowns)
   const charterBtn = document.getElementById('charterBtn') as HTMLButtonElement;
   charterBtn.addEventListener('click', () => field.openCharter());

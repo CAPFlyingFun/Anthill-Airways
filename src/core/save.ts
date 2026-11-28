@@ -78,6 +78,10 @@ export interface TycoonSave {
   /** 🎨 Each gate's plane (v1.00, tycoon/livery.ts): its name and paint, by gate. (Its upgrades are in `ups`,
    *  "plane<i>.<k>".) */
   planes?: { name?: string; color?: string; trim?: string; pattern?: string }[];
+  /** 🏆 (v1.01, tycoon/achievements.ts) Achievements done (ids), and the records board (by id; `_dayN`/`_dayF`: the
+   *  📅 day being counted for "most flights in a day"). Both kept across charters. */
+  ach?: string[];
+  rec?: Record<string, number>;
   /** 🗺️ The destinations map (v0.87, tycoon/fleet.ts ROUTES): the ones opened on the map, each one's 📣 advertising
    *  level, the ones switched off, and how many flights have left for each. By route id. */
   routes?: string[];

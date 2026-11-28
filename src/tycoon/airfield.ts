@@ -42,6 +42,7 @@ import { SURFACE, artBaggageCart, artBackdrop, artBug, artDewTank, artFuelFlower
 import { Plane } from './plane';
 import { Passengers, type Pax, type Stop } from './passengers';
 import { Nav } from './nav';
+import { Trophies, TrophyPanel } from './achievements';
 import { PLANE_FX, PLANE_UPS, PlanePanel, bodyColour, followPaint, paintPlane, planeName, repaint, type PlaneLook } from './livery';
 import { MOOD, arriveMultFor, clampMood, recordMood, starLabel, starsFrom, tipFor } from './mood';
 import { FLEET, ROUTES, ROUTE_LV_MAX, bestPlane, routeFare, routeLvCost, routeOf, type PlaneType, type RouteDef } from './fleet';
@@ -243,7 +244,25 @@ export class Airfield {
   constructor(private hud: Hud, private sfx: Sfx, public save: SaveData, private progress: Progress) {
     this.st = save.tycoon ??= { v: TYCOON_SAVE_V, fuel: [0, 0], flowers: [4, 0], flights: 0, passengers: 0, x: AT.start.x, z: AT.start.z };
     this.goals = new Goals(this.st, { cafe: () => this.owns('ty-cafe') });
-    this.goals.onDayDone = (n, stars, reward, name) => {
+    this.trophies = new Trophies({
+      value: (k) => this.trophyValue(k),
+      done: () => (this.st.ach ??= []),
+      records: () => (this.st.rec ??= {}),
+      pay: (cash, crowns) => {
+        if (cash > 0) {
+          this.addCash(cash);
+          this.count('earned', cash);
+        }
+        if (crowns > 0) {
+          this.st.crowns = (this.st.crowns ?? 0) + crowns;
+          this.st.crownsAll = (this.st.crownsAll ?? 0) + crowns;
+        }
+      },
+      banner: (t, sub, ms) => this.hud.banner(t, sub, ms),
+      sfx: () => this.sfx.unlocked(),
+    });
+    this.goals.onDayDone = (n, stars, reward, name, secs) => {
+      this.trophies.record('fastDay', secs); // (🏆 v1.01)
       this.addCash(reward);
       this.sfx.contract();
       this.hud.banner(`📅 DAY ${n} DONE! ${'⭐'.repeat(stars)}`, `${name} · +$${reward} bonus · Day ${n + 1} starts now`, 3800);
@@ -320,7 +339,8 @@ export class Airfield {
       hud,
       sfx,
       player: () => this.player.pos,
-      reward: (cash, xp, at, text) => {
+      reward: (cash, xp, at, text, kind) => {
+        (this.st.tally ??= {})[`ev_${kind}`] = (this.st.tally[`ev_${kind}`] ?? 0) + 1; // (🏆 v1.01)
         this.addCash(cash);
         this.progress.addXp(xp);
         this.count('earned', cash);
@@ -1342,6 +1362,9 @@ export class Airfield {
   private menu = new UpMenu(document.getElementById('hud')!);
   /** 🎨 (v1.00) one plane's name, paint and upgrades. */
   private planePanel = new PlanePanel(document.getElementById('hud')!);
+  /** 🏆 (v1.01) achievements and the records board. */
+  trophies!: Trophies;
+  private trophyPanel = new TrophyPanel(document.getElementById('hud')!);
   private targets: { id: string; name: string; at: THREE.Vector3; r: number; live: () => boolean; rows: () => MenuRow[]; buy: (row: string) => void; arrow: THREE.Sprite; can: boolean }[] = [];
   private targetT = 0;
   private arrowT = 0;
@@ -1867,6 +1890,34 @@ export class Airfield {
       this.progress.addXp(TY.xpFlight);
       this.count('flights', 1);
       this.tutorial.did(STEP.takeoff);
+      // 🏆 (v1.01) what this flight counts for, and its records (its pay is added up as it's billed, below)
+      {
+        const tl = (this.st.tally ??= {});
+        const add = (k: string) => (tl[k] = (tl[k] ?? 0) + 1);
+        if (this.weather.night) add('night');
+        if (this.weather.rainbow) add('rainbow');
+        if (plane.aboard > 0 && plane.aboard >= plane.model.seats.length) add('full');
+        const pt = FLEET.find((f) => f.id === plane.model.root.userData.planeType);
+        if (pt && /Jumbo/.test(pt.name)) add('jumbo');
+        const rec = (this.st.rec ??= {});
+        const dayN = this.st.day?.n ?? 0;
+        if (rec._dayN !== dayN) {
+          rec._dayN = dayN;
+          rec._dayF = 0;
+        }
+        rec._dayF = (rec._dayF ?? 0) + 1;
+        this.trophies.record('dayFlights', rec._dayF);
+        this.trophies.record('paxOne', plane.aboard);
+        this.trophies.record('cargoOne', gate.cargoAboard);
+        if (plane.aboard + gate.cargoAboard > 0) {
+          const ri = ROUTES.findIndex((r) => r.place === plane.outbound?.place);
+          // (index + 1 is kept so the first place, index 0, still counts as a record)
+          if (ri >= 0 && ri + 1 > (rec.farthest ?? -1) + 1) rec.farthest = ri;
+        }
+        // (its pay: the fares its passengers paid at check-in, and what's billed as it lifts off)
+        this.flightPay = plane.aboard * this.ticket * this.progress.cashMult * crownMult(this.st);
+        this.payingFlight = true;
+      }
       // 🗺️ a longer route's fare: the rest of each passenger's fare is paid as it lifts off
       const fare = plane.outbound?.fare ?? 1;
       const went = routeOf(plane.outbound?.place);
@@ -1900,6 +1951,8 @@ export class Airfield {
         (this.st.tally ??= {}).skyBonus = (this.st.tally.skyBonus ?? 0) + extra;
         if (this.near(plane.pos, 40)) this.hud.floatAt(plane.pos.clone().setY(plane.pos.y + 12), this.camera, `${this.weather.bonusName} +$${extra}`, 'gold');
       }
+      this.payingFlight = false;
+      this.trophies.record('flightPay', this.flightPay);
       if (this.near(plane.pos, 40)) {
         this.hud.floatAt(plane.pos.clone().setY(plane.pos.y + 3), this.camera, '🛫 Take-off!', 'big');
         this.sfx.takeoff();
@@ -2247,6 +2300,7 @@ export class Airfield {
     // (👑 every crown ever earned makes it pay more)
     const v = Math.round(value * this.progress.cashMult * crownMult(this.st));
     this.count('earned', v);
+    if (this.payingFlight) this.flightPay += v; // (🏆 a take-off's pay, for the records)
     const pad = this.cashPad.stack;
     if (pad.full) {
       pad.items[pad.count - 1].value += v;
@@ -2820,6 +2874,13 @@ export class Airfield {
     this.applyUps();
     // 🦎🪶 now and then, something happens
     this.events.update(dt, !this.learning);
+    // 🏆 (v1.01) achievements (checked about once a second), and the records that are a level, not an event
+    if (!this.learning) this.trophies.update(dt);
+    if ((this.trophyT -= dt) <= 0) {
+      this.trophyT = 2;
+      if ((this.st.moods?.length ?? 0) >= 10) this.trophies.record('rating', this.stars);
+      this.trophies.record('cash', this.save.cash);
+    }
     // 👑 the Queen offers a Royal Charter, once this airfield is worth a crown (told once an airfield)
     if (!this.save.paid['ty-charter'] && !this.learning && this.owns(CHARTER.needs) && crownsFor(runEarned(this.st)) >= 1) {
       this.save.paid['ty-charter'] = 1;
@@ -3111,6 +3172,33 @@ export class Airfield {
   /** A drop of jet fuel has reached a FUEL pad (the recycler's guide), and the hangar's menu has been opened. */
   private jetUsed = false;
   private hangarSeen = false;
+
+  // 🏆 (v1.01) a take-off's pay, added up as it's billed
+  private flightPay = 0;
+  private payingFlight = false;
+  private trophyT = 0;
+  /** What an achievement counts (achievements.ts `kind`). */
+  private trophyValue(kind: string): number {
+    const sum = (o: Record<string, number> | undefined) => Object.values(o ?? {}).reduce((a, b) => a + b, 0);
+    switch (kind) {
+      case 'rating10': return (this.st.moods?.length ?? 0) >= 10 ? Math.round(this.stars * 10) : 0;
+      case 'types': return FLEET.filter((t) => !t.unlock || this.owns(t.unlock)).length;
+      case 'painted': return (this.st.planes ?? []).filter((p) => p && (p.color || p.pattern)).length;
+      case 'routes': return ROUTES.filter((r) => this.routeOpen(r)).length;
+      case 'creek': return this.st.routeFlown?.creek ?? 0;
+      case 'ads': return sum(this.st.routeLv);
+      case 'gates': return this.gates.filter((g) => g.open).length;
+      case 'staff': return sum(this.st.staff);
+      case 'days3': return (this.st.day?.stars ?? []).filter((s) => s >= 3).length;
+      case 'charters': return this.st.charters ?? 0;
+      default: return this.tally(kind);
+    }
+  }
+  /** 🏆 Open the trophies (achievements and records). */
+  openTrophies() {
+    this.sfx.popup();
+    this.trophyPanel.open(this.trophies, () => (this.st.rec ??= {}));
+  }
 
   /** A lifetime count by kind (the quests count from these). */
   tally(kind: string): number {

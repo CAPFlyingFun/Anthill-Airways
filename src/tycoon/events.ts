@@ -36,7 +36,7 @@ export interface EventHooks {
   sfx: Sfx;
   player: () => THREE.Vector3;
   /** Pay a reward (and XP). */
-  reward: (cash: number, xp: number, at: THREE.Vector3, text: string) => void;
+  reward: (cash: number, xp: number, at: THREE.Vector3, text: string, kind: string) => void;
   /** Your level (rewards grow with it). */
   level: () => number;
   /** (v0.99) The open gates: where each one's travellers wait, and whether its plane is parked there now. */
@@ -134,7 +134,7 @@ export class Events {
   airborne(gate: number) {
     if (this.kind !== 'charter' || gate !== this.charterGate) return;
     const lv = this.h.level();
-    this.h.reward(150 + 40 * lv, 40, this.charterAt.clone().setY(10), '👑 Charter on time!');
+    this.h.reward(150 + 40 * lv, 40, this.charterAt.clone().setY(10), '👑 Charter on time!', 'charter');
     this.h.sfx.unlocked();
     this.endCharter();
   }
@@ -245,7 +245,7 @@ export class Events {
         this.lizPath = [v3(p.x + 18, 0, p.z - 40), v3(p.x + 40, 0, p.z - 110)];
         if (near) {
           const lv = this.h.level();
-          this.h.reward(30 + 12 * lv, 20, p.clone().setY(8), '🦎 Shooed!');
+          this.h.reward(30 + 12 * lv, 20, p.clone().setY(8), '🦎 Shooed!', 'lizard');
           this.h.sfx.unlocked();
         } else this.h.hud.banner('🦎 The lizard wandered off', 'The runway is open again', 2400);
       }
@@ -286,7 +286,7 @@ export class Events {
     const me = this.h.player();
     if (Math.hypot(me.x - f.position.x, me.z - f.position.z) < 3.5) {
       const lv = this.h.level();
-      this.h.reward(25 + 10 * lv, 15, f.position.clone().setY(3), '🪶 Feather!');
+      this.h.reward(25 + 10 * lv, 15, f.position.clone().setY(3), '🪶 Feather!', 'feather');
       this.h.sfx.cash();
       f.removeFromParent();
       this.feather = null;
@@ -362,7 +362,7 @@ export class Events {
     if (near || this.t > LAST.web) {
       if (near) {
         const lv = this.h.level();
-        this.h.reward(35 + 12 * lv, 20, this.webAt.clone().setY(8), '🕸️ Web cleared!');
+        this.h.reward(35 + 12 * lv, 20, this.webAt.clone().setY(8), '🕸️ Web cleared!', 'web');
         this.h.sfx.unlocked();
       } else this.h.hud.banner('🕸️ The janitor ants cleared the web', `Gate ${this.webGate + 1} is boarding again`, 2600);
       w.removeFromParent();
@@ -454,7 +454,7 @@ export class Events {
         this.birdMark = null;
         if (near) {
           const lv = this.h.level();
-          this.h.reward(35 + 12 * lv, 20, c.clone().setY(10), '🐦 Shooed!');
+          this.h.reward(35 + 12 * lv, 20, c.clone().setY(10), '🐦 Shooed!', 'bird');
           this.h.sfx.unlocked();
         } else this.h.hud.banner('🐦 The bird flew off', 'The runway is open again', 2400);
         this.runwayBlocked = false;
@@ -507,7 +507,7 @@ export class Events {
     const drop = this.h.bagDrop();
     if (Math.hypot(me.x - drop.x, me.z - drop.z) < 3.5) {
       const lv = this.h.level();
-      this.h.reward(45 + 15 * lv, 25, drop.clone().setY(5), '🧳 Bag returned! Tip!');
+      this.h.reward(45 + 15 * lv, 25, drop.clone().setY(5), '🧳 Bag returned! Tip!', 'bag');
       this.h.sfx.unlocked();
       g.removeFromParent();
       this.bag = null;

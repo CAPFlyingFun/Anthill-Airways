@@ -80,7 +80,7 @@ type Day = Omit<DaySave, 'g'> & { g: Partial<Record<GoalKind, number>> };
 
 export class Goals {
   /** Called when a day's goals are all done (the airfield pays the bonus and shows the banner). */
-  onDayDone: (n: number, stars: number, reward: number, name: string) => void = () => {};
+  onDayDone: (n: number, stars: number, reward: number, name: string, secs: number) => void = () => {};
 
   constructor(private st: TycoonSave, private opts: { cafe: () => boolean }) {}
 
@@ -132,7 +132,7 @@ export class Goals {
     const reward = dayReward(d.n, stars);
     const name = dayDef(d.n, this.opts.cafe()).name;
     this.startDay(d.n + 1, [...d.stars, stars]);
-    this.onDayDone(d.n, stars, reward, name);
+    this.onDayDone(d.n, stars, reward, name, d.t);
   }
 
   /** ⭐⭐☆: what you'd get if you finished right now. */
