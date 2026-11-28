@@ -13,6 +13,7 @@ import { pace } from '../core/pace';
 import { PEOPLE_LOD, setPersonLod } from '../actors/creatures';
 import { newModel, type CreatureModel } from '../actors/models';
 import { CROWD_HEIGHT, type Crowd, type CrowdPerson } from '../devRoom';
+import { LUGGAGE, makeBackpack, makeSuitcase } from './luggage';
 import { SIZE } from './scale';
 import type { Nav } from './nav';
 import * as THREE from 'three';
@@ -63,6 +64,11 @@ export class Pax {
   queueAt = 0;
   loungeSeat = -1;
   vipComing = false;
+  /** 👨‍👩‍👧 (v1.02) Its travelling party (0: on its own): a group arrives, queues, checks in and boards together. */
+  group = 0;
+  /** 🧳 (v1.02) A rolling suitcase beside it (handed over at check-in), a backpack on its back (carried aboard). */
+  suitcase: THREE.Object3D | null = null;
+  backpack: THREE.Object3D | null = null;
   /** Its face over its head (made the first time you come near). */
   face: TextSprite | null = null;
   faceShown = '';
@@ -115,6 +121,9 @@ export interface Stop {
  */
 /** 🧍 How near two travellers come before the walking one is eased aside (world units; a person is about 1.3 across the shoulders). GAME TUNING. */
 const PERSONAL = 1.25;
+/** 👨‍👩‍👧 (v1.02) How often the one walking in brings company, and how many (2 to 4). GAME TUNING. */
+const GROUP_CHANCE = 0.3;
+const GROUP_SIZES = [2, 2, 2, 3, 3, 4];
 /** (a gate over the crossing: asked for its waypoints, which are the crossing's two ends) */
 const GATES_ACROSS = 99;
 /** How many of the builder's women wear the cloth tee (the rest a painted one). 0 since v0.82: the DEV Room's own
@@ -213,6 +222,8 @@ export class Passengers {
   }
 
   people = false;
+  /** 👨‍👩‍👧 The last party's number. */
+  private groupNo = 0;
   /** Where the camera is (the airfield keeps it up to date): people are drawn by their distance from it. */
   eye = new THREE.Vector3();
   private lodT = 0;
@@ -233,11 +244,21 @@ export class Passengers {
   }
 
   /** A new traveller: an aphid, or one of the tiny people. */
-  private spawn(at: THREE.Vector3) {
+  private spawn(at: THREE.Vector3, luggage: 'all' | 'carry' | false = 'all') {
     const m = this.person() ?? artBug('aphid', TY.aphidLength * (0.9 + Math.random() * 0.2), { color: TINTS[Math.floor(Math.random() * TINTS.length)], seed: Math.floor(Math.random() * 1000) });
     m.root.position.copy(at);
     this.scene.add(m.root);
     const p = new Pax(m);
+    // 🧳 (v1.02) one of the builder's people may bring a suitcase, a backpack or both (an arriving one: its case
+    // went in the hold, so a backpack at most)
+    // (on the person's own root, so a case is drawn, faded off and let go of with its owner)
+    const own = (m.root.userData.crowd as CrowdPerson | undefined)?.root;
+    if (own && luggage) {
+      const r = Math.random();
+      const pack = r < LUGGAGE.suitcase * LUGGAGE.both || (r >= LUGGAGE.suitcase && r < LUGGAGE.suitcase + LUGGAGE.backpack);
+      if (r < LUGGAGE.suitcase && luggage === 'all') own.add((p.suitcase = makeSuitcase()));
+      if (pack) own.add((p.backpack = makeBackpack(Math.random(), m.root.userData.bump ?? 0)));
+    }
     this.all.push(p);
     return p;
   }
@@ -246,7 +267,7 @@ export class Passengers {
   makeArrivals(n: number) {
     const out: Pax[] = [];
     for (let i = 0; i < n; i++) {
-      const p = this.spawn(this.spots.edge);
+      const p = this.spawn(this.spots.edge, 'carry');
       p.state = 'seated';
       out.push(p);
     }
@@ -295,7 +316,20 @@ export class Passengers {
   callToBoard(g: number, n: number, path: THREE.Vector3[]) {
     const q = this.atGate[g];
     // (only those already waiting at the gate: not ones still at the café or on their way; 👑 VIPs first)
-    const called = q.filter((p) => p.state === 'waiting').sort((a, b) => Number(b.vip) - Number(a.vip)).slice(0, n);
+    // (👨‍👩‍👧 v1.02: a party boards together, or waits together for the next plane: never split, unless it could
+    // never fit at all)
+    const waiting = q.filter((p) => p.state === 'waiting').sort((a, b) => Number(b.vip) - Number(a.vip));
+    const called: Pax[] = [];
+    for (const p of waiting) {
+      if (called.length >= n) break;
+      if (called.includes(p)) continue;
+      if (!p.group) { called.push(p); continue; }
+      const all = q.filter((o) => o.group === p.group);
+      const here = all.filter((o) => o.state === 'waiting');
+      if (here.length < all.length && all.length <= n) continue; // (the rest of them aren't at the gate yet)
+      if (called.length + here.length <= n) called.push(...here);
+      else if (here.length > n && !called.length) called.push(...here.slice(0, n));
+    }
     for (const p of called) q.splice(q.indexOf(p), 1);
     for (const p of called) {
       p.state = 'boarding';
@@ -328,11 +362,19 @@ export class Passengers {
     if (this.arriveT <= 0 && this.line.length < this.queueMax) {
       // (busier as the airport grows: each open gate brings more travellers)
       this.arriveT = (TY.arriveEvery / (0.6 + 0.4 * this.gates) / this.arriveMult) * (0.7 + Math.random() * 0.6);
-      const p = this.spawn(this.spots.edge);
-      p.state = 'queue';
-      p.via = this.spots.inbound.map((v) => v.clone());
-      if (Math.random() < this.vipChance) this.makeVip(p);
-      this.line.push(p);
+      // 👨‍👩‍👧 (v1.02) now and then a party of two to four (the builder's people only), side by side, one after
+      // another in the line; a party is never VIPs
+      const party = this.people && this.crowd && Math.random() < GROUP_CHANCE ? GROUP_SIZES[Math.floor(Math.random() * GROUP_SIZES.length)] : 1;
+      const n = Math.min(party, this.queueMax - this.line.length);
+      const id = n > 1 ? ++this.groupNo : 0;
+      for (let k = 0; k < n; k++) {
+        const p = this.spawn(this.tmp.copy(this.spots.edge).add(new THREE.Vector3(((k % 2) * 2 - 1) * 0.8 * Math.min(1, k + 0.5), 0, -Math.floor(k / 2) * 1.6)));
+        p.state = 'queue';
+        p.group = id;
+        p.via = this.spots.inbound.map((v) => v.clone());
+        if (!id && Math.random() < this.vipChance) this.makeVip(p);
+        this.line.push(p);
+      }
     }
 
     // The line shuffles up; the front one checks in when someone's at the desk and a gate has room
@@ -341,23 +383,34 @@ export class Passengers {
       this.lineSpot(i, p.target);
     });
     const front = this.line[0];
-    const gate = this.freeGate();
+    // 👨‍👩‍👧 (v1.02) a party checks in together, all to one gate with room for all of them (if no gate's plane could
+    // ever seat them all, one at a time as anybody would)
+    let party = 1;
+    if (front?.group) while (party < this.line.length && this.line[party].group === front.group) party++;
+    const most = Math.max(0, ...this.gateCap.slice(0, this.gates).map((c) => c ?? 6));
+    if (party > most) party = 1;
+    const gate = this.freeGate(party);
     if (front && !front.via.length && this.serving && gate >= 0 && front.pos.distanceTo(front.target) < 1.2) {
       this.checkT += dt * this.checkMult;
       if (this.checkT >= TY.checkInSecs) {
         this.checkT = 0;
-        this.line.shift();
-        front.gate = gate;
-        front.state = 'toGate';
-        front.there = false; // (it was standing at the desk: on its way now)
-        // its stops first (the café, the shop, the lounge for a VIP), then out through the airside doorway
-        front.stops = this.stops.filter((s) => s.who(front));
-        front.stopT = 0;
-        front.out = false;
-        front.lane = -1;
-        front.via = front.stops.length ? [] : [...this.spots.outbound.map((v) => v.clone()), ...this.wayOut(gate)];
-        this.atGate[gate].push(front);
-        this.onCheckIn(front);
+        // (a party goes where its first one goes: the café or the shop for all of them, or none)
+        const stops = this.stops.filter((s) => s.who(front));
+        for (const p of this.line.splice(0, party)) {
+          p.gate = gate;
+          p.state = 'toGate';
+          p.there = false; // (it was standing at the desk: on its way now)
+          // its stops first (the café, the shop, the lounge for a VIP), then out through the airside doorway
+          p.stops = p === front ? stops : stops.filter((s) => s.who(p) || s.key !== 'lounge');
+          p.stopT = 0;
+          p.out = false;
+          p.lane = -1;
+          p.via = p.stops.length ? [] : [...this.spots.outbound.map((v) => v.clone()), ...this.wayOut(gate)];
+          // 🧳 (v1.02) the suitcase goes over the counter (it's the seed-bag on its way to the BAG DROP)
+          if (p.suitcase) { p.suitcase.removeFromParent(); p.suitcase = null; }
+          this.atGate[gate].push(p);
+          this.onCheckIn(p);
+        }
       }
     } else {
       this.checkT = Math.min(this.checkT, TY.checkInSecs * 0.5);
@@ -510,10 +563,10 @@ export class Passengers {
   }
 
   /** The open gate with the fewest waiting (and room for more), or -1. */
-  private freeGate() {
+  private freeGate(room = 1) {
     let best = -1;
     for (let g = 0; g < this.gates; g++) {
-      if (this.atGate[g].length >= (this.gateCap[g] ?? 6)) continue;
+      if (this.atGate[g].length + room > (this.gateCap[g] ?? 6)) continue;
       if (best < 0 || this.atGate[g].length < this.atGate[best].length) best = g;
     }
     return best;

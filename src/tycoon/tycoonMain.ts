@@ -56,6 +56,9 @@ const HOWTO_HTML = `
       before landing. The arriving passengers pay a landing fee.</li>
     <li>✈️ Tap a chip at the bottom (or a plane) for its <b>flight card</b>: passengers, bags, nectar and what it's
       doing. 🎯 on the card points the camera at it until you walk. 📋 is the whole flight board.</li>
+    <li>🧳 Travellers bring luggage: a rolling suitcase is handed over at check-in (it's the bag that goes out to
+      the BAG DROP), a backpack rides aboard with them. 👨‍👩‍👧 Some come as a party of two to four: they queue,
+      check in and board together, and wait for a plane with room for all of them.</li>
     <li>🏆 Trophies (top right): <b>36 achievements</b> to chase, each paying cash or 👑 crowns, and a records board
       of your bests (most flights in a day, biggest flight, farthest place…). Both stay with you through a Royal
       Charter.</li>
